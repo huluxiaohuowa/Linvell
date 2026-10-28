@@ -100,11 +100,17 @@ public enum PackageCommands {
             return packages.reduce(0) { $0+(($1["vulns"] as? [Any])?.count ?? 0) }
         case .dotnet:
             guard let root = object as? [String:Any],let projects = root["projects"] as? [[String:Any]],!projects.isEmpty else { throw PackageToolFailure.unreadableResponse }
-            return projects.reduce(0) { total,project in
-                total+(project["frameworks"] as? [[String:Any]] ?? []).reduce(0) { count,framework in
-                    count+["topLevelPackages","transitivePackages"].reduce(0) { sub,key in sub+(framework[key] as? [[String:Any]] ?? []).reduce(0) { $0+(($1["vulnerabilities"] as? [Any])?.count ?? 0) } }
+            var total = 0
+            for project in projects {
+                let frameworks = project["frameworks"] as? [[String:Any]] ?? []
+                for framework in frameworks {
+                    for key in ["topLevelPackages","transitivePackages"] {
+                        let packages = framework[key] as? [[String:Any]] ?? []
+                        for package in packages { total += (package["vulnerabilities"] as? [Any])?.count ?? 0 }
+                    }
                 }
             }
+            return total
         }
     }
     private static func json(_ source: String) throws -> Any {
