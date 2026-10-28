@@ -1,0 +1,484 @@
+import AppKit
+import LinvellCore
+import SwiftTerm
+
+final class FileNode: NSObject {
+    let url: URL
+    let isDirectory: Bool
+    lazy var children: [FileNode] = {
+        guard isDirectory else { return [] }
+        let urls = (try? FileManager.default.contentsOfDirectory(at:url,includingPropertiesForKeys:[.isDirectoryKey],options:[.skipsHiddenFiles])) ?? []
+        return urls.map(FileNode.init).sorted { a,b in a.isDirectory != b.isDirectory ? a.isDirectory : a.url.lastPathComponent.localizedStandardCompare(b.url.lastPathComponent) == .orderedAscending }
+    }()
+    init(_ url: URL) { self.url = url; isDirectory = (try? url.resourceValues(forKeys:[.isDirectoryKey]).isDirectory) == true }
+}
+
+final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutlineViewDataSource, NSOutlineViewDelegate, NSSearchFieldDelegate {
+    var documents: [OpenDocument] = []
+    var current: OpenDocument?
+    var activePane: EditorPane?
+    var panes: [EditorPane] = []
+    var root: FileNode?
+    let outline = HierarchyOutlineView()
+    let body = ResizablePanes()
+    let content = ResizablePanes()
+    let editors = ResizablePanes()
+    let sidebar = Surface(Theme.panel)
+    let activity = Surface(Theme.canvas)
+    let workspaceArea = NSView()
+    let center = Surface(Theme.canvas)
+    let tabs = NSStackView()
+    let tabScroll = NSScrollView()
+    let editorHost = NSView()
+    let status = Theme.label("Ready",size:12,color:Theme.secondary)
+    let modeLabel = Theme.label("TEXT",size:11,color:Theme.accent,weight:.semibold)
+    let breadcrumb = Theme.label("Your next idea starts here",size:12,color:Theme.secondary)
+    let projectTitle = Theme.label("Linvell",size:14,weight:.semibold)
+    let search = NSSearchField()
+    var vimEnabled = UserDefaults.standard.bool(forKey:"vimEnabled")
+    var terminal: LocalProcessTerminalView?
+    var terminalHost: NSView?
+    var recoveryTimer: Timer?
+    var commandPanel: NSPanel?
+    let recovery: RecoveryStore
+    var recoveryErrorShown = false
+    var fileIndex: [URL] = []
+    var picker: QuickPicker?
+    var sidebarKind = "files"
+    var activityButtons: [NSButton] = []
+    var preferences: PreferencesController?
+    var restoringLayout = true
+
+    init() {
+        let support = FileManager.default.urls(for:.applicationSupportDirectory,in:.userDomainMask).first!.appendingPathComponent("Linvell/Recovery",isDirectory:true)
+        recovery = RecoveryStore(directory:support)
+        let window = NSWindow(contentRect:NSRect(x:0,y:0,width:1320,height:860),styleMask:[.titled,.closable,.miniaturizable,.resizable,.fullSizeContentView],backing:.buffered,defer:false)
+        super.init(window:window)
+        window.title = "Linvell"; window.titleVisibility = .hidden; window.titlebarAppearsTransparent = true
+        window.appearance = NSAppearance(named:Theme.profile.isDark ? .darkAqua : .aqua); window.backgroundColor = Theme.panel
+        window.minSize = NSSize(width:800,height:540); window.delegate = self
+        window.setFrameAutosaveName("Linvell.Workspace"); window.center()
+        buildUI(); showWelcome()
+        recoveryTimer = Timer.scheduledTimer(withTimeInterval:2,repeats:true) { [weak self] _ in self?.persistRecovery() }
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    deinit { recoveryTimer?.invalidate() }
+
+    func buildUI() {
+        guard let rootView = window?.contentView else { return }
+        let shell = NSStackView(); shell.orientation = .vertical; shell.spacing = 0; shell.alignment = .leading; shell.distribution = .fill
+        Theme.pin(shell,in:rootView)
+        let header = Surface(Theme.panel); header.heightAnchor.constraint(equalToConstant:54).isActive = true
+        let command = NSButton(title:"Search files or run a command…    ⌘P",target:self,action:#selector(quickOpen))
+        command.bezelStyle = .inline; command.isBordered = false; command.font = .systemFont(ofSize:13)
+        command.contentTintColor = Theme.secondary; command.wantsLayer = true; command.layer?.cornerRadius = 6
+        command.layer?.borderColor = Theme.secondary.withAlphaComponent(0.20).cgColor; command.layer?.borderWidth = 1
+        command.heightAnchor.constraint(equalToConstant:30).isActive = true
+        let heading = Theme.stack([
+            projectTitle,NSView(),command,NSView(),
+            Theme.button("sidebar.left",help:"Toggle Sidebar",target:self,action:#selector(toggleSidebar)),
+            Theme.button("folder.badge.plus",help:"Open Folder…",target:self,action:#selector(openFolder)),
+            Theme.button("rectangle.split.2x1",help:"Split Editor",target:self,action:#selector(toggleSplit)),
+            Theme.button("terminal",help:"Toggle Terminal",target:self,action:#selector(toggleTerminal))
+        ])
+        heading.translatesAutoresizingMaskIntoConstraints = false; header.addSubview(heading)
+        command.widthAnchor.constraint(equalTo:header.widthAnchor,multiplier:0.35).isActive = true
+        NSLayoutConstraint.activate([heading.leadingAnchor.constraint(equalTo:header.leadingAnchor,constant:90),heading.trailingAnchor.constraint(equalTo:header.trailingAnchor,constant:-20),heading.bottomAnchor.constraint(equalTo:header.bottomAnchor,constant:-13)])
+        shell.addArrangedSubview(header)
+        header.widthAnchor.constraint(equalTo:shell.widthAnchor).isActive = true
+        body.isVertical = true; body.firstMinimum = 180; body.secondMinimum = 400
+        body.addArrangedSubview(sidebar); body.addArrangedSubview(center)
+        body.onResize = { [weak self] width in if self?.restoringLayout == false { UserDefaults.standard.set(width,forKey:"sidebarWidth") } }
+        content.onResize = { [weak self] height in
+            if let self,self.terminalHost?.isHidden == false { UserDefaults.standard.set(self.content.bounds.height-height-1,forKey:"terminalHeight") }
+        }
+        let area = Theme.stack([activity,body],spacing:0); area.alignment = .top
+        activity.widthAnchor.constraint(equalToConstant:52).isActive = true
+        activity.heightAnchor.constraint(equalTo:area.heightAnchor).isActive = true
+        body.heightAnchor.constraint(equalTo:area.heightAnchor).isActive = true
+        shell.addArrangedSubview(area)
+        area.widthAnchor.constraint(equalTo:shell.widthAnchor).isActive = true
+        area.heightAnchor.constraint(equalTo:rootView.heightAnchor,constant:-84).isActive = true
+        let footer = Theme.stack([modeLabel,NSView(),status]); footer.edgeInsets = NSEdgeInsets(top:0,left:16,bottom:0,right:20)
+        footer.heightAnchor.constraint(equalToConstant:30).isActive = true; shell.addArrangedSubview(footer)
+        footer.widthAnchor.constraint(equalTo:shell.widthAnchor).isActive = true
+        setupActivity()
+        setupSidebar(); setupCenter()
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.window?.contentView?.layoutSubtreeIfNeeded()
+            let defaults = UserDefaults.standard
+            let width = defaults.integer(forKey:"layoutVersion") >= 2 ? defaults.double(forKey:"sidebarWidth") : 260
+            self.body.setPosition(width > 0 ? width : 260,ofDividerAt:0)
+            self.outline.reloadData(); self.outline.needsDisplay = true
+            self.restoringLayout = false; defaults.set(2,forKey:"layoutVersion")
+        }
+    }
+
+    private func setupSidebar() {
+        let label = Theme.label("EXPLORER",size:11,color:Theme.secondary,weight:.semibold)
+        let row = Theme.stack([label,NSView(),Theme.button("plus",help:"New File",target:self,action:#selector(newFile)),Theme.button("arrow.clockwise",help:"Refresh Files",target:self,action:#selector(refreshFiles))],spacing:4)
+        row.heightAnchor.constraint(equalToConstant:40).isActive = true
+        search.placeholderString = "Filter files"; search.font = .systemFont(ofSize:13); search.delegate = self
+        search.target = self; search.action = #selector(filterChanged)
+        while outline.tableColumns.count > 1 { outline.removeTableColumn(outline.tableColumns.last!) }
+        let column = outline.tableColumns.first ?? NSTableColumn(identifier:NSUserInterfaceItemIdentifier("files"))
+        if outline.tableColumns.isEmpty { outline.addTableColumn(column) }
+        column.width = max(180,sidebar.bounds.width-32); column.resizingMask = .autoresizingMask
+        outline.outlineTableColumn = column; outline.headerView = nil
+        outline.indentationPerLevel = 18; outline.indentationMarkerFollowsCell = true; outline.autoresizesOutlineColumn = true
+        outline.dataSource = self; outline.delegate = self; outline.rowHeight = 32
+        outline.backgroundColor = Theme.panel; outline.style = .plain; outline.intercellSpacing = NSSize(width:0,height:4)
+        outline.target = self; outline.action = #selector(fileClicked)
+        outline.setAccessibilityLabel("Workspace files")
+        let scroll = NSScrollView(); scroll.documentView = outline; scroll.hasVerticalScroller = true
+        scroll.drawsBackground = true; scroll.backgroundColor = Theme.panel; scroll.borderType = .noBorder
+        let foot = Theme.label("⇧⌘O  Open folder",size:11,color:Theme.secondary)
+        let stack = Theme.stack([row,search,scroll,foot],orientation:.vertical,spacing:10)
+        Theme.pin(stack,in:sidebar,inset:16)
+    }
+
+    private func setupActivity() {
+        let icon = NSImageView()
+        if let url = Bundle.main.url(forResource:"Linvell",withExtension:"png") { icon.image = NSImage(contentsOf:url) }
+        icon.imageScaling = .scaleProportionallyUpOrDown; icon.heightAnchor.constraint(equalToConstant:32).isActive = true
+        var controls: [NSView] = [icon]
+        for (index,entry) in [("doc.on.doc","Explorer"),("magnifyingglass","Search Project"),("arrow.triangle.branch","Source Control"),("list.bullet.rectangle","Document Symbols")].enumerated() {
+            let button = Theme.button(entry.0,help:entry.1,target:self,action:#selector(activityClicked(_:)))
+            button.tag = index; button.image?.isTemplate = true
+            button.contentTintColor = index == 0 ? Theme.accent : Theme.secondary
+            activityButtons.append(button); controls.append(button)
+        }
+        controls.append(NSView()); controls.append(Theme.button("gearshape",help:"Settings",target:self,action:#selector(showSettings)))
+        let stack = Theme.stack(controls,orientation:.vertical,spacing:18); Theme.pin(stack,in:activity,inset:10)
+    }
+    @objc private func activityClicked(_ sender: NSButton) {
+        switch sender.tag { case 0: showSidebar("files"); case 1: showSidebar("search"); case 2: showSidebar("git"); default: showSymbols() }
+    }
+    private func showSidebar(_ kind: String) {
+        sidebarKind = kind; sidebar.isHidden = false
+        sidebar.subviews.forEach { $0.removeFromSuperview() }
+        if kind == "files" { setupSidebar() }
+        else if let project = root?.url {
+            let tool = ToolSidebar(kind:kind,project:project)
+            tool.onSelect = { [weak self] url,line in self?.open(url); self?.goToLine(line) }
+            Theme.pin(tool,in:sidebar)
+        } else {
+            let label = Theme.label("Open a folder to get started.",size:13,color:Theme.secondary)
+            label.translatesAutoresizingMaskIntoConstraints = false; sidebar.addSubview(label)
+            NSLayoutConstraint.activate([label.leadingAnchor.constraint(equalTo:sidebar.leadingAnchor,constant:18),label.topAnchor.constraint(equalTo:sidebar.topAnchor,constant:24)])
+        }
+        for button in activityButtons { button.contentTintColor = button.tag == (kind == "files" ? 0 : kind == "search" ? 1 : 2) ? Theme.accent : Theme.secondary }
+        body.adjustSubviews()
+    }
+    private func goToLine(_ line: Int) {
+        guard let view = activePane?.textView else { return }
+        let lines = view.string.components(separatedBy:"\n"), preceding = lines.prefix(max(0,min(line-1,lines.count)))
+        let offset = min(view.string.utf16.count,preceding.reduce(0) { $0 + $1.utf16.count + 1 })
+        view.setSelectedRange(NSRange(location:offset,length:0)); view.scrollRangeToVisible(view.selectedRange()); window?.makeFirstResponder(view)
+    }
+    private func showSymbols() {
+        guard let current else { return }
+        let lines = current.buffer.text.components(separatedBy:"\n")
+        let expression = try? NSRegularExpression(pattern:#"^\s*(?:(?:public|private|fileprivate|internal|open|final|static|export|async)\s+)*(?:struct|class|enum|protocol|func|function|def|interface|type)\s+([^\s({:]+)"#)
+        let options = lines.enumerated().compactMap { index,line -> PickerOption? in
+            guard let match = expression?.firstMatch(in:line,range:NSRange(location:0,length:line.utf16.count)) else { return nil }
+            let name = (line as NSString).substring(with:match.range(at:1))
+            return PickerOption(title:name,detail:"Line \(index+1) · text-based symbol",invoke:{ [weak self] in self?.goToLine(index+1) })
+        }
+        picker = QuickPicker(title:"Document symbols (text-based)",options:options,owner:window!)
+    }
+    @objc func showSettings() {
+        if preferences == nil { preferences = PreferencesController() }
+        preferences?.showWindow(nil); preferences?.window?.makeKeyAndOrderFront(nil)
+    }
+
+    private func setupCenter() {
+        tabs.orientation = .horizontal; tabs.spacing = 4; tabs.alignment = .centerY
+        tabs.edgeInsets = NSEdgeInsets(top:0,left:0,bottom:0,right:0)
+        tabScroll.documentView = tabs; tabScroll.hasHorizontalScroller = true; tabScroll.autohidesScrollers = true
+        tabScroll.drawsBackground = false; tabScroll.heightAnchor.constraint(equalToConstant:42).isActive = true
+        tabs.translatesAutoresizingMaskIntoConstraints = false
+        tabs.heightAnchor.constraint(equalTo:tabScroll.contentView.heightAnchor).isActive = true
+        let pathRow = Theme.stack([breadcrumb,NSView()]); pathRow.edgeInsets = NSEdgeInsets(top:0,left:24,bottom:0,right:24)
+        pathRow.heightAnchor.constraint(equalToConstant:34).isActive = true
+        editors.isVertical = true
+        Theme.pin(editors,in:editorHost)
+        editorHost.translatesAutoresizingMaskIntoConstraints = false
+        content.isVertical = false; content.addArrangedSubview(editorHost)
+        let stack = Theme.stack([tabScroll,pathRow,content],orientation:.vertical,spacing:0)
+        Theme.pin(stack,in:center)
+    }
+
+    private func showWelcome() {
+        editors.arrangedSubviews.forEach { $0.removeFromSuperview() }; panes = []; activePane = nil
+        let space = NSView()
+        space.translatesAutoresizingMaskIntoConstraints = false
+        let name = Theme.label("Linvell",size:48,color:Theme.foreground,weight:.medium)
+        let subtitle = Theme.label("A quiet place for serious code.",size:18,color:Theme.secondary)
+        let new = NSButton(title:"New file     ⌘N",target:self,action:#selector(newFile)); new.bezelStyle = .rounded
+        let open = NSButton(title:"Open a folder…",target:self,action:#selector(openFolder)); open.bezelStyle = .rounded
+        let note = Theme.label("Development preview · Native Swift · macOS",size:12,color:Theme.secondary)
+        let stack = Theme.stack([name,subtitle,Theme.stack([new,open],spacing:14),note],orientation:.vertical,spacing:24)
+        stack.translatesAutoresizingMaskIntoConstraints = false; space.addSubview(stack)
+        NSLayoutConstraint.activate([stack.centerXAnchor.constraint(equalTo:space.centerXAnchor),stack.centerYAnchor.constraint(equalTo:space.centerYAnchor,constant:-30)])
+        editors.addArrangedSubview(space)
+    }
+
+    @objc func newFile() { activate(OpenDocument(DocumentBuffer())) }
+    @objc func openFile() {
+        let p = NSOpenPanel(); p.allowsMultipleSelection = true; p.canChooseDirectories = false
+        p.beginSheetModal(for:window!) { [weak self] result in if result == .OK { p.urls.forEach { self?.open($0) } } }
+    }
+    @objc func openFolder() {
+        let p = NSOpenPanel(); p.canChooseDirectories = true; p.canChooseFiles = false
+        p.beginSheetModal(for:window!) { [weak self] result in if result == .OK, let url = p.url { self?.setProject(url) } }
+    }
+    func setProject(_ url: URL) {
+        root = FileNode(url); projectTitle.stringValue = url.lastPathComponent
+        outline.reloadData(); UserDefaults.standard.set(url.path,forKey:"lastProject")
+        DispatchQueue.global(qos:.userInitiated).async { [weak self] in
+            let files = ProjectFiles.list(url)
+            DispatchQueue.main.async { [weak self] in if self?.root?.url == url { self?.fileIndex = files } }
+        }
+        if sidebarKind != "files" { showSidebar(sidebarKind) }
+    }
+    func open(_ url: URL) {
+        if (try? url.resourceValues(forKeys:[.isDirectoryKey]).isDirectory) == true { setProject(url); return }
+        if let existing = documents.first(where: { $0.buffer.url == url.resolvingSymlinksInPath() }) { activate(existing); return }
+        do { activate(OpenDocument(try DocumentBuffer(url:url))) } catch { show(error) }
+    }
+    func activate(_ document: OpenDocument) {
+        if !documents.contains(where: { $0 === document }) { documents.append(document) }
+        current = document
+        editors.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        panes = []; let pane = makePane(document); editors.addArrangedSubview(pane); activePane = pane
+        renderTabs(); updateStatus(); window?.makeFirstResponder(pane.textView)
+        window?.title = "\(document.buffer.displayName) — Linvell"
+    }
+    private func makePane(_ document: OpenDocument) -> EditorPane {
+        let pane = EditorPane(document:document,vim:vimEnabled)
+        pane.translatesAutoresizingMaskIntoConstraints = false
+        pane.onFocus = { [weak self,weak pane] in self?.activePane = pane }
+        pane.onChange = { [weak self] in self?.updateStatus(); self?.updateTabTitles() }
+        pane.textView.exCommand = { [weak self] _ in self?.showEx() }
+        panes.append(pane); return pane
+    }
+    private func renderTabs() {
+        tabs.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        for (index,doc) in documents.enumerated() {
+            let b = NSButton(title:doc.buffer.displayName,target:self,action:#selector(tabClicked(_:)))
+            b.tag = index; b.bezelStyle = .inline; b.isBordered = false; b.font = .systemFont(ofSize:13,weight:doc === current ? .semibold : .regular)
+            b.contentTintColor = doc === current ? Theme.foreground : Theme.secondary
+            let close = Theme.button("xmark",help:"Close \(doc.buffer.displayName)",target:self,action:#selector(closeTab(_:))); close.tag = index
+            let icon = NSImageView(image:NSImage(systemSymbolName:doc.buffer.url?.pathExtension == "swift" ? "swift" : "doc.text",accessibilityDescription:nil)!)
+            icon.contentTintColor = doc.buffer.url?.pathExtension == "swift" ? Theme.number : Theme.accent
+            icon.widthAnchor.constraint(equalToConstant:16).isActive = true
+            let row = Theme.stack([icon,b,close],spacing:10); row.edgeInsets = NSEdgeInsets(top:0,left:16,bottom:0,right:6)
+            row.heightAnchor.constraint(equalToConstant:42).isActive = true
+            row.wantsLayer = true; row.layer?.backgroundColor = (doc === current ? Theme.canvas : Theme.panel).cgColor
+            if doc === current { row.layer?.borderColor = Theme.accent.withAlphaComponent(0.3).cgColor; row.layer?.borderWidth = 1 }
+            tabs.addArrangedSubview(row)
+        }
+        updateTabTitles()
+    }
+    private func updateTabTitles() {
+        for (i,row) in tabs.arrangedSubviews.enumerated() {
+            guard i < documents.count,let b = (row as? NSStackView)?.arrangedSubviews.compactMap({ $0 as? NSButton }).first else { continue }
+            b.title = documents[i].buffer.displayName + (documents[i].buffer.isModified ? "  •" : "")
+        }
+        window?.isDocumentEdited = documents.contains { $0.buffer.isModified }
+    }
+    @objc private func tabClicked(_ sender: NSButton) { activate(documents[sender.tag]) }
+    @objc private func closeTab(_ sender: NSButton) { closeDocument(documents[sender.tag]) }
+    @objc func closeCurrent() { if let current { closeDocument(current) } }
+    private func closeDocument(_ doc: OpenDocument) {
+        guard mayClose(doc) else { return }
+        do { try recovery.remove(doc.buffer.id) } catch { show(error); return }
+        documents.removeAll { $0 === doc }
+        if current === doc {
+            if let next = documents.last { activate(next) } else { current = nil; renderTabs(); showWelcome(); updateStatus() }
+        } else { renderTabs() }
+    }
+
+    @objc func save() { if let current { _ = saveDocument(current) } }
+    @objc func saveAs() { if let current { _ = saveDocument(current,asCopy:true) } }
+    @discardableResult func saveDocument(_ doc: OpenDocument, asCopy: Bool = false) -> Bool {
+        var destination: URL?
+        if doc.buffer.url == nil || asCopy {
+            let p = NSSavePanel(); p.nameFieldStringValue = doc.buffer.displayName
+            guard p.runModal() == .OK, let url = p.url else { return false }; destination = url
+        }
+        do {
+            try doc.buffer.save(to:destination); try recovery.remove(doc.buffer.id)
+            renderTabs(); updateStatus(); return true
+        } catch { show(error); return false }
+    }
+    func mayClose(_ doc: OpenDocument) -> Bool {
+        guard doc.buffer.isModified else { return true }
+        let a = NSAlert(); a.messageText = "Save changes to \(doc.buffer.displayName)?"; a.informativeText = "Your changes will be lost if you discard them."
+        a.addButton(withTitle:"Save"); a.addButton(withTitle:"Cancel"); a.addButton(withTitle:"Discard")
+        switch a.runModal() { case .alertFirstButtonReturn: return saveDocument(doc); case .alertThirdButtonReturn: return true; default: return false }
+    }
+    func windowShouldClose(_ sender: NSWindow) -> Bool { documents.allSatisfy(mayClose) && mayCloseTerminal() }
+    func mayCloseTerminal() -> Bool {
+        guard terminal?.process.running == true else { return true }
+        let alert = NSAlert(); alert.messageText = "Close this terminal session?"; alert.informativeText = "The shell and its running processes will be stopped."
+        alert.addButton(withTitle:"Close Session"); alert.addButton(withTitle:"Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+    func terminateTerminal() {
+        guard let terminal else { return }
+        let process = terminal.process!
+        if process.running {
+            let foreground = tcgetpgrp(process.childfd)
+            if foreground > 0 && foreground != getpgrp() { kill(-foreground,SIGHUP) }
+            let shell = process.shellPid
+            if shell > 0 && shell != getpgrp() { kill(-shell,SIGHUP) }
+        }
+        terminal.terminate()
+    }
+    func windowWillClose(_ notification: Notification) {
+        terminateTerminal(); recoveryTimer?.invalidate()
+        for d in documents { try? recovery.remove(d.buffer.id) }
+    }
+    func persistRecovery() {
+        do { for d in documents where d.buffer.isModified { try recovery.write(d.buffer) } }
+        catch { if !recoveryErrorShown { recoveryErrorShown = true; show(error) } }
+    }
+    func restore() {
+        if let path = UserDefaults.standard.string(forKey:"lastProject"),FileManager.default.fileExists(atPath:path) { setProject(URL(fileURLWithPath:path)) }
+        do {
+            for entry in try recovery.entries() {
+                // Recovered content stays an untitled copy so a changed disk file cannot be overwritten.
+                activate(OpenDocument(DocumentBuffer(text:entry.text,id:entry.id)))
+            }
+        } catch { show(error) }
+    }
+
+    func updateStatus() {
+        guard let current else { status.stringValue = "Development preview"; breadcrumb.stringValue = "Your next idea starts here"; return }
+        let p = min(activePane?.textView.selectedRange().location ?? 0,current.buffer.text.utf16.count)
+        let before = (current.buffer.text as NSString).substring(to:p)
+        let line = before.filter { $0 == "\n" }.count+1, column = (before.components(separatedBy:"\n").last?.count ?? 0)+1
+        status.stringValue = "Ln \(line), Col \(column)     \(current.buffer.formatLabel)     \(Int(Theme.fontSize)) pt"
+        modeLabel.stringValue = vimEnabled ? current.vim.mode.rawValue + (current.vim.pending.isEmpty ? "" : "  \(current.vim.pending)") : "TEXT"
+        breadcrumb.stringValue = current.buffer.displayName
+    }
+    @objc func toggleVim() {
+        vimEnabled.toggle(); UserDefaults.standard.set(vimEnabled,forKey:"vimEnabled")
+        panes.forEach { $0.textView.vimEnabled = vimEnabled; $0.document.vim.escape(); $0.textView.needsDisplay = true }; updateStatus()
+        PreferencesSync.shared.changed()
+    }
+    @objc func toggleSidebar() { sidebar.isHidden.toggle(); body.adjustSubviews() }
+    @objc func toggleSplit() {
+        guard let current else { return }
+        if panes.count > 1 { let last = panes.removeLast(); last.removeFromSuperview(); activePane = panes.first }
+        else { editors.addArrangedSubview(makePane(current)); editors.setPosition(editors.bounds.width/2,ofDividerAt:0) }
+    }
+    @objc func increaseFont() { Theme.fontSize += 1; PreferencesSync.shared.changed() }
+    @objc func decreaseFont() { Theme.fontSize -= 1; PreferencesSync.shared.changed() }
+    func applyTheme() {
+        window?.appearance = NSAppearance(named:Theme.profile.isDark ? .darkAqua : .aqua); window?.backgroundColor = Theme.panel
+        func refresh(_ view: NSView) {
+            (view as? Surface)?.refreshTheme(); (view as? ThemedLabel)?.refreshTheme()
+            if let button = view as? NSButton { button.contentTintColor = Theme.secondary }
+            view.needsDisplay = true; view.subviews.forEach(refresh)
+        }
+        if let view = window?.contentView { refresh(view) }
+        panes.forEach { $0.updateTheme() }; outline.backgroundColor = Theme.panel; outline.reloadData(); renderTabs()
+        terminal?.nativeBackgroundColor = Theme.canvas; terminal?.nativeForegroundColor = Theme.foreground
+        if sidebarKind != "files" { showSidebar(sidebarKind) }
+    }
+    @objc func toggleTerminal() {
+        if let host = terminalHost { host.isHidden.toggle(); content.adjustSubviews(); if !host.isHidden,let terminal { window?.makeFirstResponder(terminal) }; return }
+        let host = Surface(Theme.canvas)
+        host.translatesAutoresizingMaskIntoConstraints = false
+        let title = Theme.label("TERMINAL",size:11,color:Theme.secondary,weight:.semibold)
+        let bar = Theme.stack([title,NSView(),Theme.button("xmark",help:"Hide Terminal",target:self,action:#selector(toggleTerminal))]); bar.heightAnchor.constraint(equalToConstant:32).isActive = true
+        let term = LocalProcessTerminalView(frame:NSRect(x:0,y:0,width:900,height:220))
+        term.font = .monospacedSystemFont(ofSize:14,weight:.regular); term.nativeBackgroundColor = Theme.canvas; term.nativeForegroundColor = Theme.foreground
+        let stack = Theme.stack([bar,term],orientation:.vertical,spacing:4)
+        Theme.pin(stack,in:host,inset:12)
+        terminal = term; terminalHost = host; content.addArrangedSubview(host)
+        let savedHeight = UserDefaults.standard.double(forKey:"terminalHeight")
+        content.setPosition(max(120,content.bounds.height-(savedHeight > 100 ? savedHeight : 270)),ofDividerAt:0)
+        var env = ProcessInfo.processInfo.environment
+        env["TERM"] = "xterm-256color"; env["COLORTERM"] = "truecolor"; env["TERM_PROGRAM"] = "Linvell"
+        let shell = env["SHELL"] ?? "/bin/zsh"
+        term.startProcess(executable:shell,args:["-l"],environment:env.map { "\($0.key)=\($0.value)" },currentDirectory:root?.url.path ?? FileManager.default.homeDirectoryForCurrentUser.path)
+        window?.makeFirstResponder(term)
+    }
+
+    @objc func find() { activePane?.textView.performFindPanelAction(menuItem(tag:Int(NSFindPanelAction.showFindPanel.rawValue))) }
+    private func menuItem(tag: Int) -> NSMenuItem { let item = NSMenuItem(); item.tag = tag; return item }
+    @objc func selectNextOccurrence() {
+        guard let v = activePane?.textView else { return }
+        if v.selectedRange().length == 0 { v.selectWord(nil); return }
+        let ns = v.string as NSString, selected = v.selectedRange(), word = ns.substring(with:selected)
+        let end = v.selectedRanges.map { NSMaxRange($0.rangeValue) }.max() ?? NSMaxRange(selected)
+        var range = ns.range(of:word,range:NSRange(location:end,length:ns.length-end))
+        if range.location == NSNotFound { range = ns.range(of:word,range:NSRange(location:0,length:selected.location)) }
+        if range.location != NSNotFound && !v.selectedRanges.contains(NSValue(range:range)) {
+            v.selectedRanges.append(NSValue(range:range)); v.scrollRangeToVisible(range)
+        }
+    }
+    @objc func refreshFiles() { if let url = root?.url { root = FileNode(url); outline.reloadData() } }
+    @objc private func filterChanged() { outline.reloadData() }
+    private var filtered: [FileNode] {
+        let nodes = root?.children ?? []
+        return search.stringValue.isEmpty ? nodes : nodes.filter { $0.url.lastPathComponent.localizedCaseInsensitiveContains(search.stringValue) }
+    }
+    func outlineView(_ outlineView: NSOutlineView,numberOfChildrenOfItem item: Any?) -> Int { (item as? FileNode)?.children.count ?? filtered.count }
+    func outlineView(_ outlineView: NSOutlineView,child index: Int,ofItem item: Any?) -> Any { (item as? FileNode)?.children[index] ?? filtered[index] }
+    func outlineView(_ outlineView: NSOutlineView,isItemExpandable item: Any) -> Bool { (item as? FileNode)?.isDirectory == true }
+    func outlineView(_ outlineView: NSOutlineView,viewFor tableColumn: NSTableColumn?,item: Any) -> NSView? {
+        guard let node = item as? FileNode else { return nil }
+        let label = Theme.label(node.url.lastPathComponent,size:13,color:node.isDirectory ? Theme.foreground : Theme.secondary)
+        label.lineBreakMode = .byTruncatingMiddle
+        let symbol = node.isDirectory ? (outlineView.isItemExpanded(node) ? "folder.fill" : "folder") : node.url.pathExtension == "swift" ? "swift" : "doc.text"
+        let image = NSImageView(image:NSImage(systemSymbolName:symbol,accessibilityDescription:nil)!)
+        image.contentTintColor = node.isDirectory ? Theme.accent : Theme.secondary
+        image.widthAnchor.constraint(equalToConstant:16).isActive = true
+        return Theme.stack([image,label],spacing:8)
+    }
+    @objc private func fileClicked() {
+        guard outline.clickedRow >= 0,let node = outline.item(atRow:outline.clickedRow) as? FileNode else { return }
+        if node.isDirectory { if outline.isItemExpanded(node) { outline.collapseItem(node) } else { outline.expandItem(node) } }
+        else { open(node.url) }
+    }
+    func show(_ error: Error) { let alert = NSAlert(error:error); if let window { alert.beginSheetModal(for:window) } }
+
+    @objc func quickOpen() {
+        guard let root else { openFile(); return }
+        let options = fileIndex.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }.map { url in
+            PickerOption(title:url.lastPathComponent,detail:ProjectFiles.relative(url,root:root.url),invoke:{ [weak self] in self?.open(url) })
+        }
+        picker = QuickPicker(title:"Search files by name",options:options,owner:window!)
+    }
+    @objc func commandPalette() {
+        var options: [PickerOption] = []
+        for (title,selector) in [("New File",#selector(newFile)),("Open Folder…",#selector(openFolder)),("Find in File",#selector(find)),("Toggle Vim Mode",#selector(toggleVim)),("Split Editor",#selector(toggleSplit)),("Toggle Terminal",#selector(toggleTerminal)),("Increase Font Size",#selector(increaseFont)),("Decrease Font Size",#selector(decreaseFont))] {
+            options.append(PickerOption(title:title,detail:"Linvell command",invoke:{ [weak self] in self?.perform(selector) }))
+        }
+        options.append(PickerOption(title:"Preferences: Theme and Font",detail:"Appearance",invoke:{ [weak self] in self?.showSettings() }))
+        picker = QuickPicker(title:"Search commands",options:options,owner:window!)
+    }
+    private func showEx() {
+        let alert = NSAlert(); alert.messageText = "Vim command"; alert.informativeText = "Available in this preview: :w, :q, :wq, :set number, :set nonumber"
+        let field = NSTextField(string:":"); field.frame = NSRect(x:0,y:0,width:340,height:28); field.font = .monospacedSystemFont(ofSize:15,weight:.regular)
+        alert.accessoryView = field; alert.addButton(withTitle:"Run"); alert.addButton(withTitle:"Cancel")
+        alert.window.initialFirstResponder = field
+        alert.beginSheetModal(for:window!) { [weak self] response in
+            guard response == .alertFirstButtonReturn,let self else { return }
+            switch field.stringValue.trimmingCharacters(in:.whitespaces).trimmingCharacters(in:CharacterSet(charactersIn:":")) {
+            case "w": self.save()
+            case "q": self.closeCurrent()
+            case "wq": if let doc = self.current,self.saveDocument(doc) { self.closeCurrent() }
+            case "set number", "set nu": self.panes.forEach { $0.scroll.rulersVisible = true }
+            case "set nonumber", "set nonu": self.panes.forEach { $0.scroll.rulersVisible = false }
+            default: self.show(NSError(domain:"Linvell.Vim",code:1,userInfo:[NSLocalizedDescriptionKey:"This Ex command is not implemented yet."]))
+            }
+        }
+    }
+}
