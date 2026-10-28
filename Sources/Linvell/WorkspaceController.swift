@@ -508,7 +508,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         env["TERM"] = "xterm-256color"; env["COLORTERM"] = "truecolor"; env["TERM_PROGRAM"] = "Linvell"
         let shell = env["SHELL"] ?? "/bin/zsh"
         if let remote = remoteConnection {
-            let command = "cd -- "+RunTasks.directoryExpression(remoteDirectory)+" && exec \"${SHELL:-/bin/sh}\" -l"
+            let command = RunTasks.remoteShell(directory:remoteDirectory)
             term.startProcess(executable:"/usr/bin/ssh",args:["-tt","--",remote.host,command],environment:env.map { "\($0.key)=\($0.value)" },currentDirectory:FileManager.default.homeDirectoryForCurrentUser.path)
         } else {
             term.startProcess(executable:shell,args:["-l"],environment:env.map { "\($0.key)=\($0.value)" },currentDirectory:root?.url.path ?? FileManager.default.homeDirectoryForCurrentUser.path)

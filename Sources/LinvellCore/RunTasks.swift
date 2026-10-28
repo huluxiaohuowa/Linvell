@@ -33,6 +33,9 @@ public enum RunTasks {
         return SSHRemote.quote(path)
     }
     public static func remoteCommand(directory: String,command: String) -> String {
-        "cd -- "+directoryExpression(directory)+" && exec /bin/sh -lc "+SSHRemote.quote(command)
+        "/bin/sh -lc "+SSHRemote.quote("cd -- "+directoryExpression(directory)+" && exec \"${SHELL:-/bin/sh}\" -lc "+SSHRemote.quote(command))
+    }
+    public static func remoteShell(directory: String) -> String {
+        "/bin/sh -lc "+SSHRemote.quote("cd -- "+directoryExpression(directory)+" && exec \"${SHELL:-/bin/sh}\" -l")
     }
 }

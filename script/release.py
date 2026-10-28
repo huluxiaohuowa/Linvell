@@ -37,7 +37,7 @@ def run(args, **kwargs):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--version", required=True)
+    parser.add_argument("--version", default=plistlib.loads((ROOT / "Resources/Info.plist").read_bytes())["LinvellReleaseVersion"])
     parser.add_argument(
         "--publish",
         action="store_true",

@@ -94,6 +94,20 @@ final class RemoteGitTests: XCTestCase {
         XCTAssertEqual(tasks.map(\.label),["plain","process"])
         XCTAssertEqual(tasks[1].command,"'/path with spaces/tool' 'one argument'")
     }
+    func testRemoteCommandWorksWithPOSIXAndFishLoginShells() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("linvell ' shell "+UUID().uuidString)
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+        defer { try? FileManager.default.removeItem(at:root) }
+        let command = RunTasks.remoteCommand(directory:root.path,command:"printf LINVELL_SHELL_READY")
+        var shells = [URL(fileURLWithPath:"/bin/sh")]
+        if let fish = ToolCommand.executable("fish") { shells.append(fish) }
+        for shell in shells {
+            let result = try ToolCommand.run(shell,arguments:["-c",command],directory:nil,environment:["SHELL":shell.path])
+            XCTAssertTrue(result.succeeded); XCTAssertEqual(result.output,"LINVELL_SHELL_READY")
+            let terminal = try ToolCommand.run(shell,arguments:["-c",RunTasks.remoteShell(directory:root.path)],directory:nil,environment:["SHELL":shell.path],input:Data("printf LINVELL_TERMINAL_READY\nexit\n".utf8))
+            XCTAssertTrue(terminal.succeeded); XCTAssertEqual(terminal.output,"LINVELL_TERMINAL_READY")
+        }
+    }
     func testColumnSelectionKeepsGraphemesAndTabsWhole() throws {
         let text = "a😀bc\naXYZ\na中bc"
         let ranges = ColumnSelection.ranges(in:text,anchor:1,head:9)

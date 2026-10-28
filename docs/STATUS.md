@@ -1,6 +1,6 @@
 # Development status
 
-2026-10-28 · 0.1.2
+2026-10-28 · 0.1.3
 
 ## Implemented foundation
 

@@ -21,7 +21,7 @@ final class UpdateManager {
         config.httpCookieStorage = nil; config.httpShouldSetCookies = false
         return URLSession(configuration:config)
     }()
-    static var currentVersion: String { Bundle.main.object(forInfoDictionaryKey:"LinvellReleaseVersion") as? String ?? "0.1.1" }
+    static var currentVersion: String { Bundle.main.object(forInfoDictionaryKey:"LinvellReleaseVersion") as? String ?? "0.0.0" }
     var automaticChecks: Bool {
         get { UserDefaults.standard.object(forKey:"updateAutomaticChecks") == nil || UserDefaults.standard.bool(forKey:"updateAutomaticChecks") }
         set { UserDefaults.standard.set(newValue,forKey:"updateAutomaticChecks"); notify() }

@@ -44,9 +44,9 @@ Build and package **locally**, then distribute through [GitHub Releases](https:/
 python3 script/update_version.py
 # python3 script/update_version.py minor
 # python3 script/update_version.py major
-python3 script/release.py --version 0.1.2
+python3 script/release.py
 # After reviewing the resulting artifacts and release notes:
-python3 script/release.py --version 0.1.2 --publish
+python3 script/release.py --publish
 ```
 
 The script runs tests, builds a Universal app, signs with Hardened Runtime, submits for notarization, staples the ticket, checks Gatekeeper, and creates ZIP/DMG artifacts with SHA-256 checksums. `--publish` pushes the committed source and creates a GitHub release. Credentials are never committed or uploaded to GitHub.
