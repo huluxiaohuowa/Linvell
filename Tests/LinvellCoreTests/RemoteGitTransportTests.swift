@@ -2,6 +2,31 @@ import XCTest
 @testable import LinvellCore
 
 final class RemoteGitTransportTests: XCTestCase {
+    func testLiveSSHGitHistoryHunksBranchesAndCommit() throws {
+        guard let file = ProcessInfo.processInfo.environment["LINVELL_SSH_FIXTURE"] else { throw XCTSkip("A disposable SSH Git fixture was not selected.") }
+        let config = try JSONSerialization.jsonObject(with:Data(contentsOf:URL(fileURLWithPath:file))) as! [String:String]
+        guard config["gitFixture"] == "ready" else { throw XCTSkip("The selected SSH fixture has no disposable Git repository.") }
+        let remote = try SSHRemote(host:try XCTUnwrap(config["host"])),root = try XCTUnwrap(config["root"])
+        let repo = try GitRepository(remote:remote,directory:root+"/nested").resolvedWorkingTree()
+        XCTAssertEqual(URL(fileURLWithPath:repo.directory).lastPathComponent,URL(fileURLWithPath:root).lastPathComponent); XCTAssertEqual(try repo.history().count,4)
+        let path = root+"/git-hunk.txt",read = try remote.request("read",path:path)
+        let original = try XCTUnwrap(Data(base64Encoded:try XCTUnwrap(read.content)))
+        var lines = String(decoding:original,as:UTF8.self).components(separatedBy:"\n")
+        lines[4] = "edited first hunk"; lines[39] = "edited second hunk"
+        _ = try remote.request("write",path:path,content:Data(lines.joined(separator:"\n").utf8),digest:read.digest)
+        let change = try XCTUnwrap(repo.changes().first { $0.path == "git-hunk.txt" })
+        let hunks = GitHunk.parse(try repo.diff(change,staged:false)); XCTAssertEqual(hunks.count,2)
+        try repo.applyHunk(try XCTUnwrap(hunks.first),unstage:false)
+        let staged = try repo.diff(change,staged:true)
+        XCTAssertTrue(staged.contains("edited first hunk")); XCTAssertFalse(staged.contains("edited second hunk"))
+        try repo.applyHunk(try XCTUnwrap(GitHunk.parse(staged).first),unstage:true)
+        XCTAssertTrue(try repo.diff(change,staged:true).isEmpty)
+        _ = try repo.run(["switch","-c","acceptance/temporary"])
+        try repo.stage(change); try repo.commit("Verify SSH Git commit")
+        XCTAssertEqual(try repo.run(["branch","--show-current"]).trimmingCharacters(in:.whitespacesAndNewlines),"acceptance/temporary")
+        XCTAssertFalse(try repo.history().isEmpty)
+        XCTAssertFalse(try repo.changes().contains { $0.path == "git-hunk.txt" })
+    }
     func testRemoteTransportPreservesRepositoryAcrossRootResolutionAndHunkInput() throws {
         var calls: [(String,[String],Data?)] = []
         let remote = try SSHRemote(host:"example")

@@ -1,0 +1,116 @@
+name: Release macOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version increment
+        required: true
+        default: patch
+        type: choice
+        options: [patch, minor, major]
+  push:
+    tags: ['v[0-9]*.[0-9]*.[0-9]*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: linvell-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'huluxiaohuowa/Linvell'
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.ref }}
+          fetch-depth: 0
+
+      - name: Configure build directories outside the checkout
+        run: |
+          release_build="$HOME/dev/build/linvell"
+          mkdir -p "$release_build/tmp" "$release_build/private"
+          chmod 700 "$release_build/private"
+          echo "LINVELL_BUILD_DIR=$release_build" >> "$GITHUB_ENV"
+          echo "TMPDIR=$release_build/tmp" >> "$GITHUB_ENV"
+          echo "PYTHONPYCACHEPREFIX=$release_build/python-cache" >> "$GITHUB_ENV"
+
+      - name: Check release configuration handling
+        run: python3 -m unittest discover -s Tests/ReleaseScriptTests -v
+
+      - name: Prepare protected Apple configuration
+        env:
+          APPLE_RELEASE_CONFIG: ${{ secrets.APPLE_RELEASE_CONFIG }}
+        run: python3 script/materialize_ci_apple.py --output "$LINVELL_BUILD_DIR/private/linvell-apple.json"
+
+      - name: Prepare release version
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          VERSION_BUMP: ${{ inputs.bump }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
+            python3 script/update_version.py "${VERSION_BUMP:-patch}"
+          fi
+          python3 - <<'PY'
+          import os, plistlib, re
+          from pathlib import Path
+          version = plistlib.loads(Path('Resources/Info.plist').read_bytes())['LinvellReleaseVersion']
+          if not re.fullmatch(r'\d+\.\d+\.\d+', version):
+              raise SystemExit('Only stable semantic versions are released')
+          if os.environ['EVENT_NAME'] != 'workflow_dispatch' and os.environ['TAG_NAME'] != 'v'+version:
+              raise SystemExit('Tag and committed application version must match')
+          notes = Path('docs/releases') / (version+'.md')
+          if not notes.exists():
+              if os.environ['EVENT_NAME'] != 'workflow_dispatch':
+                  raise SystemExit('Commit release notes before pushing a release tag')
+              notes.write_text('# Linvell '+version+'\n\nSigned Universal macOS release built on GitHub Actions.\n\nSee https://linvell.fuluwa.top/guide.html for usage.\n')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('version='+version+'\n')
+          PY
+          if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add Resources/Info.plist docs/releases/
+            git commit -m "chore: release $(python3 -c 'import plistlib; print(plistlib.load(open("Resources/Info.plist","rb"))["LinvellReleaseVersion"])')"
+            git push origin HEAD:main
+          fi
+
+      - name: Build Universal DMG, sign, notarize and publish
+        run: python3 script/release.py --config "$LINVELL_BUILD_DIR/private/linvell-apple.json" --publish
+
+      - name: Retain signed distribution artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Linvell-${{ steps.version.outputs.version }}-universal
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            ~/dev/build/linvell/releases/${{ steps.version.outputs.version }}/*.dmg
+            ~/dev/build/linvell/releases/${{ steps.version.outputs.version }}/*.zip
+            ~/dev/build/linvell/releases/${{ steps.version.outputs.version }}/SHA256SUMS.txt
+            ~/dev/build/linvell/releases/${{ steps.version.outputs.version }}/release-manifest.json
+
+      - name: Remove temporary signing material
+        if: always()
+        run: |
+          if [[ -z "${LINVELL_BUILD_DIR:-}" ]]; then exit 0; fi
+          rm -f "$LINVELL_BUILD_DIR/private/linvell-apple.json"
+          for release_keychain in "$LINVELL_BUILD_DIR"/tmp/linvell-sign-*/release.keychain-db; do
+            if [[ -f "$release_keychain" ]]; then security delete-keychain "$release_keychain" >/dev/null 2>&1 || true; fi
+          done
+          python3 - <<'PY'
+          import os, shutil
+          from pathlib import Path
+          for path in (Path(os.environ['LINVELL_BUILD_DIR']) / 'tmp').glob('linvell-sign-*'):
+              if path.is_dir(): shutil.rmtree(path)
+          protected_log = Path.home() / 'dev/build/linvell/release-error.log'
+          protected_log.unlink(missing_ok=True)
+          PY

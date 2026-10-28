@@ -37,18 +37,16 @@ SSH uses the system configuration and authentication; the remote file protocol n
 
 ## Distribution
 
-Build and package **locally**, then distribute through [GitHub Releases](https://github.com/huluxiaohuowa/Linvell/releases). There is no GitHub runner app build and no App Store upload. The local release script reuses only the team-wide Developer ID and notarization credentials in `~/.apple.json`, in a temporary protected signing keychain.
+Build, sign, notarize and package Universal DMG/ZIP artifacts on the standard **GitHub-hosted macOS runner**, then publish to [GitHub Releases](https://github.com/huluxiaohuowa/Linvell/releases). There is no App Store upload. Public-repository standard runners are used; no paid large runner is selected.
 
 ```sh
-# Increment patch by default; pass minor or major for those changes.
-python3 script/update_version.py
-# python3 script/update_version.py minor
-# python3 script/update_version.py major
-python3 script/release.py
-# After reviewing the resulting artifacts and release notes:
-python3 script/release.py --publish
+# Default release: increment patch on CI, build and publish.
+gh workflow run release.yml --field bump=patch
+# Explicit alternatives:
+# gh workflow run release.yml --field bump=minor
+# gh workflow run release.yml --field bump=major
 ```
 
-The script runs tests, builds a Universal app, signs with Hardened Runtime, submits for notarization, staples the ticket, checks Gatekeeper, and creates ZIP/DMG artifacts with SHA-256 checksums. `--publish` pushes the committed source and creates a GitHub release. Credentials are never committed or uploaded to GitHub.
+The workflow uses the repository Actions Secret `APPLE_RELEASE_CONFIG`, containing only the shared Developer ID Application certificate and App Store Connect notarization key. It materializes these outside the checkout, uses a temporary protected keychain, removes the credentials after the run, and uploads only signed distribution artifacts. Pull requests never receive these secrets.
 
-SwiftTerm and its license are recorded in [third-party notices](Resources/ThirdPartyNotices.txt).
+`python3 script/update_version.py` still defaults to a patch increment for manual version preparation; `minor` and `major` remain explicit. Pushing a matching stable `vX.Y.Z` tag also builds the already-committed version. See [CI release details](docs/CI_RELEASE.md). Local debug builds remain available through the Run script.

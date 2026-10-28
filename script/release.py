@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local Developer ID release. Reuses ~/.apple.json common; never uploads to App Store Connect."""
+"""Developer ID release on GitHub Actions or an explicit local build; no App Store upload."""
 
 import argparse
 import base64
@@ -11,6 +11,7 @@ import plistlib
 import re
 import shlex
 import subprocess
+import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,10 +26,13 @@ def run(args, **kwargs):
     )
     if result.returncode:
         # Tool output can contain signing identities. Keep it in a protected local log.
-        log = Path.home() / "dev/build/linvell/release-error.log"
+        log = Path(os.environ.get("LINVELL_BUILD_DIR", Path.home() / "dev/build/linvell")) / "release-error.log"
         log.parent.mkdir(parents=True, exist_ok=True)
         log.write_bytes(result.stdout)
         log.chmod(0o600)
+        if os.environ.get("GITHUB_ACTIONS") == "true" and Path(args[0]).name in {"swift", "bash"}:
+            # These build commands have no credential arguments; signing/notary output stays private.
+            print(result.stdout.decode(errors="replace")[-64000:], file=sys.stderr)
         raise SystemExit(
             f"{Path(args[0]).name} failed; inspect the protected local release-error.log"
         )
@@ -77,13 +81,19 @@ def main():
     common = config["common"]
     cert = common["certificates"]["developerIdApplication"]
     asc = common["appStoreConnect"]
-    output = Path.home() / "dev/build/linvell/releases" / args.version
+    build_root = Path(os.environ.get("LINVELL_BUILD_DIR", Path.home() / "dev/build/linvell"))
+    for directory in ["tmp", "cache", "config", "security"]:
+        (build_root / directory).mkdir(parents=True, exist_ok=True)
+    os.environ["TMPDIR"] = str(build_root / "tmp")
+    os.environ["CLANG_MODULE_CACHE_PATH"] = str(build_root / "cache/clang")
+    os.environ["SWIFTPM_MODULECACHE_OVERRIDE"] = str(build_root / "cache/swift")
+    output = build_root / "releases" / args.version
     output.mkdir(parents=True, exist_ok=True)
-    print("Running tests and building Universal macOS app locally…", flush=True)
-    run(["swift", "test"])
+    print("Running tests and building Universal macOS app on GitHub Actions…" if os.environ.get("GITHUB_ACTIONS") == "true" else "Running tests and building Universal macOS app locally…", flush=True)
+    run(["swift", "test", "--scratch-path", build_root / "swiftpm", "--cache-path", build_root / "cache", "--config-path", build_root / "config", "--security-path", build_root / "security"])
     env = dict(os.environ, CONFIGURATION="release", LINVELL_UNIVERSAL="1")
     run(["bash", "script/build_and_run.sh", "--build-only"], env=env)
-    app = Path.home() / "dev/build/linvell/release/Linvell.app"
+    app = build_root / "release/Linvell.app"
     architectures = (
         run(["lipo", "-archs", app / "Contents/MacOS/Linvell"]).decode().strip().split()
     )
@@ -261,7 +271,8 @@ def main():
         "stapled": True,
         "gatekeeper": "accepted",
         "distribution": "GitHub Releases",
-        "build": "local Mac",
+        "build": "GitHub Actions macos-15-intel" if os.environ.get("GITHUB_ACTIONS") == "true" else "local Mac",
+        "workflowRun": os.environ.get("GITHUB_RUN_ID"),
         "intelRuntimeTested": False,
     }
     manifest_path = output / "release-manifest.json"
@@ -270,18 +281,19 @@ def main():
         notes = ROOT / "docs/releases" / (args.version + ".md")
         if not notes.is_file():
             raise SystemExit("Release notes must exist before publishing")
-        run(
-            [
-                "git",
-                "-c",
-                "credential.helper=",
-                "-c",
-                "credential.helper=!gh auth git-credential",
-                "push",
-                "origin",
-                "HEAD:main",
-            ]
-        )
+        if os.environ.get("GITHUB_ACTIONS") != "true":
+            run(
+                [
+                    "git",
+                    "-c",
+                    "credential.helper=",
+                    "-c",
+                    "credential.helper=!gh auth git-credential",
+                    "push",
+                    "origin",
+                    "HEAD:main",
+                ]
+            )
         run(
             [
                 "gh",

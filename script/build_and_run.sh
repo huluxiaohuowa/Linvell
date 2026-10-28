@@ -6,7 +6,11 @@ MODE="${1:-run}"
 CONFIG="${CONFIGURATION:-debug}"
 BUILD_DIR="${LINVELL_BUILD_DIR:-$HOME/dev/build/linvell}"
 APP="$BUILD_DIR/$CONFIG/Linvell.app"
-BUILD_ARGS=(-c "$CONFIG")
+mkdir -p "$BUILD_DIR/tmp" "$BUILD_DIR/cache" "$BUILD_DIR/config" "$BUILD_DIR/security"
+export TMPDIR="$BUILD_DIR/tmp"
+export CLANG_MODULE_CACHE_PATH="$BUILD_DIR/cache/clang"
+export SWIFTPM_MODULECACHE_OVERRIDE="$BUILD_DIR/cache/swift"
+BUILD_ARGS=(-c "$CONFIG" --scratch-path "$BUILD_DIR/swiftpm" --cache-path "$BUILD_DIR/cache" --config-path "$BUILD_DIR/config" --security-path "$BUILD_DIR/security")
 if [[ "${LINVELL_UNIVERSAL:-0}" == "1" ]]; then BUILD_ARGS+=(--arch arm64 --arch x86_64); fi
 swift build "${BUILD_ARGS[@]}"
 BIN_DIR="$(swift build "${BUILD_ARGS[@]}" --show-bin-path)"
