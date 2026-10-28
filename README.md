@@ -1,8 +1,14 @@
 # Linvell
 
+[Official website](https://linvell.fuluwa.top/) · [Download releases](https://github.com/huluxiaohuowa/Linvell/releases)
+
 A native macOS editor built in Swift and AppKit. The workspace follows the familiar activity-bar, explorer, editor-tab and terminal-panel structure, with an independent visual identity and a gourd-inspired icon.
 
 **Early development preview.** Full Vim compatibility and the complete development-tool workflow remain in progress. See [development status](docs/STATUS.md).
+
+![Linvell workspace in the built-in light theme, showing the file explorer, language icons, editor tabs and syntax highlighting](docs/images/linvell-workspace.png)
+
+Actual development-preview screenshot with the built-in Linvell Light theme.
 
 ## Run locally
 
@@ -33,4 +39,4 @@ python3 script/release.py --version 0.1.0-preview.1 --publish
 
 The script runs tests, builds a Universal app, signs with Hardened Runtime, submits for notarization, staples the ticket, checks Gatekeeper, and creates ZIP/DMG artifacts with SHA-256 checksums. `--publish` pushes the committed source and creates a GitHub prerelease. Credentials are never committed or uploaded to GitHub.
 
-Official website: [linvell.fuluwa.top](https://linvell.fuluwa.top/). SwiftTerm and its license are recorded in [third-party notices](Resources/ThirdPartyNotices.txt).
+SwiftTerm and its license are recorded in [third-party notices](Resources/ThirdPartyNotices.txt).
