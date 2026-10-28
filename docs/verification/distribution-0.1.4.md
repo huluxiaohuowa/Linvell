@@ -12,3 +12,12 @@
 Logs and fixture screenshots are stored outside the repository under the local build directory. Release signing, notarization, public artifact and website checks are recorded after packaging; unit tests alone do not establish those results.
 
 Remaining limits include full Vim/VS Code compatibility, the full Vim regex/Ex language, remapping, visual/Replace macros, complete block-register semantics and full Git-client history rewriting/conflict editing. SSH authentication relies on existing system keys/agent/configuration. Physical Intel runtime, all display refresh rates, all mouse gestures and arbitrary SSH jump/auth topologies are not claimed tested.
+
+## Distribution result
+
+- 99 tests passed (35 native UI, 64 core), including the disposable live SSH tests; no skips in the release acceptance run.
+- Local Universal arm64/x86_64 build passed. Apple notarization was Accepted; staple validation and Gatekeeper assessment passed.
+- Public v0.1.4 is a stable, non-draft latest release. Downloaded public DMG SHA-256 matched the local notarized release artifact.
+- A disposable signed 0.1.3 installation accepted 0.1.4 under its signing requirement, passed Gatekeeper, swapped atomically and retained exactly one verified compressed predecessor. Legacy old-helper app migration also passed. No application process was launched for this test.
+- GitHub Pages built the updated website. HTTPS home download links and bilingual guide both serve 0.1.4; browser checks verified Chinese/English rendering.
+- The user's installed application was not replaced and no second Linvell app was started.
