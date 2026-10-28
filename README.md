@@ -6,7 +6,7 @@ A native macOS editor built in Swift and AppKit. The workspace follows the famil
 
 **Early development preview.** Full Vim compatibility and the complete development-tool workflow remain in progress. See [development status](docs/STATUS.md).
 
-![Linvell welcome screen in the built-in light theme, showing the file explorer and project and file actions](docs/images/linvell-workspace.png)
+![Linvell welcome screen in the built-in light theme, showing the file explorer and project and file actions](docs/images/linvell-workspace.webp)
 
 Actual development-preview welcome screen with the built-in Linvell Light theme.
 
