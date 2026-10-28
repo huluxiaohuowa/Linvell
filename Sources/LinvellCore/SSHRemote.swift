@@ -64,7 +64,17 @@ public struct SSHRemote {
         guard SSHConfig.validAlias(host),!host.contains("*"),!host.contains("?"),!host.contains("!") else { throw GitError.command("Choose a concrete SSH host.") }
         self.host = host
     }
-    public static func quote(_ value: String) -> String { "'"+value.replacingOccurrences(of:"'",with:"'\\''")+"'" }
+    public static func quote(_ value: String) -> String {
+        // Quoted segments reconstruct the same argument in POSIX shells and fish.
+        // fish interprets backslashes inside single quotes differently from POSIX.
+        var result = "'"
+        for character in value {
+            if character == "'" { result += "'\"'\"'" }
+            else if character == "\\" { result += "'\"\\\\\"'" }
+            else { result.append(character) }
+        }
+        return result+"'"
+    }
     public func request(_ operation: String,path: String,content: Data? = nil,digest: String? = nil) throws -> RemoteReply {
         var request: [String:String] = ["operation":operation,"path":path]
         if let content { request["content"] = content.base64EncodedString() }

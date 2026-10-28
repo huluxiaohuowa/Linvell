@@ -25,7 +25,7 @@ final class RemoteGitTests: XCTestCase {
         XCTAssertEqual(SSHConfig.hosts(at:root.appendingPathComponent("config")),["included","primary","quoted","secondary"])
         XCTAssertFalse(SSHConfig.validAlias("-oProxyCommand=bad"))
         XCTAssertFalse(SSHConfig.validAlias("host; touch /tmp/bad"))
-        XCTAssertEqual(SSHRemote.quote("a'b"),"'a'\\''b'")
+        XCTAssertEqual(SSHRemote.quote("a'b"),"'a'\"'\"'b'")
     }
     func testRemoteProtocolReadsWritesAndRejectsExternalChanges() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -102,6 +102,9 @@ final class RemoteGitTests: XCTestCase {
         var shells = [URL(fileURLWithPath:"/bin/sh")]
         if let fish = ToolCommand.executable("fish") { shells.append(fish) }
         for shell in shells {
+            let literal = "backslash \\\\ ' \"$x\" `printf BAD` $(printf BAD) 中文\n"
+            let quoted = try ToolCommand.run(shell,arguments:["-c","printf '%s' "+SSHRemote.quote(literal)],directory:nil,trimOutput:false)
+            XCTAssertTrue(quoted.succeeded); XCTAssertEqual(quoted.output,literal)
             let result = try ToolCommand.run(shell,arguments:["-c",command],directory:nil,environment:["SHELL":shell.path])
             XCTAssertTrue(result.succeeded); XCTAssertEqual(result.output,"LINVELL_SHELL_READY")
             let terminal = try ToolCommand.run(shell,arguments:["-c",RunTasks.remoteShell(directory:root.path)],directory:nil,environment:["SHELL":shell.path],input:Data("printf LINVELL_TERMINAL_READY\nexit\n".utf8))
@@ -115,6 +118,6 @@ final class RemoteGitTests: XCTestCase {
         let block = ColumnSelection.ranges(in:"abcd\na\nabc",anchor:1,head:9,inclusive:true)
         XCTAssertEqual(block.count,3)
         XCTAssertTrue(block.allSatisfy { Range($0,in:"abcd\na\nabc") != nil })
-        XCTAssertEqual(RunTasks.directoryExpression("~/a ' b"),"\"$HOME\"/'a '\\'' b'")
+        XCTAssertEqual(RunTasks.directoryExpression("~/a ' b"),"\"$HOME\"/'a '\"'\"' b'")
     }
 }
