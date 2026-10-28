@@ -13,6 +13,78 @@ final class NativeEditingTests: XCTestCase {
         window.contentView = pane; window.makeFirstResponder(pane.textView); window.contentView?.layoutSubtreeIfNeeded()
     }
     override func tearDown() { window.orderOut(nil); window.contentView = nil; pane = nil; window = nil }
+    private func vimKey(_ key: String) {
+        let escape = key == "Escape"
+        let event = NSEvent.keyEvent(with:.keyDown,location:.zero,modifierFlags:[],timestamp:0,windowNumber:window.windowNumber,context:nil,characters:escape ? "\u{1b}" : key,charactersIgnoringModifiers:escape ? "\u{1b}" : key,isARepeat:false,keyCode:escape ? 53 : 0)!
+        pane.textView.keyDown(with:event)
+    }
+    func testComposedVimChangeInsertionDotAndUndoReachNativeStorage() {
+        let view = pane.textView; view.vimEnabled = true
+        view.string = "one two three"; pane.document.buffer.update(view.string); view.setSelectedRange(NSRange(location:0,length:0))
+        ["c","w"].forEach(vimKey)
+        XCTAssertEqual(view.string," two three")
+        view.insertText("中",replacementRange:view.selectedRange()); vimKey("Escape")
+        vimKey("w"); vimKey(".")
+        XCTAssertEqual(view.string,"中 中 three"); XCTAssertEqual(pane.document.buffer.text,view.string)
+        vimKey("u"); XCTAssertEqual(view.string,"中 two three")
+        vimKey("u"); XCTAssertEqual(view.string,"one two three")
+    }
+    func testVimMacroRecordsNativeTextInputAndReplaysWithoutExternalEngine() {
+        let view = pane.textView; view.vimEnabled = true
+        view.string = "a\nb\nc\n"; pane.document.buffer.update(view.string); view.setSelectedRange(NSRange(location:0,length:0))
+        ["q","a","a"].forEach(vimKey)
+        view.insertText("中",replacementRange:view.selectedRange()); vimKey("Escape")
+        ["j","q","@","a"].forEach(vimKey)
+        XCTAssertEqual(view.string,"a中\nb中\nc\n"); XCTAssertEqual(pane.document.buffer.text,view.string)
+        XCTAssertNil(pane.document.vim.recordingRegister)
+    }
+    func testReplaceModeRestoresOverwrittenGraphemesWithBackspaceAndUndo() {
+        let view = pane.textView; view.vimEnabled = true
+        view.string = "😀abc"; pane.document.buffer.update(view.string); view.setSelectedRange(NSRange(location:0,length:0))
+        vimKey("R"); XCTAssertEqual(pane.document.vim.mode,.replace)
+        view.insertText("中",replacementRange:NSRange(location:NSNotFound,length:0))
+        view.insertText("Z",replacementRange:NSRange(location:NSNotFound,length:0))
+        XCTAssertEqual(view.string,"中Zbc")
+        view.deleteBackward(nil); XCTAssertEqual(view.string,"中abc"); XCTAssertEqual(view.selectedRange().location,1)
+        vimKey("Escape"); vimKey("u"); XCTAssertEqual(view.string,"😀abc")
+    }
+    func testLineCommandsKeepMultipleCaretsAndUndoTheWholeOperation() {
+        let view = pane.textView
+        view.string = "a\nb\nc\nd"; pane.document.buffer.update(view.string)
+        view.setSelections([NSRange(location:2,length:0),NSRange(location:6,length:0)])
+        view.moveLinesUp(nil); XCTAssertEqual(view.string,"b\na\nd\nc"); XCTAssertEqual(view.editingSelections.count,2)
+        view.undoManager?.undo(); XCTAssertEqual(view.string,"a\nb\nc\nd")
+        view.toggleLineComment(nil); XCTAssertEqual(view.string,"a\n// b\nc\n// d")
+        view.undoManager?.undo(); XCTAssertEqual(view.string,"a\nb\nc\nd")
+        view.insertLineAbove(nil); XCTAssertEqual(view.editingSelections.count,2)
+        view.undoManager?.undo(); XCTAssertEqual(view.string,"a\nb\nc\nd")
+    }
+    func testVisualTextObjectsCountsAndFindKeepNativeSelections() {
+        let view = pane.textView; view.vimEnabled = true
+        view.string = "call(one)\nsecond\nthird\n"; pane.document.buffer.update(view.string); view.setSelectedRange(NSRange(location:5,length:0))
+        ["v","i","("].forEach(vimKey)
+        XCTAssertEqual((view.string as NSString).substring(with:view.selectedRange()),"one")
+        vimKey("v"); XCTAssertEqual(pane.document.vim.mode,.normal)
+        view.setSelectedRange(NSRange(location:0,length:0))
+        ["v","2","j"].forEach(vimKey)
+        XCTAssertTrue((view.string as NSString).substring(with:view.selectedRange()).contains("\nsecond\nt"))
+        vimKey("Escape"); view.setSelectedRange(NSRange(location:0,length:0))
+        ["v","f","("].forEach(vimKey)
+        XCTAssertEqual((view.string as NSString).substring(with:view.selectedRange()),"call(")
+    }
+    func testVimTextObjectsAndCountedDeletesApplyToEveryCaret() {
+        let view = pane.textView; view.vimEnabled = true
+        view.string = "call(one) call(two)"; pane.document.buffer.update(view.string)
+        view.setSelections([NSRange(location:5,length:0),NSRange(location:15,length:0)])
+        ["c","i","("].forEach(vimKey)
+        XCTAssertEqual(view.string,"call() call()")
+        view.insertText("中",replacementRange:NSRange(location:NSNotFound,length:0))
+        XCTAssertEqual(view.string,"call(中) call(中)"); vimKey("Escape")
+        pane.document.vim.escape(); view.string = "a b c\nd e f\n"; pane.document.buffer.update(view.string)
+        view.setSelections([NSRange(location:0,length:0),NSRange(location:6,length:0)])
+        ["2","d","w"].forEach(vimKey)
+        XCTAssertEqual(view.string,"c\nf\n")
+    }
     func testMultipleInsertIsOneUndoAndRedo() {
         let view = pane.textView,original = view.string
         view.setSelections([NSRange(location:0,length:5),NSRange(location:12,length:5)])

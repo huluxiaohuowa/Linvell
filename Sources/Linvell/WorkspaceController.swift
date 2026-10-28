@@ -48,13 +48,15 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     var picker: QuickPicker?
     var sidebarKind = "files"
     var activityButtons: [NSButton] = []
+    var activeActivity = 0
     var preferences: PreferencesController?
     var restoringLayout = true
     var loading: [URL:UUID] = [:]
     var latestOpenRequest: UUID?
     var remoteConnection: SSHRemote?
     var remoteDirectory = "~"
-    var remoteBrowser: RemoteBrowser?
+    var remoteBrowser: RemoteExplorer?
+    var remoteFolderPicker: RemoteFolderPicker?
     var runWorkspaceView: RunWorkspace?
 
     init() {
@@ -154,15 +156,17 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         icon.imageScaling = .scaleProportionallyUpOrDown; icon.heightAnchor.constraint(equalToConstant:32).isActive = true
         var controls: [NSView] = [icon]
         for (index,entry) in [("doc.on.doc","Explorer"),("magnifyingglass","Search Project"),("arrow.triangle.branch","Source Control"),("list.bullet.rectangle","Document Symbols"),("square.grid.2x2","Project Tools")].enumerated() {
-            let button = Theme.button(entry.0,help:entry.1,target:self,action:#selector(activityClicked(_:)))
+            let button = Theme.activityButton(entry.0,help:entry.1,target:self,action:#selector(activityClicked(_:)))
             button.tag = index; button.image?.isTemplate = true
-            button.contentTintColor = index == 0 ? Theme.accent : Theme.secondary
+            button.state = index == activeActivity ? .on : .off
+            button.contentTintColor = index == activeActivity ? Theme.accent : Theme.secondary
             activityButtons.append(button); controls.append(button)
         }
         controls.append(NSView()); controls.append(Theme.button("gearshape",help:"Settings",target:self,action:#selector(showSettings)))
-        let stack = Theme.stack(controls,orientation:.vertical,spacing:18); Theme.pin(stack,in:activity,inset:10)
+        let stack = Theme.stack(controls,orientation:.vertical,spacing:18); Theme.pin(stack,in:activity,inset:7)
     }
     @objc private func activityClicked(_ sender: NSButton) {
+        selectActivity(sender.tag)
         switch sender.tag { case 0: showSidebar("files"); case 1: showSidebar("search"); case 2: gitWorkspace(); case 3: showSymbols(); default: projectTools() }
     }
     private func showSidebar(_ kind: String) {
@@ -179,8 +183,12 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
             label.translatesAutoresizingMaskIntoConstraints = false; sidebar.addSubview(label)
             NSLayoutConstraint.activate([label.leadingAnchor.constraint(equalTo:sidebar.leadingAnchor,constant:18),label.topAnchor.constraint(equalTo:sidebar.topAnchor,constant:24)])
         }
-        for button in activityButtons { button.contentTintColor = button.tag == (kind == "files" ? 0 : kind == "search" ? 1 : 2) ? Theme.accent : Theme.secondary }
+        selectActivity(kind == "files" ? 0 : kind == "search" ? 1 : 2)
         body.adjustSubviews()
+    }
+    func selectActivity(_ index: Int) {
+        activeActivity = index
+        for button in activityButtons { button.state = button.tag == index ? .on : .off; button.contentTintColor = button.tag == index ? Theme.accent : Theme.secondary; button.needsDisplay = true }
     }
     private func goToLine(_ line: Int) {
         guard let view = activePane?.textView else { return }
@@ -205,22 +213,24 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     }
     @objc func projectTools() {
         guard let project = root?.url else { openFolder(); return }
+        preserveEditorPosition()
         current = nil; activePane = nil; panes = []; markdownView = nil
         editors.arrangedSubviews.forEach { $0.removeFromSuperview() }
         editors.addArrangedSubview(ProjectTools(project:project))
         renderTabs(); previewButton.isHidden = true; breadcrumb.stringValue = L.text("Project Tools")
         status.stringValue = L.text("Project-scoped tools"); modeLabel.stringValue = L.text("TOOLS")
-        activityButtons.forEach { $0.contentTintColor = $0.tag == 4 ? Theme.accent : Theme.secondary }
+        selectActivity(4)
     }
     @objc func gitWorkspace() {
         guard let project = root?.url else { openFolder(); return }
+        preserveEditorPosition()
         current = nil; activePane = nil; panes = []; markdownView = nil
         editors.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let git = GitWorkspace(project:project); git.onOpen = { [weak self] in self?.open($0) }
         editors.addArrangedSubview(git); editors.adjustSubviews(); renderTabs()
         previewButton.isHidden = true; breadcrumb.stringValue = L.text("Source Control")
         status.stringValue = L.text("Git repository"); modeLabel.stringValue = "GIT"
-        activityButtons.forEach { $0.contentTintColor = $0.tag == 2 ? Theme.accent : Theme.secondary }
+        sidebar.isHidden = true; body.adjustSubviews(); selectActivity(2)
     }
     @objc func runWorkspace() {
         let directory = remoteConnection == nil ? (root?.url.path ?? current?.fileURL?.deletingLastPathComponent().path) : remoteDirectory
@@ -229,6 +239,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
             guard existing.mayClose() else { return }; existing.terminate(); runWorkspaceView = nil
         }
         if runWorkspaceView == nil { runWorkspaceView = RunWorkspace(directory:directory,remote:remoteConnection) }
+        preserveEditorPosition()
         current = nil; activePane = nil; panes = []; markdownView = nil
         editors.arrangedSubviews.forEach { $0.removeFromSuperview() }
         editors.addArrangedSubview(runWorkspaceView!); editors.adjustSubviews(); renderTabs()
@@ -270,6 +281,10 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         p.beginSheetModal(for:window!) { [weak self] result in if result == .OK { p.urls.forEach { self?.open($0) } } }
     }
     @objc func openFolder() {
+        if remoteConnection != nil { openRemoteFolder(); return }
+        openLocalFolder()
+    }
+    @objc func openLocalFolder() {
         let p = NSOpenPanel(); p.canChooseDirectories = true; p.canChooseFiles = false
         p.beginSheetModal(for:window!) { [weak self] result in if result == .OK, let url = p.url { self?.setProject(url) } }
     }
@@ -282,6 +297,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         remoteConnection = nil; remoteBrowser = nil
         root = FileNode(url); projectTitle.stringValue = url.lastPathComponent
         outline.reloadData(); UserDefaults.standard.set(url.path,forKey:"lastProject")
+        WorkspaceSession.save(.local(path:url.path))
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
             let files = ProjectFiles.list(url)
             DispatchQueue.main.async { [weak self] in if self?.root?.url == url { self?.fileIndex = files } }
@@ -313,6 +329,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         }
     }
     func activate(_ document: OpenDocument) {
+        preserveEditorPosition()
         if !documents.contains(where: { $0 === document }) { documents.append(document) }
         current = document
         editors.arrangedSubviews.forEach { $0.removeFromSuperview() }
@@ -322,12 +339,22 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
             let pane = makePane(document); editors.addArrangedSubview(pane); activePane = pane
             if document.supportsPreview && document.markdownPreview {
                 let preview = MarkdownPreview(root:document.fileURL!.deletingLastPathComponent(),html:document.isHTML)
+                pane.onScroll = { [weak preview] in preview?.scrollFromSource($0) }
+                preview.onScroll = { [weak pane] in pane?.scrollFromPreview($0) }
                 preview.openFile = { [weak self] in self?.open($0) }; preview.render(document.buffer.text)
                 markdownView = preview; editors.addArrangedSubview(preview); editors.setPosition(editors.bounds.width/2,ofDividerAt:0)
             }
         }
         editors.adjustSubviews(); renderTabs(); updateStatus(); window?.makeFirstResponder(activePane?.textView)
+        if let selections = document.lastSelections { activePane?.textView.setSelections(selections) }
+        if let anchor = document.lastScroll { activePane?.scrollFromPreview(anchor); markdownView?.scrollFromSource(anchor) }
         window?.title = "\(document.displayName) — Linvell"
+    }
+    private func preserveEditorPosition() {
+        if let pane = activePane {
+            pane.document.lastScroll = pane.scrollAnchor
+            pane.document.lastSelections = pane.textView.editingSelections
+        }
     }
     private func makePane(_ document: OpenDocument) -> EditorPane {
         let pane = EditorPane(document:document,vim:vimEnabled)
@@ -335,7 +362,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         pane.onFocus = { [weak self,weak pane] in self?.activePane = pane }
         pane.onChange = { [weak self] in self?.updateStatus(); self?.updateTabTitles() }
         pane.onTextChanged = { [weak self] in self?.markdownView?.render(document.buffer.text) }
-        pane.textView.exCommand = { [weak self] _ in self?.showEx() }
+        pane.textView.exCommand = { [weak self] prefix in self?.showEx(prefix) }
         panes.append(pane); return pane
     }
     private func renderTabs() {
@@ -430,8 +457,14 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         do { for d in documents where d.buffer.isModified { try recovery.write(d.buffer) } }
         catch { if !recoveryErrorShown { recoveryErrorShown = true; show(error) } }
     }
-    func restore() {
-        if let path = UserDefaults.standard.string(forKey:"lastProject"),FileManager.default.fileExists(atPath:path) { setProject(URL(fileURLWithPath:path)) }
+    func restore(recoverDrafts: Bool = true) {
+        guard WorkspaceSession.shouldRestore else { return }
+        switch WorkspaceSession.load() {
+        case .local(let path): if FileManager.default.fileExists(atPath:path) { setProject(URL(fileURLWithPath:path)) }
+        case .ssh(let host,let path): connectToSSH(host,folder:path)
+        case nil: break
+        }
+        guard recoverDrafts else { return }
         do {
             for entry in try recovery.entries() {
                 // Recovered content stays an untitled copy so a changed disk file cannot be overwritten.
@@ -450,6 +483,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         let line = row+1,column = (current.buffer.text as NSString).substring(with:NSRange(location:start,length:p-start)).count+1
         status.stringValue = L.format("Ln %d, Col %d     %@     %d pt",line,column,current.buffer.formatLabel,Int(Theme.fontSize))
         modeLabel.stringValue = vimEnabled ? L.text(current.vim.mode.rawValue) + (current.vim.pending.isEmpty ? "" : "  \(current.vim.pending)") : L.text("TEXT")
+        if vimEnabled,let recording = current.vim.recordingRegister { modeLabel.stringValue += "  ● @"+recording }
     }
     @objc func toggleVim() {
         vimEnabled.toggle(); UserDefaults.standard.set(vimEnabled,forKey:"vimEnabled")
@@ -471,6 +505,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     @objc func increaseFont() { Theme.fontSize += 1; PreferencesSync.shared.changed() }
     @objc func decreaseFont() { Theme.fontSize -= 1; PreferencesSync.shared.changed() }
     func applyTheme() {
+        let selectedActivity = activeActivity
         window?.appearance = NSAppearance(named:Theme.profile.isDark ? .darkAqua : .aqua); window?.backgroundColor = Theme.panel
         func refresh(_ view: NSView) {
             (view as? Surface)?.refreshTheme(); (view as? ThemedLabel)?.refreshTheme()
@@ -484,6 +519,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         if let terminal { configureTerminal(terminal) }
         if let current,let markdownView { markdownView.render(current.buffer.text) }
         if sidebarKind != "files" { showSidebar(sidebarKind) }
+        selectActivity(selectedActivity)
     }
     func relocalize() {
         if let view = window?.contentView { L.apply(to:view) }
@@ -632,26 +668,42 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     }
     @objc func commandPalette() {
         var options: [PickerOption] = []
-        for (title,selector) in [("New File",#selector(newFile)),("Open Folder…",#selector(openFolder)),("Connect to SSH Host…",#selector(connectSSH)),("Source Control",#selector(gitWorkspace)),("Run & Preview",#selector(runWorkspace)),("Find in File",#selector(find)),("Toggle Vim Mode",#selector(toggleVim)),("Split Editor",#selector(toggleSplit)),("Toggle Terminal",#selector(toggleTerminal)),("Increase Font Size",#selector(increaseFont)),("Decrease Font Size",#selector(decreaseFont))] {
+        for (title,selector) in [("New File",#selector(newFile)),("Open Folder…",#selector(openFolder)),("Connect to SSH Host…",#selector(connectSSH)),("Source Control",#selector(gitWorkspace)),("Git Commit Graph",#selector(gitWorkspace)),("Run & Preview",#selector(runWorkspace)),("Find in File",#selector(find)),("Toggle Vim Mode",#selector(toggleVim)),("Split Editor",#selector(toggleSplit)),("Toggle Terminal",#selector(toggleTerminal)),("Increase Font Size",#selector(increaseFont)),("Decrease Font Size",#selector(decreaseFont))] {
             options.append(PickerOption(title:title,detail:"Linvell command",invoke:{ [weak self] in self?.perform(selector) }))
         }
         options.append(PickerOption(title:L.text("Preferences: Theme and Font"),detail:"Appearance",invoke:{ [weak self] in self?.showSettings() }))
         picker = QuickPicker(title:L.text("Search commands"),options:options,owner:window!)
     }
-    private func showEx() {
-        let alert = NSAlert(); alert.messageText = L.text("Vim command"); alert.informativeText = L.text("Available in this preview: :w, :q, :wq, :set number, :set nonumber")
-        let field = NSTextField(string:":"); field.frame = NSRect(x:0,y:0,width:340,height:28); field.font = .monospacedSystemFont(ofSize:15,weight:.regular)
+    private func showEx(_ prefix: String = ":") {
+        let alert = NSAlert(); alert.messageText = L.text("Vim command"); alert.informativeText = L.text("Search with / or ?, substitute with :s or :%s, or use :w, :q, :wq and :set number.")
+        let field = NSTextField(string:prefix); field.frame = NSRect(x:0,y:0,width:340,height:28); field.font = .monospacedSystemFont(ofSize:15,weight:.regular)
         alert.accessoryView = field; alert.addButton(withTitle:L.text("Run")); alert.addButton(withTitle:L.text("Cancel"))
         alert.window.initialFirstResponder = field
         alert.beginSheetModal(for:window!) { [weak self] response in
-            guard response == .alertFirstButtonReturn,let self else { return }
+            guard response == .alertFirstButtonReturn,let self else { self?.current?.vim.cancelPendingCommand(); return }
             switch field.stringValue.trimmingCharacters(in:.whitespaces).trimmingCharacters(in:CharacterSet(charactersIn:":")) {
             case "w": self.save()
             case "q": self.closeCurrent()
             case "wq": if let doc = self.current,self.saveDocument(doc) { self.closeCurrent() }
             case "set number", "set nu": self.panes.forEach { $0.scroll.rulersVisible = true }
             case "set nonumber", "set nonu": self.panes.forEach { $0.scroll.rulersVisible = false }
-            default: self.show(NSError(domain:"Linvell.Vim",code:1,userInfo:[NSLocalizedDescriptionKey:"This Ex command is not implemented yet."]))
+            default:
+                guard let pane = self.activePane else { return }
+                let vim = pane.document.vim,view = pane.textView,command = field.stringValue
+                vim.sync(text:view.string,cursor:view.selectedRange().location)
+                do {
+                    if command.hasPrefix("/") || command.hasPrefix("?") {
+                        let found = try vim.search(String(command.dropFirst()),backwards:command.hasPrefix("?"))
+                        if !found { throw VimCommandError.invalid("Pattern not found.") }
+                    } else { try vim.executeEx(command) }
+                    let at = vim.cursor
+                    if vim.changed,view.shouldChangeText(in:NSRange(location:0,length:view.string.utf16.count),replacementString:vim.text) {
+                        view.applyingVim = true
+                        view.textStorage?.replaceCharacters(in:NSRange(location:0,length:view.string.utf16.count),with:vim.text)
+                        view.didChangeText(); view.applyingVim = false
+                    }
+                    view.setSelectedRange(NSRange(location:min(at,view.string.utf16.count),length:0)); view.scrollRangeToVisible(view.selectedRange()); self.updateStatus()
+                } catch { self.show(error) }
             }
         }
     }

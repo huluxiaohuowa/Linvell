@@ -1,6 +1,6 @@
 # Development status
 
-2026-10-28 · 0.1.3
+2026-10-28 · 0.1.4
 
 ## Implemented foundation
 
@@ -28,11 +28,20 @@
 - Native Git panel with working/index diffs, stage/unstage, commits, branches, fetch/fast-forward pull/push and a parent-linked graph for the latest 150 commits.
 - Rectangular column selection, distributed multiline paste and Vim visual/block multi-position editing.
 
+## Added in 0.1.4
+
+- Project Tools constraint-crash regression, structured three-pane Git changes/graph UI and hunk staging.
+- Real remote project folder selection and lazy multi-level tree; local/remote startup restoration choice and clear activity selection.
+- Bidirectional Markdown scroll coordination and one compressed rollback with legacy app migration.
+- Pure Swift operator/text-object/count composition, registers, character find, marks, repeat, insertion undo, normal/insert macros, Replace mode, forward/backward/word search and a bounded Vim-pattern/Ex substitute implementation.
+- Visual text objects/counts/find, multi-caret text-object changes/counts and native VS Code line commands.
+- Differential system-Vim fixtures, hidden native rendering, actual SSH project/runner acceptance and regression tests.
+
 ## Still open
 
 The original full-editor goal is **not complete**. In particular:
 
-- Full Vim behavior, Replace mode, full operators/text objects, macros, registers beyond the initial register, mappings, Vim regex, full Ex, Vimscript/Vim9 and differential compatibility coverage.
+- Complete Vim editing compatibility: full regex/Ex and remapping, complete block-register semantics, visual/Replace macros and remaining compound operations. Vimscript/Vim9 and VSIX hosting are outside the current implementation.
 - Full multi-cursor/column selection behavior, folding, minimap, robust language-aware syntax parsing, LSP, DAP, advanced Git history editing and comprehensive settings/keybinding management.
 - Per-workspace restoration of all files, split sessions and scroll/cursor state. Recovery snapshots currently restore as untitled copies.
 - Encoding selection/conversion UI and mixed-line-ending normalization. Saving mixed endings is intentionally blocked until the format can be chosen explicitly.

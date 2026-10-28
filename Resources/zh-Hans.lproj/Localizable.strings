@@ -295,3 +295,45 @@
 "New remote file" = "新建远程文件";
 "File name" = "文件名";
 "Creating remote file…" = "正在创建远程文件…";
+
+"STARTUP" = "启动";
+"Empty window" = "空白欢迎窗口";
+"Restore last workspace" = "恢复上次的工作区";
+"On startup" = "启动时";
+"Restore the last local project or SSH folder. Files and folders opened from Finder always take priority." = "恢复上次打开的本地文件夹、项目或 SSH 远程文件夹。从 Finder 打开的文件或文件夹始终优先。";
+
+"The Swift Vim engine supports composed operators, text objects, registers, repeat and normal/insert macro recording. Full compatibility, mappings, Vim regular expressions, Vimscript and Vim9 remain in development." = "Swift Vim 引擎支持操作符组合、文本对象、寄存器、重复及普通／插入模式的宏录制。完整兼容性、映射、Vim 正则表达式、Vimscript 与 Vim9 仍在开发中。";
+
+"REPLACE" = "替换";
+
+"BRANCHES" = "分支";
+"Commit Graph" = "提交图谱";
+"Loading remote folder…" = "正在加载远程文件夹…";
+"Open Remote Folder" = "打开远程文件夹";
+"Open Remote Folder…" = "打开远程文件夹…";
+"Open Local Folder…" = "打开本地文件夹…";
+"Open This Folder" = "打开此文件夹";
+"Remote project files" = "远程项目文件";
+"Copy Line Down" = "向下复制行";
+"Copy Line Up" = "向上复制行";
+"Delete Line" = "删除行";
+"Indent Line" = "增加缩进";
+"Outdent Line" = "减少缩进";
+"Insert Line Above" = "在上方插入行";
+"Insert Line Below" = "在下方插入行";
+"Move Line Up" = "向上移动行";
+"Move Line Down" = "向下移动行";
+"Toggle Line Comment" = "切换行注释";
+"Untracked" = "未跟踪";
+"Modified" = "已修改";
+"Renamed" = "已重命名";
+"Deleted" = "已删除";
+"Added" = "已添加";
+"Conflict" = "冲突";
+"Stage Hunk" = "暂存此块";
+"Unstage Hunk" = "取消暂存此块";
+"Hunk %d" = "变更块 %d";
+"Working Changes" = "工作区改动";
+"Search with / or ?, substitute with :s or :%s, or use :w, :q, :wq and :set number." = "使用 / 或 ? 查找、:s 或 :%s 替换，或执行 :w、:q、:wq 和 :set number。";
+
+"Git Commit Graph" = "Git 提交图谱";

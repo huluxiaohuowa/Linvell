@@ -55,6 +55,13 @@ enum Theme {
         return button
     }
     static func choiceButton() -> NSPopUpButton { ChoiceButton(frame:.zero,pullsDown:false) }
+    static func activityButton(_ symbol: String,help: String,target: AnyObject,action: Selector) -> NSButton {
+        let button = ActivityIconButton(image:NSImage(systemSymbolName:symbol,accessibilityDescription:nil)!,target:target,action:action)
+        button.title = ""; button.imagePosition = .imageOnly; button.identifier = NSUserInterfaceItemIdentifier("Linvell.iconButton")
+        button.isBordered = false; button.setButtonType(.pushOnPushOff); button.toolTip = L.text(help); button.setAccessibilityLabel(L.text(help))
+        button.widthAnchor.constraint(equalToConstant:38).isActive = true; button.heightAnchor.constraint(equalToConstant:38).isActive = true
+        return button
+    }
     static func stack(_ views: [NSView], orientation: NSUserInterfaceLayoutOrientation = .horizontal, spacing: CGFloat = 10) -> NSStackView {
         let s = NSStackView(views: views); s.orientation = orientation; s.spacing = spacing; s.distribution = .fill; s.clipsToBounds = true
         s.alignment = orientation == .vertical ? .leading : .centerY
@@ -71,6 +78,16 @@ enum Theme {
             child.topAnchor.constraint(equalTo: parent.topAnchor, constant: inset),
             child.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -inset)
         ])
+    }
+}
+
+private final class ActivityIconButton: NSButton {
+    override func draw(_ dirtyRect: NSRect) {
+        if state == .on {
+            Theme.accent.withAlphaComponent(0.16).setFill(); NSBezierPath(roundedRect:bounds.insetBy(dx:1,dy:1),xRadius:7,yRadius:7).fill()
+            Theme.accent.setFill(); NSBezierPath(roundedRect:NSRect(x:0,y:6,width:3,height:bounds.height-12),xRadius:1.5,yRadius:1.5).fill()
+        }
+        super.draw(dirtyRect)
     }
 }
 

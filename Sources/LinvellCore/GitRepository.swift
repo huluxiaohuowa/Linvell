@@ -18,6 +18,22 @@ public struct GitCommit {
     public let subject: String
     public let refs: String
 }
+public struct GitHunk {
+    public let header: String
+    public let patch: String
+    public static func parse(_ diff: String) -> [GitHunk] {
+        let lines = diff.components(separatedBy:"\n")
+        guard let first = lines.firstIndex(where:{ $0.hasPrefix("@@ ") }) else { return [] }
+        let prefix = lines[..<first].joined(separator:"\n")+"\n"
+        let starts = lines.indices.filter { lines[$0].hasPrefix("@@ ") }
+        return starts.enumerated().map { index,start in
+            let end = index+1 < starts.count ? starts[index+1] : lines.count
+            var body = lines[start..<end].joined(separator:"\n")
+            if !body.hasSuffix("\n") { body += "\n" }
+            return GitHunk(header:lines[start],patch:prefix+body)
+        }
+    }
+}
 
 public enum GitError: LocalizedError {
     case command(String),invalidPath,emptyMessage
@@ -33,6 +49,11 @@ public enum GitError: LocalizedError {
 public struct GitRepository {
     public let root: URL
     public init(root: URL) { self.root = root }
+    public func resolvedWorkingTree() throws -> GitRepository {
+        var path = try run(["rev-parse","--show-toplevel"])
+        if path.hasSuffix("\n") { path.removeLast() }
+        return GitRepository(root:URL(fileURLWithPath:path,isDirectory:true))
+    }
     public func run(_ arguments: [String],timeout: TimeInterval = 30) throws -> String {
         let result = try ToolCommand.run(URL(fileURLWithPath:"/usr/bin/git"),arguments:["--no-pager","--literal-pathspecs","-c","color.ui=false","-c","core.fsmonitor=false","-C",root.path]+arguments,directory:root,timeout:timeout,trimOutput:false)
         guard result.succeeded else { throw GitError.command(result.timedOut ? "Git operation timed out." : result.output) }
@@ -76,6 +97,10 @@ public struct GitRepository {
         if let original = change.originalPath { paths.append(try checked(original)) }
         _ = try run(["add","--"]+paths)
     }
+    public func applyHunk(_ hunk: GitHunk,unstage: Bool) throws {
+        let result = try ToolCommand.run(URL(fileURLWithPath:"/usr/bin/git"),arguments:["--no-pager","-C",root.path,"apply","--cached","--whitespace=nowarn"]+(unstage ? ["--reverse"] : [])+["-"],directory:root,input:Data(hunk.patch.utf8))
+        guard result.succeeded else { throw GitError.command(result.output) }
+    }
     public func unstage(_ change: GitChange) throws {
         let paths = try [change.path,change.originalPath].compactMap { $0 }.map(checked)
         if (try? run(["rev-parse","--verify","HEAD"])) != nil { _ = try run(["restore","--staged","--"]+paths) }
@@ -96,6 +121,6 @@ public struct GitRepository {
     }
     public func commitDiff(_ hash: String) throws -> String {
         guard [40,64].contains(hash.count),hash.allSatisfy(\.isHexDigit) else { throw GitError.invalidPath }
-        return try run(["show","--first-parent","--format=fuller","--stat","--patch","--no-ext-diff","--no-textconv",hash,"--"])
+        return try run(["show","--first-parent","--format=","--stat","--patch","--no-ext-diff","--no-textconv",hash,"--"])
     }
 }

@@ -29,11 +29,25 @@ extension EditorTextView {
         let blockKey = event.modifierFlags.contains(.control) && event.charactersIgnoringModifiers == "v"
         let visual = [VimEngine.Mode.visual,.visualLine,.visualBlock].contains(vim.mode)
         if vim.mode == .normal && (key == "v" || key == "V" || blockKey) {
-            visualAnchor = selectedRange().location; visualHead = visualAnchor
+            visualAnchor = selectedRange().location; visualHead = visualAnchor; visualMotion.escape()
             vim.beginVisual(blockKey ? .visualBlock : key == "V" ? .visualLine : .visual)
             refreshVisualSelection(); return true
         }
         guard visual else { return false }
+        if multiPending == "visual-i" || multiPending == "visual-a" {
+            let around = multiPending == "visual-a"; multiPending = ""
+            visualMotion.sync(text:string,cursor:visualHead ?? selectedRange().location)
+            if let range = visualMotion.textObjectRange(key,around:around),range.length > 0 {
+                visualAnchor = range.location
+                visualHead = ns.rangeOfComposedCharacterSequence(at:NSMaxRange(range)-1).location
+                refreshVisualSelection()
+            }
+            return true
+        }
+        if ["f","F","t","T","g"].contains(visualMotion.pending.last.map(String.init) ?? "") {
+            visualMotion.sync(text:string,cursor:visualHead ?? selectedRange().location); visualMotion.key(key)
+            visualHead = min(visualMotion.cursor,ns.length); refreshVisualSelection(); return true
+        }
         if multiPending == "visual-r",key.count == 1 {
             multiPending = ""
             let replacements = editingSelections.map { ns.substring(with:$0).map { $0 == "\n" ? "\n" : key }.joined() }
@@ -46,16 +60,24 @@ extension EditorTextView {
             clearExtraSelections(); setSelectedRange(NSRange(location:at,length:0)); statusChanged?(); return true
         }
         if key == "v" || key == "V" || blockKey {
-            vim.beginVisual(blockKey ? .visualBlock : key == "V" ? .visualLine : .visual); refreshVisualSelection(); return true
+            let kind: VimEngine.Mode = blockKey ? .visualBlock : key == "V" ? .visualLine : .visual
+            if kind == vim.mode {
+                let at = visualHead ?? selectedRange().location
+                vim.escape(); visualAnchor = nil; visualHead = nil; clearExtraSelections(); setSelectedRange(NSRange(location:at,length:0)); statusChanged?()
+            } else { vim.beginVisual(kind); refreshVisualSelection() }
+            return true
         }
+        if key == "i" || key == "a" { multiPending = "visual-"+key; return true }
+        if key == "o" { let old = visualAnchor; visualAnchor = visualHead; visualHead = old; refreshVisualSelection(); return true }
         if ["d","x","c"].contains(key) {
             let selections = editingSelections
+            vim.yank(selections.map { ns.substring(with:$0) }.joined(separator:"\n"),linewise:vim.mode == .visualLine)
             performMultiEdit(selections,replacement:""); visualAnchor = nil; visualHead = nil
             vim.escape(); if key == "c" { vim.enterInsert() }; statusChanged?(); return true
         }
         if key == "r" { multiPending = "visual-r"; return true }
         if key == "y" {
-            vim.yank(editingSelections.map { ns.substring(with:$0) }.joined(separator:"\n"))
+            vim.yank(editingSelections.map { ns.substring(with:$0) }.joined(separator:"\n"),linewise:vim.mode == .visualLine)
             copy(nil); let at = visualAnchor ?? selectedRange().location
             visualAnchor = nil; visualHead = nil; clearExtraSelections(); setSelectedRange(NSRange(location:at,length:0)); vim.escape(); statusChanged?(); return true
         }
@@ -63,10 +85,10 @@ extension EditorTextView {
             setSelections(editingSelections.map { NSRange(location:key == "I" ? $0.location : NSMaxRange($0),length:0) })
             visualAnchor = nil; visualHead = nil; vim.enterInsert(); statusChanged?(); return true
         }
-        let motions = ["h","j","k","l","w","b","0","$","G"]
-        if motions.contains(key) {
-            let kind = vim.mode; vim.escape(); vim.sync(text:string,cursor:visualHead ?? selectedRange().location); vim.key(key)
-            visualHead = min(vim.cursor,ns.length); vim.beginVisual(kind); refreshVisualSelection(); return true
+        let motions = ["h","j","k","l","w","W","b","B","e","E","0","^","$","G","%","{","}"]
+        if motions.contains(key) || ["g","f","F","t","T",";",","].contains(key) || key.count == 1 && key.first?.isNumber == true {
+            visualMotion.sync(text:string,cursor:visualHead ?? selectedRange().location); visualMotion.key(key)
+            visualHead = min(visualMotion.cursor,ns.length); refreshVisualSelection(); return true
         }
         return true
     }
@@ -84,6 +106,22 @@ extension EditorTextView {
     }
     func handleMultiVim(key: String) {
         guard let document else { return }; let vim = document.vim,ns = string as NSString
+        if key.count == 1,key.first?.isNumber == true,key != "0" || !multiCount.isEmpty {
+            if multiCount.count < 4 { multiCount += key }; return
+        }
+        if ["d","c"].contains(multiPending),["i","a"].contains(key) { multiPending += key; return }
+        if ["di","da","ci","ca"].contains(multiPending) {
+            let command = multiPending,amount = min(9999,multiOperatorCount*(Int(multiCount) ?? 1))
+            multiPending = ""; multiCount = ""; multiOperatorCount = 1
+            let ranges = editingSelections.compactMap { selection -> NSRange? in
+                let engine = VimEngine(); engine.sync(text:string,cursor:selection.location)
+                return engine.textObjectRange(key,around:command.hasSuffix("a"),count:amount)
+            }
+            guard ranges.count == editingSelections.count else { return }
+            vim.yank(ranges.map { ns.substring(with:$0) }.joined(separator:"\n"))
+            performMultiEdit(MultiEdit.normalized(ranges),replacement:"")
+            if command.hasPrefix("c") { vim.enterInsert() }; statusChanged?(); return
+        }
         if multiPending == "r",key.count == 1 {
             multiPending = ""
             let ranges = editingSelections.map { $0.length > 0 || $0.location == ns.length ? $0 : ns.rangeOfComposedCharacterSequence(at:$0.location) }
@@ -109,23 +147,24 @@ extension EditorTextView {
         }
         if key == "c",editingSelections.contains(where:{ $0.length > 0 }) { performMultiEdit(editingSelections,replacement:""); vim.enterInsert(); statusChanged?(); return }
         if key == "x" || key == "d" && editingSelections.contains(where:{ $0.length > 0 }) { deleteForward(nil); return }
-        if key == "d" || key == "c" { multiPending = key; return }
+        if (key == "d" || key == "c"),multiPending.isEmpty { multiPending = key; multiOperatorCount = Int(multiCount) ?? 1; multiCount = ""; return }
         if !multiPending.isEmpty {
-            let operation = multiPending; multiPending = ""
-            let ranges = editingSelections.map { range -> NSRange in
+            let operation = multiPending,amount = min(9999,multiOperatorCount*(Int(multiCount) ?? 1))
+            multiPending = ""; multiCount = ""; multiOperatorCount = 1
+            let ranges = editingSelections.compactMap { range -> NSRange? in
                 let engine = VimEngine(); engine.sync(text:string,cursor:range.location)
-                if key == "d" || key == "c" { return ns.lineRange(for:NSRange(location:range.location,length:0)) }
-                guard key == "w" || key == "$" else { return NSRange(location:range.location,length:0) }
-                engine.key(key)
-                var end = engine.cursor
-                if key == "$",end < ns.length { end = NSMaxRange(ns.rangeOfComposedCharacterSequence(at:end)) }
-                return NSRange(location:range.location,length:max(0,end-range.location))
+                if amount > 1 { String(amount).forEach { engine.key(String($0)) } }
+                engine.key(operation); engine.key(key)
+                return engine.lastEdit?.range
             }
-            performMultiEdit(ranges,replacement:""); if operation == "c" { vim.enterInsert() }; statusChanged?(); return
+            guard ranges.count == editingSelections.count else { return }
+            vim.yank(ranges.map { ns.substring(with:$0) }.joined(separator:"\n"))
+            performMultiEdit(MultiEdit.normalized(ranges),replacement:""); if operation == "c" { vim.enterInsert() }; statusChanged?(); return
         }
-        if ["h","j","k","l","w","b","0","$","G"].contains(key) {
+        if ["h","j","k","l","w","W","b","B","e","E","0","^","$","G","%","{","}"].contains(key) {
+            let amount = Int(multiCount) ?? 1; multiCount = ""
             setSelections(editingSelections.map { range in
-                let engine = VimEngine(); engine.sync(text:string,cursor:range.location); engine.key(key)
+                let engine = VimEngine(); engine.sync(text:string,cursor:range.location); if amount > 1 { String(amount).forEach { engine.key(String($0)) } }; engine.key(key)
                 return NSRange(location:engine.cursor,length:0)
             }); statusChanged?(); return
         }

@@ -48,12 +48,13 @@ final class ProjectTools: NSView {
                 self.content.arrangedSubviews.forEach { $0.removeFromSuperview() }
                 if section == 3,case .success(let sample) = snapshot {
                     let map = CoreHeatmap(loads:sample.cpuLoads)
-                    map.widthAnchor.constraint(equalTo:self.content.widthAnchor).isActive = true; self.content.addArrangedSubview(map)
+                    self.content.addArrangedSubview(map)
+                    map.widthAnchor.constraint(equalTo:self.content.widthAnchor).isActive = true
                 }
                 for report in reports {
                     let card = ToolCard(title:L.text(report.0),body:report.1)
-                    card.widthAnchor.constraint(equalTo:self.content.widthAnchor).isActive = true
                     self.content.addArrangedSubview(card)
+                    card.widthAnchor.constraint(equalTo:self.content.widthAnchor).isActive = true
                 }
             }
         }

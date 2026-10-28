@@ -1,4 +1,5 @@
 import AppKit
+import LinvellCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var workspaces: [WorkspaceController] = []
@@ -64,6 +65,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps:true)
         PreferencesSync.shared.start()
         UpdateManager.shared.start()
+        if Bundle.main.bundleIdentifier == "top.fuluwa.linvell" {
+            let application = Bundle.main.bundleURL
+            DispatchQueue.global(qos:.utility).async { try? RollbackArchive.migrateLegacyCopies(beside:application) }
+        }
     }
     @objc private func preferencesApplied() {
         for workspace in workspaces {
@@ -157,6 +162,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let nw = NSMenuItem(title:L.text("New Window"),action:#selector(newWindow(_:)),keyEquivalent:"n"); nw.target = self; nw.keyEquivalentModifierMask = [.command,.shift]; file.addItem(nw)
         item(file,"Open…",#selector(WorkspaceController.openFile),"o",route:true)
         item(file,"Open Folder…",#selector(WorkspaceController.openFolder),route:true)
+        item(file,"Open Local Folder…",#selector(WorkspaceController.openLocalFolder),route:true)
+        item(file,"Open Remote Folder…",#selector(WorkspaceController.openRemoteFolder),route:true)
         item(file,"Connect to SSH Host…",#selector(WorkspaceController.connectSSH),route:true)
         file.addItem(.separator())
         item(file,"Close File",#selector(WorkspaceController.closeCurrent),"w",route:true)
@@ -165,6 +172,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let edit = menu("Edit")
         item(edit,"Undo",Selector(("undo:")),"z"); item(edit,"Redo",Selector(("redo:")),"z",[.command,.shift]); edit.addItem(.separator())
         item(edit,"Cut",#selector(NSText.cut(_:)),"x"); item(edit,"Copy",#selector(NSText.copy(_:)),"c"); item(edit,"Paste",#selector(NSText.paste(_:)),"v"); item(edit,"Select All",#selector(NSText.selectAll(_:)),"a")
+        edit.addItem(.separator())
+        item(edit,"Move Line Up",#selector(EditorTextView.moveLinesUp(_:)),String(UnicodeScalar(NSUpArrowFunctionKey)!),[.option])
+        item(edit,"Move Line Down",#selector(EditorTextView.moveLinesDown(_:)),String(UnicodeScalar(NSDownArrowFunctionKey)!),[.option])
+        item(edit,"Copy Line Up",#selector(EditorTextView.copyLinesUp(_:)),String(UnicodeScalar(NSUpArrowFunctionKey)!),[.option,.shift])
+        item(edit,"Copy Line Down",#selector(EditorTextView.copyLinesDown(_:)),String(UnicodeScalar(NSDownArrowFunctionKey)!),[.option,.shift])
+        item(edit,"Delete Line",#selector(EditorTextView.deleteLines(_:)),"k",[.command,.shift])
+        item(edit,"Toggle Line Comment",#selector(EditorTextView.toggleLineComment(_:)),"/")
+        item(edit,"Indent Line",#selector(EditorTextView.indentLines(_:)),"]")
+        item(edit,"Outdent Line",#selector(EditorTextView.outdentLines(_:)),"[")
+        item(edit,"Insert Line Below",#selector(EditorTextView.insertLineBelow(_:)),"\r")
+        item(edit,"Insert Line Above",#selector(EditorTextView.insertLineAbove(_:)),"\r",[.command,.shift])
         let find = menu("Find")
         item(find,"Find in File…",#selector(WorkspaceController.find),"f",route:true)
         item(find,"Replace in File…",#selector(WorkspaceController.replaceInFile),"f",[.command,.option],route:true)
@@ -183,6 +201,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item(view,"Toggle Preview",#selector(WorkspaceController.toggleMarkdownPreview),"v",[.command,.shift],route:true)
         item(view,"Project Tools",#selector(WorkspaceController.projectTools),route:true)
         item(view,"Source Control",#selector(WorkspaceController.gitWorkspace),"g",[.control,.shift],route:true)
+        item(view,"Git Commit Graph",#selector(WorkspaceController.gitWorkspace),route:true)
         item(view,"Run & Preview",#selector(WorkspaceController.runWorkspace),"b",[.command,.shift],route:true)
         view.addItem(.separator())
         item(view,"Toggle Sidebar",#selector(WorkspaceController.toggleSidebar),"b",route:true)

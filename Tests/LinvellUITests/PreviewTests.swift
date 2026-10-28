@@ -42,7 +42,7 @@ final class PreviewTests: XCTestCase {
         ![Local](images/example.png)
         """
         let html = MarkdownRendering.html(source,colors:Theme.Profile.light.colors)
-        for fragment in ["<h1","<strong>Bold</strong>","<em>italic</em>","<ul>","<pre>","&lt;tag&gt;","<table>","images/example.png"] { XCTAssertTrue(html.contains(fragment),fragment) }
+        for fragment in ["<h1","<strong>Bold</strong>","<em>italic</em>","<ul data-source-line=", "<pre data-source-line=","&lt;tag&gt;","<table data-source-line=","images/example.png"] { XCTAssertTrue(html.contains(fragment),fragment) }
         XCTAssertTrue(html.contains("default-src 'none'"))
     }
     func testMarkdownResourcesCannotEscapeDocumentFolder() throws {

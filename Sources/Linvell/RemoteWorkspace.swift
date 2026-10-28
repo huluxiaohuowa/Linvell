@@ -49,27 +49,30 @@ final class RemoteBrowser: NSView, NSTableViewDelegate, NSTableViewDataSource {
     var onDirectory: ((String) -> Void)?
     var onTerminal: (() -> Void)?
     private var generation = UUID()
-    init(connection: SSHRemote) {
+    private let directoriesOnly: Bool
+    init(connection: SSHRemote,directoriesOnly: Bool = false,initialPath: String = "~") {
+        self.directoriesOnly = directoriesOnly; directory = initialPath
         self.connection = connection; super.init(frame:.zero)
         let heading = Theme.label("SSH · "+connection.host,size:13,weight:.semibold)
         let up = Theme.button("arrow.up",help:"Parent Folder",target:self,action:#selector(parent))
         let refresh = Theme.button("arrow.clockwise",help:"Refresh Files",target:self,action:#selector(refresh))
         let terminal = Theme.button("terminal",help:"SSH Terminal",target:self,action:#selector(shell))
         let create = Theme.button("doc.badge.plus",help:"New File",target:self,action:#selector(createFile))
-        pathField.placeholderString = L.text("Remote folder path"); pathField.stringValue = "~"; pathField.target = self; pathField.action = #selector(go)
+        create.isHidden = directoriesOnly
+        pathField.placeholderString = L.text("Remote folder path"); pathField.stringValue = initialPath; pathField.target = self; pathField.action = #selector(go)
         pathField.font = .systemFont(ofSize:13)
         let column = NSTableColumn(identifier:NSUserInterfaceItemIdentifier("remote")); table.addTableColumn(column); table.headerView = nil
         table.rowHeight = 34; table.dataSource = self; table.delegate = self; table.target = self; table.doubleAction = #selector(openSelected)
         table.backgroundColor = Theme.panel; table.setAccessibilityLabel(L.text("Remote files"))
         let scroll = NSScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true
         Theme.pin(Theme.stack([Theme.stack([heading,NSView(),create,terminal,up,refresh],spacing:6),pathField,note,scroll],orientation:.vertical,spacing:12),in:self,inset:14)
-        browse("~")
+        browse(initialPath)
     }
     required init?(coder: NSCoder) { fatalError() }
     func numberOfRows(in tableView: NSTableView) -> Int { entries.count }
     func tableView(_ tableView: NSTableView,viewFor tableColumn: NSTableColumn?,row: Int) -> NSView? {
         let entry = entries[row]
-        return Theme.stack([FileIcon.view(for:URL(fileURLWithPath:entry.path),folder:entry.directory),Theme.label(entry.name,size:13)],spacing:9)
+        return RemoteEntryCell(name:entry.name,path:entry.path,directory:entry.directory)
     }
     @objc private func openSelected() {
         guard entries.indices.contains(table.selectedRow) else { return }; let entry = entries[table.selectedRow]
@@ -107,7 +110,7 @@ final class RemoteBrowser: NSView, NSTableViewDelegate, NSTableViewDataSource {
                 guard let self,self.generation == request else { return }
                 switch result {
                 case .success(let reply):
-                    self.entries = reply.entries ?? []; self.directory = reply.path ?? path
+                    self.entries = (reply.entries ?? []).filter { !self.directoriesOnly || $0.directory }; self.directory = reply.path ?? path
                     self.pathField.stringValue = self.directory; self.note.stringValue = L.format("%d entries",self.entries.count)
                     self.onDirectory?(self.directory); self.table.reloadData()
                 case .failure(let error): self.note.stringValue = error.localizedDescription

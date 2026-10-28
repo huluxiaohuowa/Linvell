@@ -9,6 +9,8 @@ final class OpenDocument: NSObject, NSTextStorageDelegate {
     let imageURL: URL?
     var markdownPreview = false
     var remote: RemoteDocument?
+    var lastScroll: DocumentScrollAnchor?
+    var lastSelections: [NSRange]?
     var fileURL: URL? { imageURL ?? buffer.url }
     var displayName: String { remote.map { URL(fileURLWithPath:$0.path).lastPathComponent } ?? imageURL?.lastPathComponent ?? buffer.url?.lastPathComponent ?? L.text("Untitled") }
     var isMarkdown: Bool { ["md","markdown","mdown"].contains(fileURL?.pathExtension.lowercased() ?? "") }
@@ -50,7 +52,9 @@ final class EditorTextView: NSTextView {
     private var extraSelections: [NSRange]?
     var visualAnchor: Int?
     var visualHead: Int?
-    var multiPending = ""
+    let visualMotion = VimEngine()
+    var multiPending = "",multiCount = "",multiOperatorCount = 1
+    var replacedCharacters: [(Int,String,Int)] = []
     var editingSelections: [NSRange] { extraSelections ?? selectedRanges.map(\.rangeValue) }
     func applySelections(_ ranges: [NSRange]) {
         let values = MultiEdit.normalized(ranges)
@@ -161,11 +165,30 @@ final class EditorTextView: NSTextView {
         copy(sender); performMultiEdit(editingSelections,replacement:"")
     }
     override func insertText(_ insertString: Any,replacementRange: NSRange) {
-        guard editingSelections.count > 1,!hasMarkedText() else { super.insertText(insertString,replacementRange:replacementRange); return }
         let value = (insertString as? NSAttributedString)?.string ?? (insertString as? String) ?? ""
+        if vimEnabled,document?.vim.mode == .replace,editingSelections.count == 1,!hasMarkedText() {
+            let ns = string as NSString,start = replacementRange.location == NSNotFound ? selectedRange() : replacementRange
+            var end = NSMaxRange(start)
+            if start.length == 0 {
+                for character in value {
+                    if character == "\n" { break }
+                    if end < ns.length,ns.substring(with:ns.rangeOfComposedCharacterSequence(at:end)) != "\n" { end = NSMaxRange(ns.rangeOfComposedCharacterSequence(at:end)) }
+                }
+            }
+            let range = NSRange(location:start.location,length:end-start.location)
+            replacedCharacters.append((start.location,ns.substring(with:range),value.utf16.count))
+            super.insertText(value,replacementRange:range); return
+        }
+        guard editingSelections.count > 1,!hasMarkedText() else { super.insertText(insertString,replacementRange:replacementRange); return }
         performMultiEdit(editingSelections,replacement:value)
     }
     override func deleteBackward(_ sender: Any?) {
+        if vimEnabled,document?.vim.mode == .replace,!hasMarkedText(),selectedRange().length == 0,
+           let last = replacedCharacters.last,selectedRange().location == last.0+last.2 {
+            replacedCharacters.removeLast()
+            super.insertText(last.1,replacementRange:NSRange(location:last.0,length:last.2))
+            setSelectedRange(NSRange(location:last.0,length:0)); return
+        }
         guard editingSelections.count > 1,!hasMarkedText() else { super.deleteBackward(sender); return }
         let ns = string as NSString
         performMultiEdit(editingSelections.map { r in r.length > 0 || r.location == 0 ? r : ns.rangeOfComposedCharacterSequence(at:r.location-1) },replacement:"")
@@ -191,7 +214,7 @@ final class EditorTextView: NSTextView {
             restoreMultiEdit(result.text,selections:result.selections.map(NSValue.init(range:)))
         } catch { NSSound.beep() }
     }
-    private func restoreMultiEdit(_ text: String,selections: [NSValue]) {
+    func restoreMultiEdit(_ text: String,selections: [NSValue]) {
         let before = string,previous = editingSelections.map(NSValue.init(range:))
         let manager = undoManager
         manager?.beginUndoGrouping(); manager?.disableUndoRegistration()
@@ -216,7 +239,7 @@ final class EditorTextView: NSTextView {
         if handleColumnKey(event) { return }
         if vimEnabled,handleVisualKey(event) { return }
         if event.keyCode == 53,editingSelections.count > 1 {
-            multiPending = ""
+            multiPending = ""; multiCount = ""; multiOperatorCount = 1
             if document?.vim.mode == .insert { document?.vim.escape(); statusChanged?(); needsDisplay = true; return }
             let first = editingSelections[0]; clearExtraSelections(); setSelectedRange(first); document?.vim.escape(); statusChanged?(); return
         }
@@ -224,7 +247,7 @@ final class EditorTextView: NSTextView {
         guard vimEnabled, let document, !hasMarkedText() else { super.keyDown(with:event); return }
         let vim = document.vim
         if event.keyCode == 53 {
-            vim.sync(text:string,cursor:selectedRange().location); vim.escape(); statusChanged?(); needsDisplay = true; return
+            vim.sync(text:string,cursor:selectedRange().location); vim.key("Escape"); setSelectedRange(NSRange(location:vim.cursor,length:0)); statusChanged?(); needsDisplay = true; return
         }
         if event.modifierFlags.contains(.command) || event.modifierFlags.contains(.option) { super.keyDown(with:event); return }
         guard vim.mode == .normal else { super.keyDown(with:event); return }
@@ -232,16 +255,23 @@ final class EditorTextView: NSTextView {
         if editingSelections.count > 1 {
             handleMultiVim(key:event.modifierFlags.contains(.control) && event.charactersIgnoringModifiers == "r" ? "Ctrl+r" : key); return
         }
-        if key == ":" { exCommand?(":"); return }
+        if [":","/","?"].contains(key) { exCommand?(key); return }
         vim.sync(text:string,cursor:selectedRange().location)
+        let clipboardRegister = ["+","*"].contains(vim.activeRegister),registerRevision = vim.registerRevision
+        if clipboardRegister,["p","P"].contains(key),let value = NSPasteboard.general.string(forType:.string) { vim.setRegister(vim.activeRegister,value:value) }
         vim.key(event.modifierFlags.contains(.control) && event.charactersIgnoringModifiers == "r" ? "Ctrl+r" : key)
+        if clipboardRegister,vim.registerRevision != registerRevision {
+            NSPasteboard.general.clearContents(); NSPasteboard.general.setString(vim.register,forType:.string)
+        }
+        if vim.mode == .replace,key == "R" { replacedCharacters.removeAll() }
+        let resultCursor = vim.cursor
         if vim.changed, shouldChangeText(in:NSRange(location:0,length:(string as NSString).length), replacementString:vim.text) {
             applyingVim = true
             textStorage?.replaceCharacters(in:NSRange(location:0,length:(string as NSString).length),with:vim.text)
             didChangeText()
             applyingVim = false
         }
-        setSelectedRange(NSRange(location:min(vim.cursor,(string as NSString).length),length:0))
+        setSelectedRange(NSRange(location:min(resultCursor,(string as NSString).length),length:0))
         scrollRangeToVisible(selectedRange()); statusChanged?(); needsDisplay = true
     }
     override func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) {
@@ -265,6 +295,8 @@ final class EditorPane: NSView, NSTextViewDelegate {
     var onChange: (() -> Void)?
     var onTextChanged: (() -> Void)?
     var onFocus: (() -> Void)?
+    var onScroll: ((DocumentScrollAnchor) -> Void)?
+    private var followingPreviewScroll = false
     private var highlighting = false
     private var highlightWork: DispatchWorkItem?
 
@@ -304,11 +336,42 @@ final class EditorPane: NSView, NSTextViewDelegate {
     }
     required init?(coder: NSCoder) { fatalError() }
     deinit { NotificationCenter.default.removeObserver(self) }
-    @objc private func scrolled() { gutter.needsDisplay = true }
+    @objc private func scrolled() { gutter.needsDisplay = true; if !followingPreviewScroll { onScroll?(scrollAnchor) } }
+    var scrollAnchor: DocumentScrollAnchor {
+        guard let manager = textView.layoutManager,let container = textView.textContainer,manager.numberOfGlyphs > 0 else { return DocumentScrollAnchor(line:1,progress:0) }
+        let y = scroll.contentView.bounds.minY,origin = textView.textContainerOrigin
+        let glyph = min(manager.numberOfGlyphs-1,manager.glyphIndex(for:NSPoint(x:0,y:max(0,y-origin.y)),in:container))
+        let offset = manager.characterIndexForGlyph(at:glyph),row = document.lines.line(at:offset)
+        let start = document.lines.starts[row],end = row+1 < document.lines.starts.count ? document.lines.starts[row+1] : document.buffer.text.utf16.count
+        let rect = manager.boundingRect(forGlyphRange:manager.glyphRange(forCharacterRange:NSRange(location:start,length:end-start),actualCharacterRange:nil),in:container)
+        let fraction = max(0,min(0.999,(y-origin.y-rect.minY)/max(1,rect.height)))
+        let maximum = max(0,textView.frame.height-scroll.contentView.bounds.height)
+        return DocumentScrollAnchor(line:Double(row+1)+Double(fraction),progress:maximum > 0 ? Double(max(0,min(1,y/maximum))) : 0)
+    }
+    func scrollFromPreview(_ anchor: DocumentScrollAnchor) {
+        guard let manager = textView.layoutManager,let container = textView.textContainer else { return }
+        let row = min(document.lines.starts.count-1,max(0,Int(anchor.line)-1))
+        let start = document.lines.starts[row],end = row+1 < document.lines.starts.count ? document.lines.starts[row+1] : document.buffer.text.utf16.count
+        let range = NSRange(location:start,length:end-start)
+        manager.ensureLayout(forCharacterRange:range)
+        let rect = manager.boundingRect(forGlyphRange:manager.glyphRange(forCharacterRange:range,actualCharacterRange:nil),in:container)
+        let maximum = max(0,textView.frame.height-scroll.contentView.bounds.height)
+        let target = anchor.progress <= 0.001 ? 0 : anchor.progress >= 0.999 ? maximum : textView.textContainerOrigin.y+rect.minY+CGFloat(anchor.line-floor(anchor.line))*rect.height
+        followingPreviewScroll = true
+        scroll.contentView.scroll(to:NSPoint(x:scroll.contentView.bounds.minX,y:max(0,min(maximum,target))))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        DispatchQueue.main.async { [weak self] in self?.followingPreviewScroll = false }
+    }
+    func textView(_ textView: NSTextView,shouldChangeTextIn affectedCharRange: NSRange,replacementString: String?) -> Bool {
+        if self.textView.vimEnabled,!self.textView.applyingVim,(document.vim.mode == .insert || document.vim.mode == .replace),let replacementString {
+            document.vim.recordNativeEdit(range:affectedCharRange,replacement:replacementString,cursor:textView.selectedRange().location)
+        }
+        return true
+    }
     func textDidChange(_ notification: Notification) {
         guard !highlighting else { return }
         let before = document.buffer.text
-        if !textView.applyingVim { document.vim.recordInsertion(before:before,cursor:textView.selectedRange().location) }
+        if !textView.applyingVim { document.vim.recordInsertion(before:before,cursor:textView.selectedRange().location); document.vim.sync(text:document.storage.string,cursor:textView.selectedRange().location) }
         document.buffer.update(document.storage.string)
         onTextChanged?()
         gutter.needsDisplay = true; onChange?()

@@ -6,7 +6,7 @@ final class GitGraphView: NSView {
     init(_ row: GitGraphRow) {
         self.row = row; super.init(frame:.zero); translatesAutoresizingMaskIntoConstraints = false
         widthAnchor.constraint(equalToConstant:CGFloat(max(2,row.width))*14+12).isActive = true
-        heightAnchor.constraint(equalToConstant:54).isActive = true
+        heightAnchor.constraint(equalToConstant:58).isActive = true
     }
     required init?(coder: NSCoder) { fatalError() }
     override var isFlipped: Bool { true }

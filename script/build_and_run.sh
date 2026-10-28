@@ -36,7 +36,10 @@ for localization in Resources/*.lproj; do
 done
 if [[ "$CONFIG" == "debug" ]]; then
   for info_strings in "$APP"/Contents/Resources/*.lproj/InfoPlist.strings; do
-    [[ -f "$info_strings" ]] && plutil -replace CFBundleDisplayName -string 'Linvell Dev' "$info_strings"
+    if [[ -f "$info_strings" ]]; then
+      plutil -convert xml1 "$info_strings"
+      plutil -replace CFBundleDisplayName -string 'Linvell Dev' "$info_strings"
+    fi
   done
 fi
 for resource in "$BIN_DIR"/*.bundle; do

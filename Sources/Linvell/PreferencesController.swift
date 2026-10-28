@@ -55,6 +55,12 @@ final class PreferencesController: NSWindowController {
         var rows: [NSView] = [Theme.label(title,size:30,weight:.semibold),Theme.label(subtitle,size:14,color:Theme.secondary)]
         switch category {
         case 0:
+            rows.append(section("STARTUP"))
+            let startup = Theme.choiceButton()
+            startup.addItems(withTitles:[L.text("Empty window"),L.text("Restore last workspace")])
+            startup.selectItem(at:WorkspaceSession.shouldRestore ? 1 : 0); startup.target = self; startup.action = #selector(startupChanged(_:))
+            rows.append(settingRow("On startup",startup))
+            rows.append(text("Restore the last local project or SSH folder. Files and folders opened from Finder always take priority."))
             rows.append(section("INTERFACE LANGUAGE"))
             let language = Theme.choiceButton()
             language.addItems(withTitles:[L.text("Follow macOS"),"English","简体中文"])
@@ -99,7 +105,7 @@ final class PreferencesController: NSWindowController {
             rows.append(section("MODAL EDITING")); rows.append(check("Enable Vim mode",key:"vimEnabled"))
             rows.append(text("Normal, Insert, Visual, Visual Line and Visual Block modes support common motions, multiple selections, changes, copy/paste and undo. Use v, V or Control-V for visual selection."))
             rows.append(section("COMPATIBILITY"))
-            rows.append(text("Full Vim compatibility remains in development. Replace mode, macros, mappings, Vim regular expressions, Vimscript and Vim9 are not implemented yet."))
+            rows.append(text("The Swift Vim engine supports composed operators, text objects, registers, repeat and normal/insert macro recording. Full compatibility, mappings, Vim regular expressions, Vimscript and Vim9 remain in development."))
             rows.append(text("Press Escape to return to Normal mode. Terminal input is always sent to the shell."))
         case 3:
             rows.append(section("ICLOUD DRIVE"))
@@ -161,6 +167,9 @@ final class PreferencesController: NSWindowController {
     @objc private func languageChanged(_ sender: NSPopUpButton) {
         UserDefaults.standard.set(["system","en","zh-Hans"][sender.indexOfSelectedItem],forKey:L.languageKey)
         L.configureLaunchLanguage(); NotificationCenter.default.post(name:L.changed,object:nil)
+    }
+    @objc private func startupChanged(_ sender: NSPopUpButton) {
+        UserDefaults.standard.set(sender.indexOfSelectedItem == 0 ? "empty" : "restore",forKey:WorkspaceSession.startupKey)
     }
     @objc private func updatePreferenceChanged(_ sender: NSButton) {
         let value = sender.state == .on

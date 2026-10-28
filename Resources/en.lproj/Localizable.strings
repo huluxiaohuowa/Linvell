@@ -295,3 +295,45 @@
 "New remote file" = "New remote file";
 "File name" = "File name";
 "Creating remote file…" = "Creating remote file…";
+
+"STARTUP" = "STARTUP";
+"Empty window" = "Empty window";
+"Restore last workspace" = "Restore last workspace";
+"On startup" = "On startup";
+"Restore the last local project or SSH folder. Files and folders opened from Finder always take priority." = "Restore the last local project or SSH folder. Files and folders opened from Finder always take priority.";
+
+"The Swift Vim engine supports composed operators, text objects, registers, repeat and normal/insert macro recording. Full compatibility, mappings, Vim regular expressions, Vimscript and Vim9 remain in development." = "The Swift Vim engine supports composed operators, text objects, registers, repeat and normal/insert macro recording. Full compatibility, mappings, Vim regular expressions, Vimscript and Vim9 remain in development.";
+
+"REPLACE" = "REPLACE";
+
+"BRANCHES" = "BRANCHES";
+"Commit Graph" = "Commit Graph";
+"Loading remote folder…" = "Loading remote folder…";
+"Open Remote Folder" = "Open Remote Folder";
+"Open Remote Folder…" = "Open Remote Folder…";
+"Open Local Folder…" = "Open Local Folder…";
+"Open This Folder" = "Open This Folder";
+"Remote project files" = "Remote project files";
+"Copy Line Down" = "Copy Line Down";
+"Copy Line Up" = "Copy Line Up";
+"Delete Line" = "Delete Line";
+"Indent Line" = "Indent Line";
+"Outdent Line" = "Outdent Line";
+"Insert Line Above" = "Insert Line Above";
+"Insert Line Below" = "Insert Line Below";
+"Move Line Up" = "Move Line Up";
+"Move Line Down" = "Move Line Down";
+"Toggle Line Comment" = "Toggle Line Comment";
+"Untracked" = "Untracked";
+"Modified" = "Modified";
+"Renamed" = "Renamed";
+"Deleted" = "Deleted";
+"Added" = "Added";
+"Conflict" = "Conflict";
+"Stage Hunk" = "Stage Hunk";
+"Unstage Hunk" = "Unstage Hunk";
+"Hunk %d" = "Hunk %d";
+"Working Changes" = "Working Changes";
+"Search with / or ?, substitute with :s or :%s, or use :w, :q, :wq and :set number." = "Search with / or ?, substitute with :s or :%s, or use :w, :q, :wq and :set number.";
+
+"Git Commit Graph" = "Git Commit Graph";

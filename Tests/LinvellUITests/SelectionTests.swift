@@ -32,7 +32,7 @@ final class SelectionTests: XCTestCase {
         text.setSelections([NSRange(location:0,length:0),NSRange(location:8,length:0)])
         text.handleMultiVim(key:"c"); text.handleMultiVim(key:"w")
         XCTAssertEqual(text.document?.vim.mode,.insert)
-        text.insertText("X ",replacementRange:NSRange(location:NSNotFound,length:0))
+        text.insertText("X",replacementRange:NSRange(location:NSNotFound,length:0))
         XCTAssertEqual(text.string,"X two\nX two")
         text.setSelections([NSRange(location:0,length:1),NSRange(location:6,length:1)])
         text.performMultiEdit(text.editingSelections,replacements:["first","second"])

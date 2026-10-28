@@ -6,12 +6,14 @@ final class LaunchOpeningTests: XCTestCase {
     func testFinderFolderBeforeLaunchReusesItsWorkspace() throws {
         _ = NSApplication.shared
         let originalProject = UserDefaults.standard.object(forKey:"lastProject")
+        let originalSession = UserDefaults.standard.object(forKey:WorkspaceSession.key)
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
         let delegate = AppDelegate()
         defer {
             delegate.workspaces.forEach { $0.window?.close() }
             UserDefaults.standard.set(originalProject,forKey:"lastProject")
+            UserDefaults.standard.set(originalSession,forKey:WorkspaceSession.key)
             try? FileManager.default.removeItem(at:folder)
         }
         delegate.application(NSApp,openFiles:[folder.path])
