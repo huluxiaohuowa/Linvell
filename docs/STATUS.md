@@ -7,14 +7,17 @@
 - Native AppKit workspace with activity rail, explorer, file tabs, shared-storage split editors and resizable native panes.
 - Explicit file-tree indentation, disclosure controls and hierarchy guides.
 - Four built-in light/dark themes, 15 pt default text, font family/size controls and categorized settings.
+- Shared language icons in the explorer, file tabs and quick file picker; 21 bundled Devicon assets with native fallback icons for other file types.
 - UTF-8 / BOM / UTF-16 text loading, CR/LF/CRLF preservation, atomic file writes, permission preservation, symlink resolution and external-change detection.
 - Periodic local recovery snapshots for modified buffers. Recovered content opens as an untitled copy, preserving existing disk files.
-- In-document find/replace, an initial next-occurrence selection command, fuzzy file picker and searchable command picker.
+- In-document find/replace, VS Code-style file/command shortcuts and Sublime-style next/all occurrence selection, additional carets, split selection into lines and uniform multi-cursor edits with undo/redo.
 - Literal project search (UTF-8 files under 2 MB; up to 20,000 indexed files / 500 matches), text-based document symbols and read-only Git status.
 - SwiftTerm PTY terminal with the project directory passed as a process parameter.
 - Native initial Vim command engine: Normal/Insert, basic character/line/word motions, counts, dd/dw/d$/yy, put, deletion, undo/redo, insert entry and a small Ex command set.
 - Optional iCloud Drive preference file with an explicit allowlist and per-setting merge. No document or credential sync.
 - Local packaging, Developer ID signing, notarization and GitHub prerelease scripts.
+- GitHub update checks, independent automatic download/install switches, checksum and signing-identity verification, and an installer helper that waits for normal quit and retains the previous app. Signed end-to-end update acceptance is still pending.
+- Background file decoding, an incremental line index and noncontiguous native text layout. Large-file performance remains under measurement and is not claimed to match Sublime.
 
 ## Still open
 

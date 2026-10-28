@@ -44,13 +44,22 @@ public final class DocumentBuffer {
         if data.starts(with: [0xEF, 0xBB, 0xBF]) { hasBOM = true; content = data.dropFirst(3) }
         else if data.starts(with: [0xFF, 0xFE]) { hasBOM = true; encoding = .utf16LittleEndian; content = data.dropFirst(2) }
         else if data.starts(with: [0xFE, 0xFF]) { hasBOM = true; encoding = .utf16BigEndian; content = data.dropFirst(2) }
-        guard let decoded = String(data: content, encoding: encoding), !decoded.contains("\0") else { throw DocumentError.unsupportedEncoding }
-        let crlf = decoded.components(separatedBy: "\r\n").count - 1
-        let rest = decoded.replacingOccurrences(of: "\r\n", with: "")
-        let lf = rest.contains("\n"), cr = rest.contains("\r")
-        hasMixedLineEndings = [crlf > 0, lf, cr].filter { $0 }.count > 1
-        lineEnding = crlf > 0 ? "\r\n" : cr ? "\r" : "\n"
-        text = decoded.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+        guard let decoded = String(data: content, encoding: encoding) else { throw DocumentError.unsupportedEncoding }
+        // Scan once without allocating an array containing every line of a large file.
+        var crlf = false,lf = false,cr = false,pendingCR = false
+        for byte in decoded.utf8 {
+            if byte == 0 { throw DocumentError.unsupportedEncoding }
+            if pendingCR {
+                if byte == 10 { crlf = true; pendingCR = false; continue }
+                cr = true
+            }
+            pendingCR = byte == 13
+            if byte == 10 { lf = true }
+        }
+        cr = cr || pendingCR
+        hasMixedLineEndings = [crlf,lf,cr].filter { $0 }.count > 1
+        lineEnding = crlf ? "\r\n" : cr ? "\r" : "\n"
+        text = crlf || cr ? decoded.replacingOccurrences(of:"\r\n",with:"\n").replacingOccurrences(of:"\r",with:"\n") : decoded
         savedText = text; self.url = resolved; diskDigest = Self.digest(data)
     }
 

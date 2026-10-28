@@ -11,6 +11,13 @@
 - Swift Argument Parser is resolved for upstream's unused `termcast` executable; it is not linked into Linvell.
 - `Package.resolved` pins transitive resolution. Reference Vim is never embedded.
 
+## Devicon file icons
+
+- Upstream: https://github.com/devicons/devicon
+- Commit: `32fe1d3b3f36ad11f90ab94f7db59738139c2bf6`
+- License: MIT; complete license and provenance are bundled in `Resources/FileIcons/`.
+- Original SVG assets and generated 64-pixel PNGs provide native file-type icons. These are static resources, with no additional runtime dependency. Trademark rights remain with their respective owners.
+
 ## Product references
 
 Nova 14.1 was downloaded from Panic as the original plan's reference, then exited and moved to Trash after the visual-direction correction. Nova is not the visual acceptance baseline.

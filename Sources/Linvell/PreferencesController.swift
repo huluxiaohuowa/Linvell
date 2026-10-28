@@ -18,7 +18,7 @@ final class PreferencesController: NSWindowController {
         navigation.heightAnchor.constraint(equalTo:stack.heightAnchor).isActive = true; detail.heightAnchor.constraint(equalTo:stack.heightAnchor).isActive = true
         let heading = Theme.label("SETTINGS",size:11,color:Theme.secondary,weight:.semibold)
         var rows: [NSView] = [heading]
-        for (index,entry) in [("paintpalette","Appearance"),("textformat","Editor"),("keyboard","Vim"),("icloud","Sync")].enumerated() {
+        for (index,entry) in [("paintpalette","Appearance"),("textformat","Editor"),("keyboard","Vim"),("icloud","Sync"),("arrow.triangle.2.circlepath","Updates")].enumerated() {
             let b = NSButton(title:entry.1,image:NSImage(systemSymbolName:entry.0,accessibilityDescription:nil)!,target:self,action:#selector(selectCategory(_:)))
             b.tag = index; b.isBordered = false; b.imagePosition = .imageLeading; b.alignment = .left; b.font = .systemFont(ofSize:14)
             b.heightAnchor.constraint(equalToConstant:40).isActive = true; buttons.append(b); rows.append(b)
@@ -27,11 +27,16 @@ final class PreferencesController: NSWindowController {
         Theme.pin(Theme.stack(rows,orientation:.vertical,spacing:12),in:navigation,inset:20)
         render()
         NotificationCenter.default.addObserver(self,selector:#selector(preferencesUpdated),name:PreferencesSync.didApply,object:nil)
-        statusTimer = Timer.scheduledTimer(withTimeInterval:2,repeats:true) { [weak self] _ in self?.statusLabel?.stringValue = PreferencesSync.shared.status }
+        NotificationCenter.default.addObserver(self,selector:#selector(updateStatusChanged),name:UpdateManager.changed,object:nil)
+        statusTimer = Timer.scheduledTimer(withTimeInterval:2,repeats:true) { [weak self] _ in
+            guard let self else { return }; self.statusLabel?.stringValue = self.category == 3 ? PreferencesSync.shared.status : UpdateManager.shared.status
+        }
     }
     required init?(coder: NSCoder) { fatalError() }
     deinit { NotificationCenter.default.removeObserver(self); statusTimer?.invalidate() }
     @objc private func selectCategory(_ sender: NSButton) { category = sender.tag; render() }
+    func showUpdates() { category = 4; render(); showWindow(nil); window?.makeKeyAndOrderFront(nil) }
+    @objc private func updateStatusChanged() { if category == 4 { render() } }
     @objc private func preferencesUpdated() {
         window?.appearance = NSAppearance(named:Theme.profile.isDark ? .darkAqua : .aqua); window?.backgroundColor = Theme.canvas
         navigation.refreshTheme(); detail.refreshTheme(); render()
@@ -39,8 +44,8 @@ final class PreferencesController: NSWindowController {
     private func render() {
         detail.subviews.forEach { $0.removeFromSuperview() }; statusLabel = nil
         buttons.forEach { $0.contentTintColor = $0.tag == category ? Theme.accent : Theme.secondary }
-        let title = ["Appearance","Editor","Vim","iCloud Sync"][category]
-        let subtitle = ["A workspace that feels like your own.","Comfortable text, deliberate defaults.","A native engine, built one behavior at a time.","Your preferences, across your Macs."][category]
+        let title = ["Appearance","Editor","Vim","iCloud Sync","Updates"][category]
+        let subtitle = ["A workspace that feels like your own.","Comfortable text, deliberate defaults.","A native engine, built one behavior at a time.","Your preferences, across your Macs.","Stay current, on your terms."][category]
         var rows: [NSView] = [Theme.label(title,size:30,weight:.semibold),Theme.label(subtitle,size:14,color:Theme.secondary)]
         switch category {
         case 0:
@@ -76,7 +81,7 @@ final class PreferencesController: NSWindowController {
             rows.append(section("COMPATIBILITY"))
             rows.append(text("Full Vim compatibility remains in development. Visual/Replace modes, macros, mappings, Vim regular expressions, Vimscript and Vim9 are not implemented yet."))
             rows.append(text("Press Escape to return to Normal mode. Terminal input is always sent to the shell."))
-        default:
+        case 3:
             rows.append(section("ICLOUD DRIVE"))
             let enabled = NSButton(checkboxWithTitle:"Sync preferences with iCloud Drive",target:self,action:#selector(syncChanged(_:))); enabled.state = PreferencesSync.shared.enabled ? .on : .off; rows.append(enabled)
             let state = text(PreferencesSync.shared.status); statusLabel = state; rows.append(state)
@@ -85,9 +90,27 @@ final class PreferencesController: NSWindowController {
             rows.append(text("Color theme, font family and size, line numbers, wrapping, indentation and Vim mode. Changes to different settings are merged independently."))
             rows.append(section("STAYS ON THIS MAC"))
             rows.append(text("Documents, recovery snapshots, project paths, terminal environment and credentials. iCloud Drive must be enabled in macOS System Settings."))
+        default:
+            let updates = UpdateManager.shared
+            rows.append(section("GITHUB RELEASES")); rows.append(Theme.label("Installed: \(UpdateManager.currentVersion)",size:14))
+            for (tag,title,value) in [(0,"Automatically check for updates",updates.automaticChecks),(1,"Automatically download verified updates",updates.automaticDownloads),(2,"Install downloaded updates when Linvell quits",updates.automaticInstall),(3,"Include preview releases",updates.includePreviews)] {
+                let b = NSButton(checkboxWithTitle:title,target:self,action:#selector(updatePreferenceChanged(_:))); b.tag = tag; b.state = value ? .on : .off; b.font = .systemFont(ofSize:14); rows.append(b)
+            }
+            rows.append(section("STATUS")); let state = text(updates.status); statusLabel = state; rows.append(state)
+            let check = NSButton(title:"Check Now",target:self,action:#selector(checkUpdate)); check.bezelStyle = .rounded; check.isEnabled = !updates.busy
+            let download = NSButton(title:"Download Update",target:self,action:#selector(downloadUpdate)); download.bezelStyle = .rounded; download.isEnabled = !updates.busy && updates.offer != nil
+            let install = NSButton(title:"Install and Restart",target:self,action:#selector(installUpdate)); install.bezelStyle = .rounded; install.isEnabled = !updates.busy && updates.prepared != nil
+            rows.append(Theme.stack([check,download,install,NSView()]))
+            rows.append(text("Checks run every six hours. Downloads require a matching checksum and Linvell signing identity. Installation waits for normal quit, including unsaved-document prompts, and retains the previous app for recovery."))
+            rows.append(text("Update preferences apply to this Mac and are not synchronized through iCloud. Automatic download and installation are off by default."))
         }
         rows.append(NSView())
-        let stack = Theme.stack(rows,orientation:.vertical,spacing:18); Theme.pin(stack,in:detail,inset:32)
+        let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = false; scroll.borderType = .noBorder
+        let document = SettingsDocument(); document.translatesAutoresizingMaskIntoConstraints = false; scroll.documentView = document
+        Theme.pin(scroll,in:detail)
+        let stack = Theme.stack(rows,orientation:.vertical,spacing:18); Theme.pin(stack,in:document,inset:32)
+        document.widthAnchor.constraint(equalTo:scroll.contentView.widthAnchor).isActive = true
+        document.heightAnchor.constraint(greaterThanOrEqualTo:scroll.contentView.heightAnchor).isActive = true
     }
     private func section(_ title: String) -> NSTextField { Theme.label(title,size:11,color:Theme.secondary,weight:.semibold) }
     private func text(_ value: String) -> NSTextField { let l = NSTextField(wrappingLabelWithString:value); l.font = .systemFont(ofSize:13); l.textColor = Theme.secondary; return l }
@@ -106,7 +129,16 @@ final class PreferencesController: NSWindowController {
     }
     @objc private func syncChanged(_ sender: NSButton) { PreferencesSync.shared.enabled = sender.state == .on; statusLabel?.stringValue = PreferencesSync.shared.status }
     @objc private func syncNow() { PreferencesSync.shared.sync(); statusLabel?.stringValue = PreferencesSync.shared.status }
+    @objc private func updatePreferenceChanged(_ sender: NSButton) {
+        let value = sender.state == .on
+        switch sender.tag { case 0: UpdateManager.shared.automaticChecks = value; case 1: UpdateManager.shared.automaticDownloads = value; case 2: UpdateManager.shared.automaticInstall = value; default: UpdateManager.shared.includePreviews = value }
+    }
+    @objc private func checkUpdate() { UpdateManager.shared.check() }
+    @objc private func downloadUpdate() { UpdateManager.shared.download() }
+    @objc private func installUpdate() { UpdateManager.shared.requestInstall() }
 }
+
+private final class SettingsDocument: NSView { override var isFlipped: Bool { true } }
 
 final class ThemePreview: NSButton {
     let profile: Theme.Profile

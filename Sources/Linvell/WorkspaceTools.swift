@@ -2,7 +2,7 @@ import AppKit
 
 enum ProjectFiles {
     static func list(_ root: URL) -> [URL] {
-        let excluded: Set<String> = ["node_modules","dist","build","DerivedData","vendor"]
+        let excluded: Set<String> = ["node_modules","dist","build","DerivedData","vendor","__pycache__"]
         guard let iterator = FileManager.default.enumerator(at:root,includingPropertiesForKeys:[.isRegularFileKey,.isDirectoryKey,.isSymbolicLinkKey],options:[.skipsHiddenFiles]) else { return [] }
         var urls: [URL] = []
         for case let url as URL in iterator {
@@ -26,7 +26,9 @@ enum ProjectFiles {
 struct PickerOption {
     let title: String
     let detail: String
+    let fileURL: URL?
     let invoke: () -> Void
+    init(title: String,detail: String,fileURL: URL? = nil,invoke: @escaping () -> Void) { self.title = title; self.detail = detail; self.fileURL = fileURL; self.invoke = invoke }
 }
 
 final class QuickPicker: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
@@ -59,6 +61,7 @@ final class QuickPicker: NSWindowController, NSTableViewDataSource, NSTableViewD
         let result = results[row]
         let title = Theme.label(result.title,size:14), detail = Theme.label(result.detail,size:11,color:Theme.secondary)
         let stack = NSStackView(views:[title,detail]); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 3
+        if let url = result.fileURL { return Theme.stack([FileIcon.view(for:url),stack],spacing:10) }
         return stack
     }
     func controlTextDidChange(_ notification: Notification) {
@@ -114,7 +117,7 @@ final class ToolSidebar: NSView, NSTableViewDataSource, NSTableViewDelegate, NSS
         let item = results[row], a = Theme.label(item.title,size:13), b = Theme.label(item.detail,size:11,color:Theme.secondary)
         a.lineBreakMode = .byTruncatingTail; b.lineBreakMode = .byTruncatingMiddle
         let s = NSStackView(views:[a,b]); s.orientation = .vertical; s.alignment = .leading; s.spacing = 3
-        return s
+        return Theme.stack([FileIcon.view(for:item.url),s],spacing:9)
     }
     @objc func selected() { guard table.selectedRow >= 0 else { return }; let r = results[table.selectedRow]; onSelect?(r.url,r.line) }
     func controlTextDidChange(_ notification: Notification) { refresh() }

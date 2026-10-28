@@ -2,6 +2,8 @@ import AppKit
 
 /// Native frame-based panes. Inner content uses Auto Layout; pane widths have one owner.
 final class ResizablePanes: NSView {
+    override init(frame: NSRect) { super.init(frame:frame); wantsLayer = true; clipsToBounds = true; layer?.masksToBounds = true }
+    required init?(coder: NSCoder) { fatalError() }
     var isVertical = true
     var firstMinimum: CGFloat = 120
     var secondMinimum: CGFloat = 120
@@ -48,12 +50,14 @@ final class PaneHandle: NSView {
     weak var owner: ResizablePanes?
     init(owner: ResizablePanes) {
         self.owner = owner; super.init(frame:.zero)
+        wantsLayer = true; clipsToBounds = true; layer?.masksToBounds = true
         setAccessibilityElement(true); setAccessibilityRole(.splitter); setAccessibilityLabel("Resize panes"); setAccessibilityEnabled(true)
     }
     required init?(coder: NSCoder) { fatalError() }
     override var acceptsFirstResponder: Bool { true }
-    override func resetCursorRects() { (owner?.isVertical == true ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).set(); addCursorRect(bounds,cursor:owner?.isVertical == true ? .resizeLeftRight : .resizeUpDown) }
+    override func resetCursorRects() { addCursorRect(bounds,cursor:owner?.isVertical == true ? .resizeLeftRight : .resizeUpDown) }
     override func draw(_ dirtyRect: NSRect) {
+        NSGraphicsContext.saveGraphicsState(); bounds.clip(); defer { NSGraphicsContext.restoreGraphicsState() }
         Theme.secondary.withAlphaComponent(0.2).setFill()
         (owner?.isVertical == true ? NSRect(x:4,y:0,width:1,height:bounds.height) : NSRect(x:0,y:4,width:bounds.width,height:1)).fill()
     }

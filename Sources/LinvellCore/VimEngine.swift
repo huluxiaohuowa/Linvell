@@ -14,6 +14,7 @@ public final class VimEngine {
     private var future: [(String, Int)] = []
 
     public init() {}
+    public func cancelPendingCommand() { pending = ""; count = "" }
     public func escape() { mode = .normal; pending = ""; count = ""; clamp() }
     public func sync(text: String, cursor: Int) { self.text = text; self.cursor = min(max(0, cursor), text.utf16.count) }
     public func key(_ key: String) {

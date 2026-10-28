@@ -2,12 +2,51 @@ import AppKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var workspaces: [WorkspaceController] = []
+    var keyMonitor: Any?
+    var chordDeadline: Date?
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        if let icon = Bundle.main.url(forResource:"AppIcon",withExtension:"icns").flatMap({ NSImage(contentsOf:$0) }) {
+            NSApp.applicationIconImage = icon
+        }
         buildMenus()
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching:.keyDown) { [weak self] event in
+            guard let self,let workspace = NSApp.keyWindow?.windowController as? WorkspaceController else { return event }
+            let command = event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command
+            if let until = self.chordDeadline,Date() < until {
+                self.chordDeadline = nil
+                if command && event.charactersIgnoringModifiers == "d" { workspace.skipOccurrence(); return nil }
+                if command && event.charactersIgnoringModifiers == "o" { workspace.openFolder(); return nil }
+                if event.keyCode == 53 { return nil }
+            }
+            if command && event.charactersIgnoringModifiers == "k",(NSApp.keyWindow?.firstResponder as? NSTextView)?.hasMarkedText() != true {
+                self.chordDeadline = Date().addingTimeInterval(2); return nil
+            }
+            return event
+        }
         NotificationCenter.default.addObserver(self,selector:#selector(preferencesApplied),name:PreferencesSync.didApply,object:nil)
         let controller = newWorkspace()
         let args = CommandLine.arguments.dropFirst()
+        if let at = args.firstIndex(of:"--benchmark-open"),args.index(after:at) < args.endIndex,
+           let out = args.firstIndex(of:"--benchmark-report"),args.index(after:out) < args.endIndex {
+            let file = URL(fileURLWithPath:args[args.index(after:at)]),report = URL(fileURLWithPath:args[args.index(after:out)])
+            let started = ProcessInfo.processInfo.systemUptime
+            controller.open(file) {
+                let opened = ProcessInfo.processInfo.systemUptime
+                controller.window?.contentView?.layoutSubtreeIfNeeded(); controller.window?.displayIfNeeded()
+                guard let pane = controller.activePane,let manager = pane.textView.layoutManager,let container = pane.textView.textContainer else { return }
+                manager.ensureLayout(forBoundingRect:pane.textView.visibleRect,in:container)
+                let painted = ProcessInfo.processInfo.systemUptime
+                let ns = pane.textView.string as NSString
+                pane.textView.scrollRangeToVisible(NSRange(location:ns.length/2,length:0))
+                controller.window?.displayIfNeeded()
+                let scrolled = ProcessInfo.processInfo.systemUptime
+                let values: [String:Any] = ["bytes":(try? file.resourceValues(forKeys:[.fileSizeKey]).fileSize) ?? 0,"lines":controller.current?.lines.starts.count ?? 0,"openSeconds":opened-started,"firstLayoutSeconds":painted-started,"midpointScrollSeconds":scrolled-painted,"maximumRefreshRate":controller.window?.screen?.maximumFramesPerSecond ?? 0,"method":"Local native AppKit timing; no Sublime comparison or frame-latency acceptance"]
+                try? JSONSerialization.data(withJSONObject:values,options:[.sortedKeys,.prettyPrinted]).write(to:report,options:.atomic)
+                NSApp.terminate(nil)
+            }
+            return
+        }
         if let index = args.firstIndex(of:"--demo"), args.index(after:index) < args.endIndex {
             controller.window?.setContentSize(NSSize(width:1320,height:860)); controller.window?.center()
             let file = URL(fileURLWithPath:args[args.index(after:index)])
@@ -16,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else { controller.restore() }
         NSApp.activate(ignoringOtherApps:true)
         PreferencesSync.shared.start()
+        UpdateManager.shared.start()
     }
     @objc private func preferencesApplied() {
         for workspace in workspaces {
@@ -41,6 +81,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for workspace in workspaces where workspace.window?.isVisible == true {
             if !workspace.documents.allSatisfy(workspace.mayClose) || !workspace.mayCloseTerminal() { return .terminateCancel }
         }
+        if UpdateManager.shared.shouldInstallOnQuit {
+            do { try UpdateManager.shared.scheduleInstallation() }
+            catch { NSAlert(error:error).runModal(); return .terminateCancel }
+        }
         for workspace in workspaces {
             workspace.terminateTerminal()
             for doc in workspace.documents { try? workspace.recovery.remove(doc.buffer.id) }
@@ -56,6 +100,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.perform(NSSelectorFromString(action))
     }
     @objc func website() { NSWorkspace.shared.open(URL(string:"https://linvell.fuluwa.top")!) }
+    @objc func checkUpdates() {
+        let workspace = workspaces.last ?? newWorkspace()
+        workspace.showSettings(); workspace.preferences?.showUpdates(); UpdateManager.shared.check()
+    }
     @objc func selectTheme(_ item: NSMenuItem) {
         guard let profile = Theme.Profile(rawValue:item.title) else { return }
         Theme.profile = profile
@@ -75,6 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let app = menu("Linvell")
         let about = NSMenuItem(title:"About Linvell",action:#selector(self.about),keyEquivalent:""); about.target = self; app.addItem(about)
+        let updates = NSMenuItem(title:"Check for Updates…",action:#selector(checkUpdates),keyEquivalent:""); updates.target = self; app.addItem(updates)
         app.addItem(.separator()); item(app,"Hide Linvell",#selector(NSApplication.hide(_:)),"h")
         item(app,"Settings…",#selector(WorkspaceController.showSettings),",",route:true)
         app.addItem(.separator()); item(app,"Quit Linvell",#selector(NSApplication.terminate(_:)),"q")
@@ -82,7 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item(file,"New File",#selector(WorkspaceController.newFile),"n",route:true)
         let nw = NSMenuItem(title:"New Window",action:#selector(newWindow(_:)),keyEquivalent:"n"); nw.target = self; nw.keyEquivalentModifierMask = [.command,.shift]; file.addItem(nw)
         item(file,"Open…",#selector(WorkspaceController.openFile),"o",route:true)
-        item(file,"Open Folder…",#selector(WorkspaceController.openFolder),"o",[.command,.shift],route:true)
+        item(file,"Open Folder…",#selector(WorkspaceController.openFolder),route:true)
         file.addItem(.separator())
         item(file,"Close File",#selector(WorkspaceController.closeCurrent),"w",route:true)
         item(file,"Save",#selector(WorkspaceController.save),"s",route:true)
@@ -92,10 +141,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item(edit,"Cut",#selector(NSText.cut(_:)),"x"); item(edit,"Copy",#selector(NSText.copy(_:)),"c"); item(edit,"Paste",#selector(NSText.paste(_:)),"v"); item(edit,"Select All",#selector(NSText.selectAll(_:)),"a")
         let find = menu("Find")
         item(find,"Find in File…",#selector(WorkspaceController.find),"f",route:true)
+        item(find,"Replace in File…",#selector(WorkspaceController.replaceInFile),"f",[.command,.option],route:true)
+        item(find,"Search Project…",#selector(WorkspaceController.projectSearch),"f",[.command,.shift],route:true)
         item(find,"Select Next Occurrence",#selector(WorkspaceController.selectNextOccurrence),"d",route:true)
+        item(find,"Select All Occurrences",#selector(WorkspaceController.selectAllOccurrences),"l",[.command,.shift],route:true)
+        item(find,"Undo Selection",#selector(WorkspaceController.undoSelections),"u",route:true)
+        item(find,"Split Selection into Lines",#selector(WorkspaceController.splitSelectionIntoLines),"i",[.option,.shift],route:true)
+        item(find,"Add Cursor Above",#selector(WorkspaceController.addCursorAbove),String(UnicodeScalar(NSUpArrowFunctionKey)!),[.command,.option],route:true)
+        item(find,"Add Cursor Below",#selector(WorkspaceController.addCursorBelow),String(UnicodeScalar(NSDownArrowFunctionKey)!),[.command,.option],route:true)
+        item(find,"Select Line",#selector(WorkspaceController.selectCurrentLine),"l",route:true)
         let view = menu("View")
         item(view,"Command Palette",#selector(WorkspaceController.commandPalette),"p",[.command,.shift],route:true)
         item(view,"Open Quickly…",#selector(WorkspaceController.quickOpen),"p",route:true)
+        item(view,"Go to Symbol…",#selector(WorkspaceController.documentSymbols),"o",[.command,.shift],route:true)
         view.addItem(.separator())
         item(view,"Toggle Sidebar",#selector(WorkspaceController.toggleSidebar),"b",route:true)
         item(view,"Split Editor",#selector(WorkspaceController.toggleSplit),"\\",route:true)

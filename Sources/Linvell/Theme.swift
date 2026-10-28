@@ -49,7 +49,7 @@ enum Theme {
         return b
     }
     static func stack(_ views: [NSView], orientation: NSUserInterfaceLayoutOrientation = .horizontal, spacing: CGFloat = 10) -> NSStackView {
-        let s = NSStackView(views: views); s.orientation = orientation; s.spacing = spacing; s.distribution = .fill
+        let s = NSStackView(views: views); s.orientation = orientation; s.spacing = spacing; s.distribution = .fill; s.clipsToBounds = true
         s.alignment = orientation == .vertical ? .leading : .centerY
         if orientation == .vertical {
             for view in views { view.widthAnchor.constraint(equalTo:s.widthAnchor).isActive = true }
@@ -69,7 +69,7 @@ enum Theme {
 
 final class Surface: NSView {
     let isPanel: Bool
-    init(_ color: NSColor) { isPanel = color == Theme.panel; super.init(frame: .zero); wantsLayer = true; layer?.backgroundColor = color.cgColor }
+    init(_ color: NSColor) { isPanel = color == Theme.panel; super.init(frame: .zero); wantsLayer = true; clipsToBounds = true; layer?.masksToBounds = true; layer?.backgroundColor = color.cgColor }
     func refreshTheme() { layer?.backgroundColor = (isPanel ? Theme.panel : Theme.canvas).cgColor }
     required init?(coder: NSCoder) { fatalError() }
 }

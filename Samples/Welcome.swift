@@ -20,7 +20,8 @@ let workspace = Workspace(
 workspace.open("Welcome.swift")
 
 // ⌘O         Open a file
-// ⇧⌘O        Open a folder
+// ⌘K ⌘O      Open a folder
+// ⇧⌘O        Go to symbol
 // ⌘F         Find and replace
 // ⌘\         Split the editor
 // Control+`  Open the terminal

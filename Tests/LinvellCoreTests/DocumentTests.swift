@@ -32,6 +32,13 @@ final class DocumentTests: XCTestCase {
         let bytes = Data("a\r\nb\nc".utf8), url = try file(bytes), doc = try DocumentBuffer(url:url)
         XCTAssertTrue(doc.hasMixedLineEndings); doc.update("changed"); XCTAssertThrowsError(try doc.save()); XCTAssertEqual(try Data(contentsOf:url),bytes)
     }
+    func testSinglePassLineEndingDetection() throws {
+        for (source,ending,mixed) in [("a\nb\n","\n",false),("a\r\nb\r\n","\r\n",false),("a\rb\r","\r",false),("a\r\nb\r","\r\n",true),("a\r\r\nb\n","\r\n",true),("中文 😀","\n",false)] {
+            let doc = try DocumentBuffer(url:file(Data(source.utf8)))
+            XCTAssertEqual(doc.lineEnding,ending); XCTAssertEqual(doc.hasMixedLineEndings,mixed)
+            XCTAssertEqual(doc.text,source.replacingOccurrences(of:"\r\n",with:"\n").replacingOccurrences(of:"\r",with:"\n"))
+        }
+    }
     func testSymlinkAndPermissionsPreserved() throws {
         let url = try file(Data("hello".utf8)); try FileManager.default.setAttributes([.posixPermissions:0o640],ofItemAtPath:url.path)
         let link = directory.appendingPathComponent("link"); try FileManager.default.createSymbolicLink(at:link,withDestinationURL:url)

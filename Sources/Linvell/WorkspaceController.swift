@@ -48,12 +48,15 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     var activityButtons: [NSButton] = []
     var preferences: PreferencesController?
     var restoringLayout = true
+    var loading: [URL:UUID] = [:]
+    var latestOpenRequest: UUID?
 
     init() {
         let support = FileManager.default.urls(for:.applicationSupportDirectory,in:.userDomainMask).first!.appendingPathComponent("Linvell/Recovery",isDirectory:true)
         recovery = RecoveryStore(directory:support)
         let window = NSWindow(contentRect:NSRect(x:0,y:0,width:1320,height:860),styleMask:[.titled,.closable,.miniaturizable,.resizable,.fullSizeContentView],backing:.buffered,defer:false)
         super.init(window:window)
+        window.contentView = WorkspaceRootView(frame:NSRect(x:0,y:0,width:1320,height:860))
         window.title = "Linvell"; window.titleVisibility = .hidden; window.titlebarAppearsTransparent = true
         window.appearance = NSAppearance(named:Theme.profile.isDark ? .darkAqua : .aqua); window.backgroundColor = Theme.panel
         window.minSize = NSSize(width:800,height:540); window.delegate = self
@@ -66,6 +69,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
 
     func buildUI() {
         guard let rootView = window?.contentView else { return }
+        rootView.clipsToBounds = true
         let shell = NSStackView(); shell.orientation = .vertical; shell.spacing = 0; shell.alignment = .leading; shell.distribution = .fill
         Theme.pin(shell,in:rootView)
         let header = Surface(Theme.panel); header.heightAnchor.constraint(equalToConstant:54).isActive = true
@@ -133,7 +137,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         outline.setAccessibilityLabel("Workspace files")
         let scroll = NSScrollView(); scroll.documentView = outline; scroll.hasVerticalScroller = true
         scroll.drawsBackground = true; scroll.backgroundColor = Theme.panel; scroll.borderType = .noBorder
-        let foot = Theme.label("⇧⌘O  Open folder",size:11,color:Theme.secondary)
+        let foot = Theme.label("⌘K ⌘O  Open folder",size:11,color:Theme.secondary)
         let stack = Theme.stack([row,search,scroll,foot],orientation:.vertical,spacing:10)
         Theme.pin(stack,in:sidebar,inset:16)
     }
@@ -161,7 +165,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         if kind == "files" { setupSidebar() }
         else if let project = root?.url {
             let tool = ToolSidebar(kind:kind,project:project)
-            tool.onSelect = { [weak self] url,line in self?.open(url); self?.goToLine(line) }
+            tool.onSelect = { [weak self] url,line in self?.open(url) { [weak self] in self?.goToLine(line) } }
             Theme.pin(tool,in:sidebar)
         } else {
             let label = Theme.label("Open a folder to get started.",size:13,color:Theme.secondary)
@@ -225,7 +229,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         editors.addArrangedSubview(space)
     }
 
-    @objc func newFile() { activate(OpenDocument(DocumentBuffer())) }
+    @objc func newFile() { latestOpenRequest = nil; activate(OpenDocument(DocumentBuffer())) }
     @objc func openFile() {
         let p = NSOpenPanel(); p.allowsMultipleSelection = true; p.canChooseDirectories = false
         p.beginSheetModal(for:window!) { [weak self] result in if result == .OK { p.urls.forEach { self?.open($0) } } }
@@ -243,10 +247,28 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         }
         if sidebarKind != "files" { showSidebar(sidebarKind) }
     }
-    func open(_ url: URL) {
+    func open(_ url: URL,completion: (() -> Void)? = nil) {
         if (try? url.resourceValues(forKeys:[.isDirectoryKey]).isDirectory) == true { setProject(url); return }
-        if let existing = documents.first(where: { $0.buffer.url == url.resolvingSymlinksInPath() }) { activate(existing); return }
-        do { activate(OpenDocument(try DocumentBuffer(url:url))) } catch { show(error) }
+        if let existing = documents.first(where: { $0.buffer.url == url.resolvingSymlinksInPath() }) { activate(existing); completion?(); return }
+        let resolved = url.resolvingSymlinksInPath()
+        guard loading[resolved] == nil else { return }
+        let request = UUID(); loading[resolved] = request; latestOpenRequest = request
+        status.stringValue = "Opening \(url.lastPathComponent)…"
+        DispatchQueue.global(qos:.userInitiated).async { [weak self] in
+            do {
+                let buffer = try DocumentBuffer(url:resolved),index = LineIndex(buffer.text)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self,self.loading[resolved] == request else { return }
+                    self.loading.removeValue(forKey:resolved)
+                    guard self.window?.isVisible == true else { return }
+                    let doc = OpenDocument(buffer,lines:index)
+                    if self.latestOpenRequest == request { self.activate(doc); completion?() }
+                    else { self.documents.append(doc); self.renderTabs() }
+                }
+            } catch {
+                DispatchQueue.main.async { [weak self] in self?.loading.removeValue(forKey:resolved); self?.show(error) }
+            }
+        }
     }
     func activate(_ document: OpenDocument) {
         if !documents.contains(where: { $0 === document }) { documents.append(document) }
@@ -271,9 +293,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
             b.tag = index; b.bezelStyle = .inline; b.isBordered = false; b.font = .systemFont(ofSize:13,weight:doc === current ? .semibold : .regular)
             b.contentTintColor = doc === current ? Theme.foreground : Theme.secondary
             let close = Theme.button("xmark",help:"Close \(doc.buffer.displayName)",target:self,action:#selector(closeTab(_:))); close.tag = index
-            let icon = NSImageView(image:NSImage(systemSymbolName:doc.buffer.url?.pathExtension == "swift" ? "swift" : "doc.text",accessibilityDescription:nil)!)
-            icon.contentTintColor = doc.buffer.url?.pathExtension == "swift" ? Theme.number : Theme.accent
-            icon.widthAnchor.constraint(equalToConstant:16).isActive = true
+            let icon = FileIcon.view(for:doc.buffer.url)
             let row = Theme.stack([icon,b,close],spacing:10); row.edgeInsets = NSEdgeInsets(top:0,left:16,bottom:0,right:6)
             row.heightAnchor.constraint(equalToConstant:42).isActive = true
             row.wantsLayer = true; row.layer?.backgroundColor = (doc === current ? Theme.canvas : Theme.panel).cgColor
@@ -359,8 +379,8 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     func updateStatus() {
         guard let current else { status.stringValue = "Development preview"; breadcrumb.stringValue = "Your next idea starts here"; return }
         let p = min(activePane?.textView.selectedRange().location ?? 0,current.buffer.text.utf16.count)
-        let before = (current.buffer.text as NSString).substring(to:p)
-        let line = before.filter { $0 == "\n" }.count+1, column = (before.components(separatedBy:"\n").last?.count ?? 0)+1
+        let row = current.lines.line(at:p),start = current.lines.starts[row]
+        let line = row+1,column = (current.buffer.text as NSString).substring(with:NSRange(location:start,length:p-start)).count+1
         status.stringValue = "Ln \(line), Col \(column)     \(current.buffer.formatLabel)     \(Int(Theme.fontSize)) pt"
         modeLabel.stringValue = vimEnabled ? current.vim.mode.rawValue + (current.vim.pending.isEmpty ? "" : "  \(current.vim.pending)") : "TEXT"
         breadcrumb.stringValue = current.buffer.displayName
@@ -387,7 +407,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         }
         if let view = window?.contentView { refresh(view) }
         panes.forEach { $0.updateTheme() }; outline.backgroundColor = Theme.panel; outline.reloadData(); renderTabs()
-        terminal?.nativeBackgroundColor = Theme.canvas; terminal?.nativeForegroundColor = Theme.foreground
+        if let terminal { configureTerminal(terminal) }
         if sidebarKind != "files" { showSidebar(sidebarKind) }
     }
     @objc func toggleTerminal() {
@@ -397,7 +417,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         let title = Theme.label("TERMINAL",size:11,color:Theme.secondary,weight:.semibold)
         let bar = Theme.stack([title,NSView(),Theme.button("xmark",help:"Hide Terminal",target:self,action:#selector(toggleTerminal))]); bar.heightAnchor.constraint(equalToConstant:32).isActive = true
         let term = LocalProcessTerminalView(frame:NSRect(x:0,y:0,width:900,height:220))
-        term.font = .monospacedSystemFont(ofSize:14,weight:.regular); term.nativeBackgroundColor = Theme.canvas; term.nativeForegroundColor = Theme.foreground
+        configureTerminal(term)
         let stack = Theme.stack([bar,term],orientation:.vertical,spacing:4)
         Theme.pin(stack,in:host,inset:12)
         terminal = term; terminalHost = host; content.addArrangedSubview(host)
@@ -409,6 +429,14 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         term.startProcess(executable:shell,args:["-l"],environment:env.map { "\($0.key)=\($0.value)" },currentDirectory:root?.url.path ?? FileManager.default.homeDirectoryForCurrentUser.path)
         window?.makeFirstResponder(term)
     }
+    private func configureTerminal(_ terminal: LocalProcessTerminalView) {
+        terminal.font = Theme.editorFont; terminal.nativeBackgroundColor = Theme.canvas; terminal.nativeForegroundColor = Theme.foreground
+        terminal.clipsToBounds = true; terminal.caretColor = Theme.accent; terminal.caretTextColor = Theme.canvas; terminal.caretViewTracksFocus = true
+        let colors: [UInt32] = Theme.profile.isDark
+            ? [0x27323B,0xED8796,0x8BD5A2,0xEED49F,0x8AADF4,0xC6A0F6,0x8BD5CA,0xCAD3F5,0x6E7B8A,0xF5A2AF,0xA6DA95,0xF5D8A6,0xA5C3FF,0xD5B2FF,0x9EE4DB,0xEFF4FF]
+            : [0x35443F,0xB33245,0x247A4F,0x946300,0x245BC5,0x8251A3,0x187583,0xCBD5D0,0x657C71,0xCF3B50,0x34824D,0x956919,0x326BD4,0x985AB3,0x1B8791,0xFCFDFD]
+        terminal.installColors(colors.map { value in SwiftTerm.Color(red:UInt16((value>>16)&255)*257,green:UInt16((value>>8)&255)*257,blue:UInt16(value&255)*257) })
+    }
 
     @objc func find() { activePane?.textView.performFindPanelAction(menuItem(tag:Int(NSFindPanelAction.showFindPanel.rawValue))) }
     private func menuItem(tag: Int) -> NSMenuItem { let item = NSMenuItem(); item.tag = tag; return item }
@@ -416,13 +444,73 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         guard let v = activePane?.textView else { return }
         if v.selectedRange().length == 0 { v.selectWord(nil); return }
         let ns = v.string as NSString, selected = v.selectedRange(), word = ns.substring(with:selected)
-        let end = v.selectedRanges.map { NSMaxRange($0.rangeValue) }.max() ?? NSMaxRange(selected)
+        let end = v.editingSelections.map { NSMaxRange($0) }.max() ?? NSMaxRange(selected)
         var range = ns.range(of:word,range:NSRange(location:end,length:ns.length-end))
         if range.location == NSNotFound { range = ns.range(of:word,range:NSRange(location:0,length:selected.location)) }
-        if range.location != NSNotFound && !v.selectedRanges.contains(NSValue(range:range)) {
-            v.selectedRanges.append(NSValue(range:range)); v.scrollRangeToVisible(range)
+        if range.location != NSNotFound && !v.editingSelections.contains(range) {
+            v.setSelections(v.editingSelections+[range]); v.scrollRangeToVisible(range)
         }
     }
+    @objc func skipOccurrence() {
+        guard let v = activePane?.textView,v.selectedRange().length > 0 else { return }
+        var ranges = v.editingSelections
+        guard let skipped = ranges.popLast() else { return }
+        let ns = v.string as NSString,word = ns.substring(with:skipped),end = NSMaxRange(skipped)
+        var next = ns.range(of:word,range:NSRange(location:end,length:ns.length-end))
+        if next.location == NSNotFound { next = ns.range(of:word,range:NSRange(location:0,length:skipped.location)) }
+        if next.location != NSNotFound,!ranges.contains(next) { v.setSelections(ranges+[next]); v.scrollRangeToVisible(next) }
+    }
+    @objc func selectAllOccurrences() {
+        guard let v = activePane?.textView else { return }
+        if v.selectedRange().length == 0 { v.selectWord(nil) }
+        let ns = v.string as NSString,selection = v.selectedRange()
+        guard selection.length > 0 else { return }
+        let word = ns.substring(with:selection); var matches: [NSRange] = [],offset = 0
+        while offset < ns.length {
+            let r = ns.range(of:word,range:NSRange(location:offset,length:ns.length-offset))
+            if r.location == NSNotFound { break }; matches.append(r); offset = NSMaxRange(r)
+        }
+        v.setSelections(matches)
+    }
+    @objc func undoSelections() { activePane?.textView.undoSelection() }
+    @objc func addCursorAbove() { addCursors(direction:-1) }
+    @objc func addCursorBelow() { addCursors(direction:1) }
+    private func addCursors(direction: Int) {
+        guard let v = activePane?.textView,let current else { return }
+        let ns = v.string as NSString,index = current.lines
+        var ranges = v.editingSelections
+        for selection in ranges {
+            let cursor = NSMaxRange(selection),row = index.line(at:cursor),targetRow = row+direction
+            guard targetRow >= 0,targetRow < index.starts.count else { continue }
+            let end = targetRow+1 < index.starts.count ? index.starts[targetRow+1]-1 : ns.length
+            var target = min(end,index.starts[targetRow]+cursor-index.starts[row])
+            if target < ns.length { target = ns.rangeOfComposedCharacterSequence(at:target).location }
+            ranges.append(NSRange(location:target,length:0))
+        }
+        v.setSelections(ranges)
+    }
+    @objc func splitSelectionIntoLines() {
+        guard let v = activePane?.textView,let current else { return }
+        let index = current.lines,ns = v.string as NSString
+        var carets: [NSRange] = []
+        for selection in v.editingSelections {
+            let first = index.line(at:selection.location),last = index.line(at:max(selection.location,NSMaxRange(selection)-1))
+            for line in first...last {
+                let end = line+1 < index.starts.count ? index.starts[line+1]-1 : ns.length
+                carets.append(NSRange(location:min(end,NSMaxRange(selection)),length:0))
+            }
+        }
+        v.setSelections(carets)
+    }
+    @objc func selectCurrentLine() {
+        guard let v = activePane?.textView,let current else { return }
+        let row = current.lines.line(at:v.selectedRange().location),start = current.lines.starts[row]
+        let end = row+1 < current.lines.starts.count ? current.lines.starts[row+1] : current.storage.length
+        v.setSelections([NSRange(location:start,length:end-start)])
+    }
+    @objc func projectSearch() { showSidebar("search") }
+    @objc func documentSymbols() { showSymbols() }
+    @objc func replaceInFile() { activePane?.textView.performFindPanelAction(menuItem(tag:Int(NSTextFinder.Action.showReplaceInterface.rawValue))) }
     @objc func refreshFiles() { if let url = root?.url { root = FileNode(url); outline.reloadData() } }
     @objc private func filterChanged() { outline.reloadData() }
     private var filtered: [FileNode] {
@@ -436,10 +524,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         guard let node = item as? FileNode else { return nil }
         let label = Theme.label(node.url.lastPathComponent,size:13,color:node.isDirectory ? Theme.foreground : Theme.secondary)
         label.lineBreakMode = .byTruncatingMiddle
-        let symbol = node.isDirectory ? (outlineView.isItemExpanded(node) ? "folder.fill" : "folder") : node.url.pathExtension == "swift" ? "swift" : "doc.text"
-        let image = NSImageView(image:NSImage(systemSymbolName:symbol,accessibilityDescription:nil)!)
-        image.contentTintColor = node.isDirectory ? Theme.accent : Theme.secondary
-        image.widthAnchor.constraint(equalToConstant:16).isActive = true
+        let image = FileIcon.view(for:node.url,folder:node.isDirectory,expanded:outlineView.isItemExpanded(node))
         return Theme.stack([image,label],spacing:8)
     }
     @objc private func fileClicked() {
@@ -452,7 +537,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     @objc func quickOpen() {
         guard let root else { openFile(); return }
         let options = fileIndex.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }.map { url in
-            PickerOption(title:url.lastPathComponent,detail:ProjectFiles.relative(url,root:root.url),invoke:{ [weak self] in self?.open(url) })
+            PickerOption(title:url.lastPathComponent,detail:ProjectFiles.relative(url,root:root.url),fileURL:url,invoke:{ [weak self] in self?.open(url) })
         }
         picker = QuickPicker(title:"Search files by name",options:options,owner:window!)
     }
