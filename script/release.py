@@ -98,7 +98,7 @@ def main():
     if args.publish:
         notes = ROOT/"docs/releases"/(args.version+".md")
         if not notes.is_file(): raise SystemExit("Release notes must exist before publishing")
-        run(["git","push","origin","HEAD:main"])
+        run(["git","-c","credential.helper=","-c","credential.helper=!gh auth git-credential","push","origin","HEAD:main"])
         run(["gh","release","create","v"+args.version,"--repo","huluxiaohuowa/Linvell","--target",revision,"--title","Linvell "+args.version,"--prerelease","--notes-file",notes,zip_path,dmg,checksums,manifest_path])
         print("Published GitHub preview release v"+args.version,flush=True)
     print("Artifacts: "+str(output),flush=True)
