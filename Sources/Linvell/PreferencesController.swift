@@ -97,9 +97,9 @@ final class PreferencesController: NSWindowController {
             sample.font = Theme.editorFont; rows.append(sample)
         case 2:
             rows.append(section("MODAL EDITING")); rows.append(check("Enable Vim mode",key:"vimEnabled"))
-            rows.append(text("This preview supports Normal and Insert modes, basic motions, counts, line/word deletion, yank and put, undo and a small Ex command set."))
+            rows.append(text("Normal, Insert, Visual, Visual Line and Visual Block modes support common motions, multiple selections, changes, copy/paste and undo. Use v, V or Control-V for visual selection."))
             rows.append(section("COMPATIBILITY"))
-            rows.append(text("Full Vim compatibility remains in development. Visual/Replace modes, macros, mappings, Vim regular expressions, Vimscript and Vim9 are not implemented yet."))
+            rows.append(text("Full Vim compatibility remains in development. Replace mode, macros, mappings, Vim regular expressions, Vimscript and Vim9 are not implemented yet."))
             rows.append(text("Press Escape to return to Normal mode. Terminal input is always sent to the shell."))
         case 3:
             rows.append(section("ICLOUD DRIVE"))

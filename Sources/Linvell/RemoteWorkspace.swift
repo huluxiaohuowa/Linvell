@@ -1,0 +1,118 @@
+import AppKit
+import LinvellCore
+
+final class RemoteDocument {
+    let connection: SSHRemote
+    let path: String
+    var digest: String
+    let cache: URL
+    init(connection: SSHRemote,path: String,digest: String,data: Data) throws {
+        self.connection = connection; self.path = path; self.digest = digest
+        cache = FileManager.default.temporaryDirectory.appendingPathComponent("linvell-remote-"+UUID().uuidString,isDirectory:true)
+        try FileManager.default.createDirectory(at:cache,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+        let file = cache.appendingPathComponent(URL(fileURLWithPath:path).lastPathComponent)
+        try data.write(to:file,options:.atomic); try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:file.path)
+    }
+    var localURL: URL { cache.appendingPathComponent(URL(fileURLWithPath:path).lastPathComponent) }
+    deinit { try? FileManager.default.removeItem(at:cache) }
+    func save(_ data: Data) throws {
+        let reply = try connection.request("write",path:path,content:data,digest:digest)
+        guard let updated = reply.digest else { throw GitError.command("The remote save was not acknowledged.") }
+        digest = updated
+    }
+}
+
+/// Runs network work off-main while preserving synchronous save/close decisions.
+enum RemoteProgress {
+    static func perform<T>(_ title: String,work: @escaping () throws -> T) throws -> T {
+        let panel = NSPanel(contentRect:NSRect(x:0,y:0,width:380,height:105),styleMask:[.titled],backing:.buffered,defer:false)
+        panel.title = L.text(title); panel.center(); panel.isReleasedWhenClosed = false
+        let spinner = NSProgressIndicator(); spinner.style = .spinning; spinner.startAnimation(nil)
+        Theme.pin(Theme.stack([spinner,Theme.label(title,size:14)],spacing:16),in:panel.contentView!,inset:26)
+        var outcome: Result<T,Error>?
+        DispatchQueue.global(qos:.userInitiated).async {
+            let result = Result { try work() }
+            DispatchQueue.main.async { outcome = result; NSApp.stopModal() }
+        }
+        NSApp.runModal(for:panel); panel.orderOut(nil)
+        guard let outcome else { throw GitError.command("Remote operation interrupted.") }
+        return try outcome.get()
+    }
+}
+
+final class RemoteBrowser: NSView, NSTableViewDelegate, NSTableViewDataSource {
+    let connection: SSHRemote
+    let pathField = NSTextField(),table = NSTableView(),note = Theme.label("",size:12,color:Theme.secondary)
+    var entries: [RemoteEntry] = []
+    var directory = "~"
+    var onOpen: ((String) -> Void)?
+    var onDirectory: ((String) -> Void)?
+    var onTerminal: (() -> Void)?
+    private var generation = UUID()
+    init(connection: SSHRemote) {
+        self.connection = connection; super.init(frame:.zero)
+        let heading = Theme.label("SSH · "+connection.host,size:13,weight:.semibold)
+        let up = Theme.button("arrow.up",help:"Parent Folder",target:self,action:#selector(parent))
+        let refresh = Theme.button("arrow.clockwise",help:"Refresh Files",target:self,action:#selector(refresh))
+        let terminal = Theme.button("terminal",help:"SSH Terminal",target:self,action:#selector(shell))
+        let create = Theme.button("doc.badge.plus",help:"New File",target:self,action:#selector(createFile))
+        pathField.placeholderString = L.text("Remote folder path"); pathField.stringValue = "~"; pathField.target = self; pathField.action = #selector(go)
+        pathField.font = .systemFont(ofSize:13)
+        let column = NSTableColumn(identifier:NSUserInterfaceItemIdentifier("remote")); table.addTableColumn(column); table.headerView = nil
+        table.rowHeight = 34; table.dataSource = self; table.delegate = self; table.target = self; table.doubleAction = #selector(openSelected)
+        table.backgroundColor = Theme.panel; table.setAccessibilityLabel(L.text("Remote files"))
+        let scroll = NSScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true
+        Theme.pin(Theme.stack([Theme.stack([heading,NSView(),create,terminal,up,refresh],spacing:6),pathField,note,scroll],orientation:.vertical,spacing:12),in:self,inset:14)
+        browse("~")
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    func numberOfRows(in tableView: NSTableView) -> Int { entries.count }
+    func tableView(_ tableView: NSTableView,viewFor tableColumn: NSTableColumn?,row: Int) -> NSView? {
+        let entry = entries[row]
+        return Theme.stack([FileIcon.view(for:URL(fileURLWithPath:entry.path),folder:entry.directory),Theme.label(entry.name,size:13)],spacing:9)
+    }
+    @objc private func openSelected() {
+        guard entries.indices.contains(table.selectedRow) else { return }; let entry = entries[table.selectedRow]
+        if entry.directory { browse(entry.path) } else { onOpen?(entry.path) }
+    }
+    @objc private func go() { browse(pathField.stringValue) }
+    @objc private func refresh() { browse(directory) }
+    @objc private func parent() { browse((directory as NSString).deletingLastPathComponent) }
+    @objc private func shell() { onTerminal?() }
+    @objc func createFile() {
+        let alert = NSAlert(); alert.messageText = L.text("New remote file")
+        let input = NSTextField(frame:NSRect(x:0,y:0,width:320,height:28)); input.placeholderString = L.text("File name")
+        alert.accessoryView = input; alert.window.initialFirstResponder = input
+        alert.addButton(withTitle:L.text("Create")); alert.addButton(withTitle:L.text("Cancel"))
+        guard alert.runModal() == .alertFirstButtonReturn,!input.stringValue.isEmpty else { return }
+        let path = (directory as NSString).appendingPathComponent(input.stringValue),remote = connection
+        note.stringValue = L.text("Creating remote file…")
+        DispatchQueue.global(qos:.userInitiated).async { [weak self] in
+            let result = Result { try remote.request("create",path:path) }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .success(let reply): self.browse(self.directory); self.onOpen?(reply.path ?? path)
+                case .failure(let error): self.note.stringValue = error.localizedDescription
+                }
+            }
+        }
+    }
+    func browse(_ path: String) {
+        let request = UUID(); generation = request; note.stringValue = L.text("Connecting…")
+        let remote = connection
+        DispatchQueue.global(qos:.userInitiated).async { [weak self] in
+            let result = Result { try remote.request("list",path:path) }
+            DispatchQueue.main.async {
+                guard let self,self.generation == request else { return }
+                switch result {
+                case .success(let reply):
+                    self.entries = reply.entries ?? []; self.directory = reply.path ?? path
+                    self.pathField.stringValue = self.directory; self.note.stringValue = L.format("%d entries",self.entries.count)
+                    self.onDirectory?(self.directory); self.table.reloadData()
+                case .failure(let error): self.note.stringValue = error.localizedDescription
+                }
+            }
+        }
+    }
+}

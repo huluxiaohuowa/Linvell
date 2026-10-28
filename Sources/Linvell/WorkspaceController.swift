@@ -52,6 +52,10 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     var restoringLayout = true
     var loading: [URL:UUID] = [:]
     var latestOpenRequest: UUID?
+    var remoteConnection: SSHRemote?
+    var remoteDirectory = "~"
+    var remoteBrowser: RemoteBrowser?
+    var runWorkspaceView: RunWorkspace?
 
     init() {
         let support = FileManager.default.urls(for:.applicationSupportDirectory,in:.userDomainMask).first!.appendingPathComponent("Linvell/Recovery",isDirectory:true)
@@ -159,12 +163,13 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         let stack = Theme.stack(controls,orientation:.vertical,spacing:18); Theme.pin(stack,in:activity,inset:10)
     }
     @objc private func activityClicked(_ sender: NSButton) {
-        switch sender.tag { case 0: showSidebar("files"); case 1: showSidebar("search"); case 2: showSidebar("git"); case 3: showSymbols(); default: projectTools() }
+        switch sender.tag { case 0: showSidebar("files"); case 1: showSidebar("search"); case 2: gitWorkspace(); case 3: showSymbols(); default: projectTools() }
     }
     private func showSidebar(_ kind: String) {
         sidebarKind = kind; sidebar.isHidden = false
         sidebar.subviews.forEach { $0.removeFromSuperview() }
-        if kind == "files" { setupSidebar() }
+        if kind == "files",let connection = remoteConnection { setupRemoteSidebar(connection) }
+        else if kind == "files" { setupSidebar() }
         else if let project = root?.url {
             let tool = ToolSidebar(kind:kind,project:project)
             tool.onSelect = { [weak self] url,line in self?.open(url) { [weak self] in self?.goToLine(line) } }
@@ -207,6 +212,28 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         status.stringValue = L.text("Project-scoped tools"); modeLabel.stringValue = L.text("TOOLS")
         activityButtons.forEach { $0.contentTintColor = $0.tag == 4 ? Theme.accent : Theme.secondary }
     }
+    @objc func gitWorkspace() {
+        guard let project = root?.url else { openFolder(); return }
+        current = nil; activePane = nil; panes = []; markdownView = nil
+        editors.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let git = GitWorkspace(project:project); git.onOpen = { [weak self] in self?.open($0) }
+        editors.addArrangedSubview(git); editors.adjustSubviews(); renderTabs()
+        previewButton.isHidden = true; breadcrumb.stringValue = L.text("Source Control")
+        status.stringValue = L.text("Git repository"); modeLabel.stringValue = "GIT"
+        activityButtons.forEach { $0.contentTintColor = $0.tag == 2 ? Theme.accent : Theme.secondary }
+    }
+    @objc func runWorkspace() {
+        let directory = remoteConnection == nil ? (root?.url.path ?? current?.fileURL?.deletingLastPathComponent().path) : remoteDirectory
+        guard let directory else { openFolder(); return }
+        if let existing = runWorkspaceView,existing.directory != directory || existing.remote?.host != remoteConnection?.host {
+            guard existing.mayClose() else { return }; existing.terminate(); runWorkspaceView = nil
+        }
+        if runWorkspaceView == nil { runWorkspaceView = RunWorkspace(directory:directory,remote:remoteConnection) }
+        current = nil; activePane = nil; panes = []; markdownView = nil
+        editors.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        editors.addArrangedSubview(runWorkspaceView!); editors.adjustSubviews(); renderTabs()
+        previewButton.isHidden = true; breadcrumb.stringValue = L.text("Run & Preview"); modeLabel.stringValue = "RUN"
+    }
 
     private func setupCenter() {
         tabs.orientation = .horizontal; tabs.spacing = 4; tabs.alignment = .centerY
@@ -234,7 +261,10 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         markdownView = nil; editors.addArrangedSubview(WelcomeView(owner:self))
     }
 
-    @objc func newFile() { latestOpenRequest = nil; activate(OpenDocument(DocumentBuffer())) }
+    @objc func newFile() {
+        if remoteConnection != nil { remoteBrowser?.createFile(); return }
+        latestOpenRequest = nil; activate(OpenDocument(DocumentBuffer()))
+    }
     @objc func openFile() {
         let p = NSOpenPanel(); p.allowsMultipleSelection = true; p.canChooseDirectories = false
         p.beginSheetModal(for:window!) { [weak self] result in if result == .OK { p.urls.forEach { self?.open($0) } } }
@@ -244,13 +274,19 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         p.beginSheetModal(for:window!) { [weak self] result in if result == .OK, let url = p.url { self?.setProject(url) } }
     }
     func setProject(_ url: URL) {
+        let wasRemote = remoteConnection != nil
+        if wasRemote {
+            guard mayCloseTerminal() else { return }; terminateTerminal()
+            terminalHost?.removeFromSuperview(); terminalHost = nil; terminal = nil
+        }
+        remoteConnection = nil; remoteBrowser = nil
         root = FileNode(url); projectTitle.stringValue = url.lastPathComponent
         outline.reloadData(); UserDefaults.standard.set(url.path,forKey:"lastProject")
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
             let files = ProjectFiles.list(url)
             DispatchQueue.main.async { [weak self] in if self?.root?.url == url { self?.fileIndex = files } }
         }
-        if sidebarKind != "files" { showSidebar(sidebarKind) }
+        if wasRemote || sidebarKind != "files" { showSidebar(wasRemote ? "files" : sidebarKind) }
     }
     func open(_ url: URL,completion: (() -> Void)? = nil) {
         if (try? url.resourceValues(forKeys:[.isDirectoryKey]).isDirectory) == true { setProject(url); return }
@@ -341,6 +377,14 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     @objc func saveAs() { if let current { _ = saveDocument(current,asCopy:true) } }
     @discardableResult func saveDocument(_ doc: OpenDocument, asCopy: Bool = false) -> Bool {
         guard doc.imageURL == nil else { return true }
+        if let remote = doc.remote,!asCopy {
+            do {
+                let data = try doc.buffer.dataForSaving()
+                try RemoteProgress.perform("Saving remote file…") { try remote.save(data) }
+                try doc.buffer.save(); try recovery.remove(doc.buffer.id)
+                renderTabs(); updateStatus(); return true
+            } catch { show(error); return false }
+        }
         var destination: URL?
         if doc.buffer.url == nil || asCopy {
             let p = NSSavePanel(); p.nameFieldStringValue = doc.displayName
@@ -348,6 +392,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         }
         do {
             try doc.buffer.save(to:destination); try recovery.remove(doc.buffer.id)
+            if asCopy { doc.remote = nil }
             renderTabs(); updateStatus(); return true
         } catch { show(error); return false }
     }
@@ -359,12 +404,14 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     }
     func windowShouldClose(_ sender: NSWindow) -> Bool { documents.allSatisfy(mayClose) && mayCloseTerminal() }
     func mayCloseTerminal() -> Bool {
+        if let runWorkspaceView,!runWorkspaceView.mayClose() { return false }
         guard terminal?.process.running == true else { return true }
         let alert = NSAlert(); alert.messageText = L.text("Close this terminal session?"); alert.informativeText = L.text("The shell and its running processes will be stopped.")
         alert.addButton(withTitle:L.text("Close Session")); alert.addButton(withTitle:L.text("Cancel"))
         return alert.runModal() == .alertFirstButtonReturn
     }
     func terminateTerminal() {
+        runWorkspaceView?.shutdown()
         guard let terminal else { return }
         let process = terminal.process!
         if process.running {
@@ -395,7 +442,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
 
     func updateStatus() {
         guard let current else { status.stringValue = L.text("Development preview"); breadcrumb.stringValue = L.text("Your next idea starts here"); previewButton.isHidden = true; markdownView = nil; return }
-        breadcrumb.stringValue = current.displayName; previewButton.isHidden = !current.supportsPreview
+        breadcrumb.stringValue = current.remote.map { $0.connection.host+":"+$0.path } ?? current.displayName; previewButton.isHidden = !current.supportsPreview
         previewButton.title = L.text(current.markdownPreview ? "Hide Preview" : "Preview")
         if current.imageURL != nil { status.stringValue = L.text("Image preview · Read only"); modeLabel.stringValue = L.text("IMAGE"); return }
         let p = min(activePane?.textView.selectedRange().location ?? 0,current.buffer.text.utf16.count)
@@ -431,6 +478,8 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
             view.needsDisplay = true; view.subviews.forEach(refresh)
         }
         if let view = window?.contentView { refresh(view) }
+        (editors.arrangedSubviews.first as? GitWorkspace)?.refreshTheme()
+        runWorkspaceView?.refreshTheme(); remoteBrowser?.table.backgroundColor = Theme.panel
         panes.forEach { $0.updateTheme() }; outline.backgroundColor = Theme.panel; outline.reloadData(); renderTabs()
         if let terminal { configureTerminal(terminal) }
         if let current,let markdownView { markdownView.render(current.buffer.text) }
@@ -458,7 +507,12 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         var env = ProcessInfo.processInfo.environment
         env["TERM"] = "xterm-256color"; env["COLORTERM"] = "truecolor"; env["TERM_PROGRAM"] = "Linvell"
         let shell = env["SHELL"] ?? "/bin/zsh"
-        term.startProcess(executable:shell,args:["-l"],environment:env.map { "\($0.key)=\($0.value)" },currentDirectory:root?.url.path ?? FileManager.default.homeDirectoryForCurrentUser.path)
+        if let remote = remoteConnection {
+            let command = "cd -- "+RunTasks.directoryExpression(remoteDirectory)+" && exec \"${SHELL:-/bin/sh}\" -l"
+            term.startProcess(executable:"/usr/bin/ssh",args:["-tt","--",remote.host,command],environment:env.map { "\($0.key)=\($0.value)" },currentDirectory:FileManager.default.homeDirectoryForCurrentUser.path)
+        } else {
+            term.startProcess(executable:shell,args:["-l"],environment:env.map { "\($0.key)=\($0.value)" },currentDirectory:root?.url.path ?? FileManager.default.homeDirectoryForCurrentUser.path)
+        }
         window?.makeFirstResponder(term)
     }
     private func configureTerminal(_ terminal: LocalProcessTerminalView) {
@@ -569,6 +623,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     func show(_ error: Error) { let alert = NSAlert(error:error); if let window { alert.beginSheetModal(for:window) } }
 
     @objc func quickOpen() {
+        if let connection = remoteConnection { quickOpenRemote(connection); return }
         guard let root else { openFile(); return }
         let options = fileIndex.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }.map { url in
             PickerOption(title:url.lastPathComponent,detail:ProjectFiles.relative(url,root:root.url),fileURL:url,invoke:{ [weak self] in self?.open(url) })
@@ -577,7 +632,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     }
     @objc func commandPalette() {
         var options: [PickerOption] = []
-        for (title,selector) in [("New File",#selector(newFile)),("Open Folder…",#selector(openFolder)),("Find in File",#selector(find)),("Toggle Vim Mode",#selector(toggleVim)),("Split Editor",#selector(toggleSplit)),("Toggle Terminal",#selector(toggleTerminal)),("Increase Font Size",#selector(increaseFont)),("Decrease Font Size",#selector(decreaseFont))] {
+        for (title,selector) in [("New File",#selector(newFile)),("Open Folder…",#selector(openFolder)),("Connect to SSH Host…",#selector(connectSSH)),("Source Control",#selector(gitWorkspace)),("Run & Preview",#selector(runWorkspace)),("Find in File",#selector(find)),("Toggle Vim Mode",#selector(toggleVim)),("Split Editor",#selector(toggleSplit)),("Toggle Terminal",#selector(toggleTerminal)),("Increase Font Size",#selector(increaseFont)),("Decrease Font Size",#selector(decreaseFont))] {
             options.append(PickerOption(title:title,detail:"Linvell command",invoke:{ [weak self] in self?.perform(selector) }))
         }
         options.append(PickerOption(title:L.text("Preferences: Theme and Font"),detail:"Appearance",invoke:{ [weak self] in self?.showSettings() }))

@@ -8,8 +8,9 @@ final class OpenDocument: NSObject, NSTextStorageDelegate {
     let lines: LineIndex
     let imageURL: URL?
     var markdownPreview = false
+    var remote: RemoteDocument?
     var fileURL: URL? { imageURL ?? buffer.url }
-    var displayName: String { imageURL?.lastPathComponent ?? buffer.url?.lastPathComponent ?? L.text("Untitled") }
+    var displayName: String { remote.map { URL(fileURLWithPath:$0.path).lastPathComponent } ?? imageURL?.lastPathComponent ?? buffer.url?.lastPathComponent ?? L.text("Untitled") }
     var isMarkdown: Bool { ["md","markdown","mdown"].contains(fileURL?.pathExtension.lowercased() ?? "") }
     var isHTML: Bool { ["html","htm"].contains(fileURL?.pathExtension.lowercased() ?? "") }
     var supportsPreview: Bool { isMarkdown || isHTML }
@@ -47,8 +48,11 @@ final class EditorTextView: NSTextView {
     var applyingVim = false
     var selectionHistory: [[NSValue]] = []
     private var extraSelections: [NSRange]?
+    var visualAnchor: Int?
+    var visualHead: Int?
+    var multiPending = ""
     var editingSelections: [NSRange] { extraSelections ?? selectedRanges.map(\.rangeValue) }
-    private func applySelections(_ ranges: [NSRange]) {
+    func applySelections(_ ranges: [NSRange]) {
         let values = MultiEdit.normalized(ranges)
         guard !values.isEmpty else { return }
         if values.count > 1 && values.contains(where: { $0.length == 0 }) {
@@ -96,6 +100,19 @@ final class EditorTextView: NSTextView {
     }
     override func mouseDown(with event: NSEvent) {
         if vimEnabled { document?.vim.cancelPendingCommand() }
+        if event.modifierFlags.intersection([.command,.option,.shift]) == [.option,.shift] {
+            let anchor = characterIndexForInsertion(at:convert(event.locationInWindow,from:nil))
+            window?.makeFirstResponder(self)
+            var next: NSEvent? = event
+            while let current = next {
+                let head = characterIndexForInsertion(at:convert(current.locationInWindow,from:nil))
+                selectColumns(anchor:anchor,head:head)
+                if current.type == .leftMouseUp { break }
+                next = window?.nextEvent(matching:[.leftMouseDragged,.leftMouseUp])
+            }
+            return
+        }
+        visualAnchor = nil; visualHead = nil
         if event.modifierFlags.intersection([.command,.option,.shift]) == .option {
             let point = convert(event.locationInWindow,from:nil),at = characterIndexForInsertion(at:point)
             setSelections(editingSelections+[NSRange(location:at,length:0)]); window?.makeFirstResponder(self); return
@@ -128,7 +145,11 @@ final class EditorTextView: NSTextView {
     }
     override func paste(_ sender: Any?) {
         guard editingSelections.count > 1,!hasMarkedText() else { super.paste(sender); return }
-        if let value = NSPasteboard.general.string(forType:.string) { performMultiEdit(editingSelections,replacement:value) }
+        if let value = NSPasteboard.general.string(forType:.string) {
+            let lines = value.components(separatedBy:"\n")
+            if lines.count == editingSelections.count { performMultiEdit(editingSelections,replacements:lines) }
+            else { performMultiEdit(editingSelections,replacement:value) }
+        }
     }
     override func copy(_ sender: Any?) {
         guard editingSelections.count > 1 else { super.copy(sender); return }
@@ -158,9 +179,15 @@ final class EditorTextView: NSTextView {
         if editingSelections.count > 1,!hasMarkedText() { performMultiEdit(editingSelections,replacement:"\n") }
         else { super.insertNewline(sender) }
     }
-    private func performMultiEdit(_ ranges: [NSRange],replacement: String) {
+    func performMultiEdit(_ ranges: [NSRange],replacement: String) {
         do {
             let result = try MultiEdit.apply(ranges,replacement:replacement,to:string)
+            restoreMultiEdit(result.text,selections:result.selections.map(NSValue.init(range:)))
+        } catch { NSSound.beep() }
+    }
+    func performMultiEdit(_ ranges: [NSRange],replacements: [String]) {
+        do {
+            let result = try MultiEdit.apply(ranges,replacements:replacements,to:string)
             restoreMultiEdit(result.text,selections:result.selections.map(NSValue.init(range:)))
         } catch { NSSound.beep() }
     }
@@ -186,7 +213,11 @@ final class EditorTextView: NSTextView {
         } else { super.insertTab(sender) }
     }
     override func keyDown(with event: NSEvent) {
+        if handleColumnKey(event) { return }
+        if vimEnabled,handleVisualKey(event) { return }
         if event.keyCode == 53,editingSelections.count > 1 {
+            multiPending = ""
+            if document?.vim.mode == .insert { document?.vim.escape(); statusChanged?(); needsDisplay = true; return }
             let first = editingSelections[0]; clearExtraSelections(); setSelectedRange(first); document?.vim.escape(); statusChanged?(); return
         }
         if !hasMarkedText(),moveMultipleCarets(event) { return }
@@ -199,9 +230,7 @@ final class EditorTextView: NSTextView {
         guard vim.mode == .normal else { super.keyDown(with:event); return }
         let key = event.characters ?? ""
         if editingSelections.count > 1 {
-            if key == "i" || key == "a" { vim.key("i"); statusChanged?(); return }
-            if key == "x" { deleteForward(nil); return }
-            NSSound.beep(); return
+            handleMultiVim(key:event.modifierFlags.contains(.control) && event.charactersIgnoringModifiers == "r" ? "Ctrl+r" : key); return
         }
         if key == ":" { exCommand?(":"); return }
         vim.sync(text:string,cursor:selectedRange().location)

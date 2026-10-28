@@ -2,7 +2,7 @@ import Foundation
 
 /// Initial native command engine. This deliberately does not claim full Vim compatibility.
 public final class VimEngine {
-    public enum Mode: String { case normal = "NORMAL", insert = "INSERT" }
+    public enum Mode: String { case normal = "NORMAL", insert = "INSERT",visual = "VISUAL",visualLine = "VISUAL LINE",visualBlock = "VISUAL BLOCK" }
     public private(set) var mode: Mode = .normal
     public private(set) var pending = ""
     public private(set) var register = ""
@@ -15,6 +15,9 @@ public final class VimEngine {
 
     public init() {}
     public func cancelPendingCommand() { pending = ""; count = "" }
+    public func beginVisual(_ mode: Mode) { self.mode = mode; cancelPendingCommand() }
+    public func enterInsert() { mode = .insert; cancelPendingCommand() }
+    public func yank(_ value: String) { register = value }
     public func escape() { mode = .normal; pending = ""; count = ""; clamp() }
     public func sync(text: String, cursor: Int) { self.text = text; self.cursor = min(max(0, cursor), text.utf16.count) }
     public func key(_ key: String) {

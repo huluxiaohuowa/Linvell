@@ -17,6 +17,13 @@ mkdir -p "$APP/Contents/Helpers"
 cp "$BIN_DIR/Linvell" "$APP/Contents/MacOS/Linvell"
 cp "$BIN_DIR/LinvellUpdater" "$APP/Contents/Helpers/LinvellUpdater"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+if [[ "$CONFIG" == "debug" ]]; then
+  # Development launches must not compete with the installed app in Finder.
+  /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier top.fuluwa.linvell.debug' "$APP/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c 'Delete :CFBundleDocumentTypes' "$APP/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c 'Delete :NSServices' "$APP/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c 'Add :CFBundleDisplayName string Linvell Dev' "$APP/Contents/Info.plist"
+fi
 cp Resources/Brand/Linvell.png "$APP/Contents/Resources/Linvell.png"
 for wordmark in Resources/Brand/Wordmark*.png; do
   [[ -f "$wordmark" ]] && cp "$wordmark" "$APP/Contents/Resources/"
@@ -27,6 +34,11 @@ if [[ -d Resources/FileIcons ]]; then ditto Resources/FileIcons "$APP/Contents/R
 for localization in Resources/*.lproj; do
   [[ -d "$localization" ]] && ditto "$localization" "$APP/Contents/Resources/$(basename "$localization")"
 done
+if [[ "$CONFIG" == "debug" ]]; then
+  for info_strings in "$APP"/Contents/Resources/*.lproj/InfoPlist.strings; do
+    [[ -f "$info_strings" ]] && plutil -replace CFBundleDisplayName -string 'Linvell Dev' "$info_strings"
+  done
+fi
 for resource in "$BIN_DIR"/*.bundle; do
   [[ -d "$resource" ]] && ditto "$resource" "$APP/Contents/Resources/$(basename "$resource")"
 done

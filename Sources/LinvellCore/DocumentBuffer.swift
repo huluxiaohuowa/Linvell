@@ -81,6 +81,16 @@ public final class DocumentBuffer {
         if sameFile, let digest = diskDigest {
             guard let current = try? Data(contentsOf: target), Self.digest(current) == digest else { throw DocumentError.externalChange }
         }
+        let data = try dataForSaving()
+        let fm = FileManager.default
+        let attributes = try? fm.attributesOfItem(atPath: target.path)
+        try data.write(to: target, options: .atomic)
+        if let mode = attributes?[.posixPermissions] { try fm.setAttributes([.posixPermissions: mode], ofItemAtPath: target.path) }
+        guard try Data(contentsOf: target) == data else { throw CocoaError(.fileWriteUnknown) }
+        url = target; diskDigest = Self.digest(data); savedText = text
+    }
+
+    public func dataForSaving() throws -> Data {
         if hasMixedLineEndings { throw DocumentError.mixedLineEndings }
         let diskText = text.replacingOccurrences(of: "\n", with: lineEnding)
         guard var data = diskText.data(using: encoding, allowLossyConversion: false) else { throw DocumentError.encodingFailure }
@@ -88,12 +98,7 @@ public final class DocumentBuffer {
             let prefix: [UInt8] = encoding == .utf8 ? [0xEF, 0xBB, 0xBF] : encoding == .utf16LittleEndian ? [0xFF, 0xFE] : [0xFE, 0xFF]
             data.insert(contentsOf: prefix, at: 0)
         }
-        let fm = FileManager.default
-        let attributes = try? fm.attributesOfItem(atPath: target.path)
-        try data.write(to: target, options: .atomic)
-        if let mode = attributes?[.posixPermissions] { try fm.setAttributes([.posixPermissions: mode], ofItemAtPath: target.path) }
-        guard try Data(contentsOf: target) == data else { throw CocoaError(.fileWriteUnknown) }
-        url = target; diskDigest = Self.digest(data); savedText = text
+        return data
     }
 
     private static func digest(_ data: Data) -> Data { Data(SHA256.hash(data: data)) }

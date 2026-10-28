@@ -29,6 +29,12 @@ The **Updates** category provides independent switches for automatic checks, dow
 
 iCloud Drive can synchronize the preference allowlist in `Linvell/Preferences.json`: theme, font, text size, wrapping, line numbers, indentation and Vim mode. Preferences are merged per setting using their modification times. The sync switch and machine-specific layout stay local. Documents, recovery snapshots, project paths, terminal environment and credentials never enter this preference file. iCloud Drive must be available; actual delivery to another Mac is managed by iCloud and needs cross-device verification.
 
+## Remote development, running and Git
+
+Read the bilingual [usage guide](https://linvell.fuluwa.top/guide.html) for SSH workspaces, local/remote run and web preview, Git Graph, VS Code-style shortcuts and normal/Vim multi-selection editing. Guide source is maintained in [linvell-web](https://github.com/huluxiaohuowa/linvell-web/tree/main/docs).
+
+SSH uses the system configuration and authentication; the remote file protocol needs Python 3. This is a native remote editing and running workflow, without a VS Code extension or debug-adapter host.
+
 ## Distribution
 
 Build and package **locally**, then distribute through [GitHub Releases](https://github.com/huluxiaohuowa/Linvell/releases). There is no GitHub runner app build and no App Store upload. The local release script reuses only the team-wide Developer ID and notarization credentials in `~/.apple.json`, in a temporary protected signing keychain.
@@ -38,9 +44,9 @@ Build and package **locally**, then distribute through [GitHub Releases](https:/
 python3 script/update_version.py
 # python3 script/update_version.py minor
 # python3 script/update_version.py major
-python3 script/release.py --version 0.1.1
+python3 script/release.py --version 0.1.2
 # After reviewing the resulting artifacts and release notes:
-python3 script/release.py --version 0.1.1 --publish
+python3 script/release.py --version 0.1.2 --publish
 ```
 
 The script runs tests, builds a Universal app, signs with Hardened Runtime, submits for notarization, staples the ticket, checks Gatekeeper, and creates ZIP/DMG artifacts with SHA-256 checksums. `--publish` pushes the committed source and creates a GitHub release. Credentials are never committed or uploaded to GitHub.
