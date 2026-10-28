@@ -31,6 +31,7 @@ final class OpenDocument: NSObject, NSTextStorageDelegate {
 }
 
 final class EditorTextView: NSTextView {
+    override class var isCompatibleWithResponsiveScrolling: Bool { true }
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         FileDrop.urls(sender.draggingPasteboard).isEmpty ? super.draggingEntered(sender) : .copy
     }
@@ -289,7 +290,7 @@ final class EditorTextView: NSTextView {
 
 final class EditorPane: NSView, NSTextViewDelegate {
     let textView: EditorTextView
-    let scroll = NSScrollView()
+    let scroll = ResponsiveScrollView()
     let gutter = LineNumbers()
     let document: OpenDocument
     var onChange: (() -> Void)?
@@ -467,7 +468,7 @@ final class LineNumbers: NSRulerView {
     }
 }
 
-final class HierarchyOutlineView: NSOutlineView {
+final class HierarchyOutlineView: ResponsiveOutlineView {
     override func drawBackground(inClipRect clipRect: NSRect) {
         NSGraphicsContext.saveGraphicsState(); bounds.clip(); defer { NSGraphicsContext.restoreGraphicsState() }
         super.drawBackground(inClipRect:clipRect)

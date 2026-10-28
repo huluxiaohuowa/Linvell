@@ -1,5 +1,5 @@
 {
-  "originHash" : "35b9ae6146229190a84e406dce1306b5d33338ef05b5892e0b1d61e900d0dac7",
+  "originHash" : "560c8796eec3f8450058e8ebe6296a3f618e79cb98f85cb6ff4565eb63eeb743",
   "pins" : [
     {
       "identity" : "ink",
@@ -7,23 +7,6 @@
       "location" : "https://github.com/JohnSundell/Ink.git",
       "state" : {
         "revision" : "bcc9f219900a62c4210e6db726035d7f03ae757b"
-      }
-    },
-    {
-      "identity" : "swift-argument-parser",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/swift-argument-parser",
-      "state" : {
-        "revision" : "6a52f3251125d74daf04fcbd5e6f08a75d074382",
-        "version" : "1.8.2"
-      }
-    },
-    {
-      "identity" : "swiftterm",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/migueldeicaza/SwiftTerm.git",
-      "state" : {
-        "revision" : "5c83a9d214e7354697624c11deb4e488bdcfabad"
       }
     }
   ],

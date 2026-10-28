@@ -1,6 +1,6 @@
 # Development status
 
-2026-10-28 · 0.1.4
+2026-10-28 · 0.1.5
 
 ## Implemented foundation
 
@@ -36,6 +36,12 @@
 - Pure Swift operator/text-object/count composition, registers, character find, marks, repeat, insertion undo, normal/insert macros, Replace mode, forward/backward/word search and a bounded Vim-pattern/Ex substitute implementation.
 - Visual text objects/counts/find, multi-caret text-object changes/counts and native VS Code line commands.
 - Differential system-Vim fixtures, hidden native rendering, actual SSH project/runner acceptance and regression tests.
+
+## Added in 0.1.5
+
+- Selected remote folders open directly; remote Git routes to its data transport and workspace instead of a folder picker.
+- Responsive layer-backed scrolling across native scroll areas; display-linked window drawing and terminal updates track each screen's refresh capability.
+- Reused remote entry cells and cached folder symbols; callback/layout measurements recorded with explicit presentation limits.
 
 ## Still open
 

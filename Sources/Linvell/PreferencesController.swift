@@ -131,7 +131,7 @@ final class PreferencesController: NSWindowController {
             rows.append(text("Update preferences apply to this Mac and are not synchronized through iCloud. Automatic download and installation are off by default."))
         }
         rows.append(NSView())
-        let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = false; scroll.borderType = .noBorder
+        let scroll = ResponsiveScrollView(); scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = false; scroll.borderType = .noBorder
         let document = SettingsDocument(); document.translatesAutoresizingMaskIntoConstraints = false; scroll.documentView = document
         Theme.pin(scroll,in:detail)
         let stack = Theme.stack(rows,orientation:.vertical,spacing:18); Theme.pin(stack,in:document,inset:32)

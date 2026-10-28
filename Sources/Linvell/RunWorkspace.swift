@@ -60,7 +60,7 @@ final class RunWorkspace: NSView, LocalProcessTerminalViewDelegate {
     @objc func run() {
         guard !running,!command.stringValue.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { return }
         terminal?.removeFromSuperview()
-        let term = LocalProcessTerminalView(frame:output.bounds); terminal = term; term.processDelegate = self
+        let term = DisplayPacedTerminalView(frame:output.bounds); terminal = term; term.processDelegate = self
         term.font = .monospacedSystemFont(ofSize:Theme.fontSize,weight:.regular)
         term.nativeBackgroundColor = Theme.canvas; term.nativeForegroundColor = Theme.foreground; term.caretColor = Theme.accent
         Theme.pin(term,in:output)

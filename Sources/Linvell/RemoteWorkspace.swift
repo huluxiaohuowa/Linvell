@@ -42,7 +42,7 @@ enum RemoteProgress {
 
 final class RemoteBrowser: NSView, NSTableViewDelegate, NSTableViewDataSource {
     let connection: SSHRemote
-    let pathField = NSTextField(),table = NSTableView(),note = Theme.label("",size:12,color:Theme.secondary)
+    let pathField = NSTextField(),table = ResponsiveTableView(),note = Theme.label("",size:12,color:Theme.secondary)
     var entries: [RemoteEntry] = []
     var directory = "~"
     var onOpen: ((String) -> Void)?
@@ -50,7 +50,9 @@ final class RemoteBrowser: NSView, NSTableViewDelegate, NSTableViewDataSource {
     var onTerminal: (() -> Void)?
     private var generation = UUID()
     private let directoriesOnly: Bool
-    init(connection: SSHRemote,directoriesOnly: Bool = false,initialPath: String = "~") {
+    private(set) var isLoading = false
+    var onSelectionChanged: (() -> Void)?
+    init(connection: SSHRemote,directoriesOnly: Bool = false,initialPath: String = "~",autoLoad: Bool = true) {
         self.directoriesOnly = directoriesOnly; directory = initialPath
         self.connection = connection; super.init(frame:.zero)
         let heading = Theme.label("SSH · "+connection.host,size:13,weight:.semibold)
@@ -62,17 +64,24 @@ final class RemoteBrowser: NSView, NSTableViewDelegate, NSTableViewDataSource {
         pathField.placeholderString = L.text("Remote folder path"); pathField.stringValue = initialPath; pathField.target = self; pathField.action = #selector(go)
         pathField.font = .systemFont(ofSize:13)
         let column = NSTableColumn(identifier:NSUserInterfaceItemIdentifier("remote")); table.addTableColumn(column); table.headerView = nil
-        table.rowHeight = 34; table.dataSource = self; table.delegate = self; table.target = self; table.doubleAction = #selector(openSelected)
+        table.rowHeight = 34; table.dataSource = self; table.delegate = self; table.target = self; table.action = #selector(selectionChanged); table.doubleAction = #selector(openSelected)
         table.backgroundColor = Theme.panel; table.setAccessibilityLabel(L.text("Remote files"))
-        let scroll = NSScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true
+        let scroll = ResponsiveScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true
         Theme.pin(Theme.stack([Theme.stack([heading,NSView(),create,terminal,up,refresh],spacing:6),pathField,note,scroll],orientation:.vertical,spacing:12),in:self,inset:14)
-        browse(initialPath)
+        if autoLoad { browse(initialPath) }
     }
+    var selectedDirectory: String? {
+        guard !isLoading else { return nil }
+        if entries.indices.contains(table.selectedRow),entries[table.selectedRow].directory { return entries[table.selectedRow].path }
+        return directory
+    }
+    @objc private func selectionChanged() { onSelectionChanged?() }
+    func tableViewSelectionDidChange(_ notification: Notification) { onSelectionChanged?() }
     required init?(coder: NSCoder) { fatalError() }
     func numberOfRows(in tableView: NSTableView) -> Int { entries.count }
     func tableView(_ tableView: NSTableView,viewFor tableColumn: NSTableColumn?,row: Int) -> NSView? {
         let entry = entries[row]
-        return RemoteEntryCell(name:entry.name,path:entry.path,directory:entry.directory)
+        return RemoteEntryCell.make(in:tableView,name:entry.name,path:entry.path,directory:entry.directory)
     }
     @objc private func openSelected() {
         guard entries.indices.contains(table.selectedRow) else { return }; let entry = entries[table.selectedRow]
@@ -102,17 +111,19 @@ final class RemoteBrowser: NSView, NSTableViewDelegate, NSTableViewDataSource {
         }
     }
     func browse(_ path: String) {
-        let request = UUID(); generation = request; note.stringValue = L.text("Connecting…")
+        let request = UUID(); generation = request; isLoading = true; table.deselectAll(nil); onSelectionChanged?(); note.stringValue = L.text("Connecting…")
         let remote = connection
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
             let result = Result { try remote.request("list",path:path) }
             DispatchQueue.main.async {
                 guard let self,self.generation == request else { return }
+                self.isLoading = false
+                defer { self.onSelectionChanged?() }
                 switch result {
                 case .success(let reply):
                     self.entries = (reply.entries ?? []).filter { !self.directoriesOnly || $0.directory }; self.directory = reply.path ?? path
                     self.pathField.stringValue = self.directory; self.note.stringValue = L.format("%d entries",self.entries.count)
-                    self.onDirectory?(self.directory); self.table.reloadData()
+                    self.onDirectory?(self.directory); self.table.reloadData(); self.table.deselectAll(nil)
                 case .failure(let error): self.note.stringValue = error.localizedDescription
                 }
             }

@@ -8,8 +8,8 @@
 - License: MIT; bundled notice in `Resources/ThirdPartyNotices.txt`.
 - Terminal engine and macOS implementation are Swift, using native AppKit/POSIX interfaces. This revision contains no C/C++/Objective-C/Metal implementation files under `Sources/SwiftTerm`.
 - Chosen over newer revisions containing Metal shader sources to keep the implementation-language boundary specified by the development plan.
-- Swift Argument Parser is resolved for upstream's unused `termcast` executable; it is not linked into Linvell.
-- `Package.resolved` pins transitive resolution. Reference Vim is never embedded.
+- SwiftTerm library sources are retained under `Vendor/SwiftTerm` at the pinned upstream revision, with MIT license and patch provenance. The only behavioral patch exposes an optional host display scheduler to replace the fixed 60 Hz debounce.
+- The local library-only package does not depend on Swift Argument Parser. `Package.resolved` pins other external dependencies. Reference Vim is never embedded.
 
 ## Devicon file icons
 

@@ -86,6 +86,16 @@ public struct SSHRemote {
         if let error = reply.error { throw GitError.command(error) }
         return reply
     }
+    public static func gitCommand(_ arguments: [String],directory: String) -> String {
+        let command = (directory == "~" ? "cd && " : "")+"exec env GIT_TERMINAL_PROMPT=0 GIT_OPTIONAL_LOCKS=0 git "+GitRepository.arguments(directory:directory == "~" ? "." : directory,arguments:arguments).map(quote).joined(separator:" ")
+        return "/bin/sh -c "+quote(command)
+    }
+    public func git(_ arguments: [String],directory: String,input: Data? = nil,timeout: TimeInterval = 30) throws -> String {
+        guard (directory.hasPrefix("/") || directory == "~"),!directory.utf8.contains(0) else { throw GitError.invalidPath }
+        let result = try ToolCommand.run(URL(fileURLWithPath:"/usr/bin/ssh"),arguments:["-T","-o","BatchMode=yes","-o","ConnectTimeout=10","-o","ServerAliveInterval=10","-o","ServerAliveCountMax=2","--",host,Self.gitCommand(arguments,directory:directory)],directory:nil,timeout:timeout+10,input:input,trimOutput:false,maximumOutputBytes:16*1024*1024)
+        guard result.succeeded else { throw GitError.command(result.timedOut ? "SSH Git operation timed out." : result.output) }
+        return result.output
+    }
     // Fixed stdlib-only protocol. No server installation, shell interpolation or credentials are sent.
     public static let agent = #"""
 import os,sys,json,base64,hashlib,tempfile,stat

@@ -33,7 +33,7 @@ struct PickerOption {
 
 final class QuickPicker: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
     let input = NSSearchField()
-    let table = NSTableView()
+    let table = ResponsiveTableView()
     let options: [PickerOption]
     var results: [PickerOption] = []
     weak var parentWindow: NSWindow?
@@ -48,7 +48,7 @@ final class QuickPicker: NSWindowController, NSTableViewDataSource, NSTableViewD
         table.rowHeight = 46; table.dataSource = self; table.delegate = self; table.backgroundColor = Theme.panel
         table.target = self; table.doubleAction = #selector(choose); table.allowsEmptySelection = false
         table.setAccessibilityLabel(title+" results")
-        let scroll = NSScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true
+        let scroll = ResponsiveScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true
         let hint = Theme.label("↑↓ Navigate     ↵ Open     Esc Cancel",size:12,color:Theme.secondary)
         let stack = Theme.stack([input,scroll,hint],orientation:.vertical,spacing:12)
         Theme.pin(stack,in:panel.contentView!,inset:18)
@@ -89,7 +89,7 @@ final class QuickPicker: NSWindowController, NSTableViewDataSource, NSTableViewD
 final class ToolSidebar: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
     struct Result { let title: String; let detail: String; let url: URL; let line: Int }
     let query = NSSearchField()
-    let table = NSTableView()
+    let table = ResponsiveTableView()
     let caption = Theme.label("",size:11,color:Theme.secondary)
     var results: [Result] = []
     var onSelect: ((URL,Int) -> Void)?
@@ -106,7 +106,7 @@ final class ToolSidebar: NSView, NSTableViewDataSource, NSTableViewDelegate, NSS
         let c = NSTableColumn(identifier:NSUserInterfaceItemIdentifier("results")); table.addTableColumn(c); table.headerView = nil
         table.rowHeight = 48; table.dataSource = self; table.delegate = self; table.backgroundColor = Theme.panel
         table.target = self; table.action = #selector(selected); table.setAccessibilityLabel(kind == "search" ? "Project search results" : "Changed files")
-        let scroll = NSScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true; scroll.drawsBackground = false
+        let scroll = ResponsiveScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true; scroll.drawsBackground = false
         let stack = Theme.stack(kind == "search" ? [row,query,caption,scroll] : [row,caption,scroll],orientation:.vertical,spacing:12)
         Theme.pin(stack,in:self,inset:16)
         if kind == "search" { caption.stringValue = "Search is literal and case-insensitive." } else { refresh() }

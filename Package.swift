@@ -6,7 +6,7 @@ let package = Package(
     platforms: [.macOS("15.6")],
     products: [.executable(name: "Linvell", targets: ["Linvell"]),.executable(name:"LinvellUpdater",targets:["LinvellUpdater"])],
     dependencies: [
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", revision: "5c83a9d214e7354697624c11deb4e488bdcfabad"),
+        .package(path:"Vendor/SwiftTerm"),
         .package(url:"https://github.com/JohnSundell/Ink.git",revision:"bcc9f219900a62c4210e6db726035d7f03ae757b")
     ],
     targets: [

@@ -1,7 +1,7 @@
 import AppKit
 
 final class WelcomeView: NSView {
-    private let scroll = NSScrollView()
+    private let scroll = ResponsiveScrollView()
     private let page: WelcomePage
     init(owner: WorkspaceController) {
         page = WelcomePage(owner:owner); super.init(frame:.zero)

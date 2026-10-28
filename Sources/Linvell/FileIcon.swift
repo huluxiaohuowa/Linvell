@@ -3,7 +3,7 @@ import AppKit
 enum FileIcon {
     private static var cache: [String:NSImage] = [:]
     static func image(for url: URL?,folder: Bool = false,expanded: Bool = false) -> NSImage {
-        if folder { return NSImage(systemSymbolName:expanded ? "folder.fill" : "folder",accessibilityDescription:"Folder")! }
+        if folder { return symbol(expanded ? "folder.fill" : "folder") }
         let ext = url?.pathExtension.lowercased() ?? "",name = url?.lastPathComponent.lowercased() ?? ""
         let types: [String:String] = ["swift":"swift","py":"python","pyw":"python","js":"javascript","mjs":"javascript","cjs":"javascript","ts":"typescript","tsx":"react","jsx":"react","html":"html5","htm":"html5","css":"css3","json":"json","jsonc":"json","yml":"yaml","yaml":"yaml","md":"markdown","markdown":"markdown","rs":"rust","go":"go","c":"c","h":"c","cpp":"cplusplus","cc":"cplusplus","hpp":"cplusplus","cs":"csharp","java":"java","kt":"kotlin","kts":"kotlin","rb":"ruby","php":"php"]
         let key = name == "dockerfile" ? "docker" : name == ".gitignore" || name == ".gitattributes" ? "git" : types[ext]
@@ -22,7 +22,12 @@ enum FileIcon {
         case "zip","dmg","gz","tar": symbol = "archivebox"
         default: symbol = "doc.text"
         }
-        return NSImage(systemSymbolName:symbol,accessibilityDescription:"File")!
+        return Self.symbol(symbol)
+    }
+    private static func symbol(_ name: String) -> NSImage {
+        let key = "symbol:"+name
+        if let image = cache[key] { return image }
+        let image = NSImage(systemSymbolName:name,accessibilityDescription:nil)!; cache[key] = image; return image
     }
     static func view(for url: URL?,folder: Bool = false,expanded: Bool = false) -> NSImageView {
         let image = image(for:url,folder:folder,expanded:expanded),view = NSImageView(image:image)

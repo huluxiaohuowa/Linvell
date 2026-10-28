@@ -12,7 +12,7 @@ final class RemoteTreeNode: NSObject {
 
 final class RemoteExplorer: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     let connection: SSHRemote
-    let table = NSOutlineView()
+    let table = ResponsiveOutlineView()
     private let note = NSTextField(wrappingLabelWithString:"")
     private(set) var rootNode: RemoteTreeNode
     var directory: String { rootNode.path }
@@ -36,7 +36,7 @@ final class RemoteExplorer: NSView, NSOutlineViewDataSource, NSOutlineViewDelega
         table.backgroundColor = Theme.panel; table.autoresizingMask = [.width]; table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         table.target = self; table.action = #selector(selected); table.doubleAction = #selector(toggled)
         table.setAccessibilityLabel(L.text("Remote project files"))
-        let scroll = NSScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true; scroll.drawsBackground = false
+        let scroll = ResponsiveScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true; scroll.drawsBackground = false
         Theme.pin(Theme.stack([title,Theme.stack([open,create,shell,NSView(),refresh],spacing:4),note,scroll],orientation:.vertical,spacing:10),in:self,inset:12)
         reload()
     }
@@ -51,7 +51,7 @@ final class RemoteExplorer: NSView, NSOutlineViewDataSource, NSOutlineViewDelega
     func outlineView(_ outlineView: NSOutlineView,shouldCollapseItem item: Any) -> Bool { (item as? RemoteTreeNode)?.wantsExpanded = false; return true }
     func outlineView(_ outlineView: NSOutlineView,viewFor tableColumn: NSTableColumn?,item: Any) -> NSView? {
         guard let node = item as? RemoteTreeNode else { return nil }
-        return RemoteEntryCell(name:node.name,path:node.path,directory:node.isDirectory)
+        return RemoteEntryCell.make(in:outlineView,name:node.name,path:node.path,directory:node.isDirectory)
     }
     @objc private func selected() {
         guard let node = table.item(atRow:table.selectedRow) as? RemoteTreeNode,!node.isDirectory else { return }
@@ -109,19 +109,31 @@ final class RemoteExplorer: NSView, NSOutlineViewDataSource, NSOutlineViewDelega
 }
 
 final class RemoteEntryCell: NSTableCellView {
+    static let reuseID = NSUserInterfaceItemIdentifier("Linvell.RemoteEntry")
+    private let icon = NSImageView(),label = Theme.label("",size:13)
     init(name: String,path: String,directory: Bool) {
-        super.init(frame:.zero); clipsToBounds = true
-        let icon = FileIcon.view(for:URL(fileURLWithPath:path),folder:directory),label = Theme.label(name,size:13)
+        super.init(frame:.zero); identifier = Self.reuseID; clipsToBounds = true
+        icon.imageScaling = .scaleProportionallyUpOrDown
         label.maximumNumberOfLines = 1; label.usesSingleLineMode = true; label.lineBreakMode = .byTruncatingMiddle
         for view in [icon,label] { view.translatesAutoresizingMaskIntoConstraints = false; addSubview(view) }
-        NSLayoutConstraint.activate([icon.leadingAnchor.constraint(equalTo:leadingAnchor,constant:3),icon.centerYAnchor.constraint(equalTo:centerYAnchor),label.leadingAnchor.constraint(equalTo:icon.trailingAnchor,constant:7),label.trailingAnchor.constraint(equalTo:trailingAnchor,constant:-6),label.centerYAnchor.constraint(equalTo:centerYAnchor),label.heightAnchor.constraint(equalToConstant:20)])
-        toolTip = path
+        NSLayoutConstraint.activate([icon.widthAnchor.constraint(equalToConstant:16),icon.heightAnchor.constraint(equalToConstant:16),icon.leadingAnchor.constraint(equalTo:leadingAnchor,constant:3),icon.centerYAnchor.constraint(equalTo:centerYAnchor),label.leadingAnchor.constraint(equalTo:icon.trailingAnchor,constant:7),label.trailingAnchor.constraint(equalTo:trailingAnchor,constant:-6),label.centerYAnchor.constraint(equalTo:centerYAnchor),label.heightAnchor.constraint(equalToConstant:20)])
+        configure(name:name,path:path,directory:directory)
+    }
+    func configure(name: String,path: String,directory: Bool) {
+        let image = FileIcon.image(for:URL(fileURLWithPath:path),folder:directory)
+        icon.image = image; icon.contentTintColor = directory ? Theme.accent : image.isTemplate ? Theme.secondary : nil
+        label.stringValue = name; label.textColor = Theme.foreground; toolTip = path
+    }
+    static func make(in table: NSTableView,name: String,path: String,directory: Bool) -> RemoteEntryCell {
+        if let cell = table.makeView(withIdentifier:reuseID,owner:nil) as? RemoteEntryCell { cell.configure(name:name,path:path,directory:directory); return cell }
+        return RemoteEntryCell(name:name,path:path,directory:directory)
     }
     required init?(coder: NSCoder) { fatalError() }
 }
 
 final class RemoteFolderPicker: NSWindowController {
     private let browser: RemoteBrowser
+    private var openButton: NSButton?
     weak var parentWindow: NSWindow?
     var onChoose: ((String) -> Void)?
     var onTerminal: (() -> Void)?
@@ -133,10 +145,17 @@ final class RemoteFolderPicker: NSWindowController {
         super.init(window:panel)
         browser.onTerminal = { [weak self] in self?.cancel(); self?.onTerminal?() }
         let cancel = Theme.actionButton("Cancel",target:self,action:#selector(cancel)),open = Theme.actionButton("Open This Folder",target:self,action:#selector(choose))
+        openButton = open
+        browser.onSelectionChanged = { [weak self] in self?.updateTarget() }
+        updateTarget()
         Theme.pin(Theme.stack([browser,Theme.stack([NSView(),cancel,open],spacing:12)],orientation:.vertical,spacing:12),in:panel.contentView!,inset:16)
         owner.beginSheet(panel)
     }
     required init?(coder: NSCoder) { fatalError() }
+    private func updateTarget() {
+        openButton?.isEnabled = browser.selectedDirectory != nil
+        if let path = browser.selectedDirectory { openButton?.title = L.format("Open “%@”",URL(fileURLWithPath:path).lastPathComponent) }
+    }
     @objc private func cancel() { if let window { parentWindow?.endSheet(window); window.orderOut(nil) } }
-    @objc private func choose() { let path = browser.directory; cancel(); onChoose?(path) }
+    @objc private func choose() { guard let path = browser.selectedDirectory else { return }; cancel(); onChoose?(path) }
 }

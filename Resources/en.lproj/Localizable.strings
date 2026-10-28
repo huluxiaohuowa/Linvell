@@ -337,3 +337,5 @@
 "Search with / or ?, substitute with :s or :%s, or use :w, :q, :wq and :set number." = "Search with / or ?, substitute with :s or :%s, or use :w, :q, :wq and :set number.";
 
 "Git Commit Graph" = "Git Commit Graph";
+
+"Open “%@”" = "Open “%@”";

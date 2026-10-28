@@ -21,7 +21,7 @@ final class ProjectTools: NSView {
         spinner.style = .spinning; spinner.controlSize = .small; spinner.isDisplayedWhenStopped = false
         let header = Theme.stack([Theme.stack([title,name],orientation:.vertical,spacing:5),NSView(),spinner,refreshButton])
         content.orientation = .vertical; content.alignment = .leading; content.spacing = 16
-        let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = false
+        let scroll = ResponsiveScrollView(); scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = false
         let page = ToolsPage(); page.translatesAutoresizingMaskIntoConstraints = false; scroll.documentView = page
         Theme.pin(content,in:page,inset:2); page.widthAnchor.constraint(equalTo:scroll.contentView.widthAnchor).isActive = true
         content.setHuggingPriority(.defaultLow,for:.vertical)

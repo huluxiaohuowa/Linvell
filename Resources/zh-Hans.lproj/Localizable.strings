@@ -337,3 +337,5 @@
 "Search with / or ?, substitute with :s or :%s, or use :w, :q, :wq and :set number." = "使用 / 或 ? 查找、:s 或 :%s 替换，或执行 :w、:q、:wq 和 :set number。";
 
 "Git Commit Graph" = "Git 提交图谱";
+
+"Open “%@”" = "打开“%@”";

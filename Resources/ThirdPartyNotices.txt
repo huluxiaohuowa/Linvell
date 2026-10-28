@@ -2,6 +2,7 @@ Linvell — Third-party notices
 
 SwiftTerm (MIT)
 Pinned revision: 5c83a9d214e7354697624c11deb4e488bdcfabad
+Local modification: optional host display-update scheduling for adaptive macOS refresh rates.
 
 Copyright (c) 2019-2022 Miguel de Icaza (https://github.com/migueldeicaza)
 Copyright (c) 2017-2019, The xterm.js authors (https://github.com/xtermjs/xterm.js)

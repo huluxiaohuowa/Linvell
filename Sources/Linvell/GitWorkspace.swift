@@ -3,14 +3,14 @@ import LinvellCore
 
 final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private(set) var repository: GitRepository
-    let table = NSTableView(),diff = NSTextView()
+    let table = ResponsiveTableView(),diff = NSTextView()
     let mode = NSSegmentedControl(labels:[L.text("Changes"),L.text("Commit Graph")],trackingMode:.selectOne,target:nil,action:nil)
     let side = NSSegmentedControl(labels:[L.text("Working Tree"),L.text("Staged")],trackingMode:.selectOne,target:nil,action:nil)
     let message = NSTextField(),caption = Theme.label("",size:12,color:Theme.secondary)
     var changes: [GitChange] = [],commits: [GitCommit] = []
     var graph: [GitGraphRow] = []
     var onOpen: ((URL) -> Void)?
-    let branchesTable = NSTableView()
+    let branchesTable = ResponsiveTableView()
     private var branchNames: [String] = []
     private var changesControls: NSStackView!
     private var commitControls: NSStackView!
@@ -22,8 +22,10 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private var hunks: [GitHunk] = []
     private var busy = false,generation = UUID(),refreshGeneration = UUID()
     private var actions: [NSControl] = []
-    init(project: URL) {
-        repository = GitRepository(root:project)
+    convenience init(project: URL) { self.init(repository:GitRepository(root:project)) }
+    init(repository: GitRepository) {
+        self.repository = repository
+        let project = repository.root
         super.init(frame:.zero)
         wantsLayer = true; layer?.backgroundColor = Theme.canvas.cgColor
         appearance = NSAppearance(named:Theme.profile.isDark ? .darkAqua : .aqua)
@@ -47,13 +49,13 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate {
         table.headerView = nil; table.rowHeight = 58; table.intercellSpacing = .zero; table.dataSource = self; table.delegate = self
         table.backgroundColor = Theme.panel; table.style = .plain; table.target = self
         table.setAccessibilityLabel(L.text("Git changes and history"))
-        let list = NSScrollView(); list.documentView = table; list.hasVerticalScroller = true; list.drawsBackground = false; list.scrollerStyle = .overlay
+        let list = ResponsiveScrollView(); list.documentView = table; list.hasVerticalScroller = true; list.drawsBackground = false; list.scrollerStyle = .overlay
         diff.isEditable = false; diff.isRichText = false; diff.font = Theme.editorFont; diff.backgroundColor = Theme.canvas; diff.textColor = Theme.foreground
         diff.isHorizontallyResizable = true; diff.textContainer?.widthTracksTextView = false; diff.textContainer?.containerSize = NSSize(width:100000,height:CGFloat.greatestFiniteMagnitude)
         diff.frame = NSRect(x:0,y:0,width:600,height:400); diff.isVerticallyResizable = true; diff.textContainerInset = NSSize(width:16,height:16)
         diff.setAccessibilityLabel(L.text("Git diff"))
         diff.usesFindBar = true; diff.isIncrementalSearchingEnabled = true
-        let preview = NSScrollView(); preview.documentView = diff; preview.hasVerticalScroller = true; preview.hasHorizontalScroller = true; preview.drawsBackground = false; preview.scrollerStyle = .overlay
+        let preview = ResponsiveScrollView(); preview.documentView = diff; preview.hasVerticalScroller = true; preview.hasHorizontalScroller = true; preview.drawsBackground = false; preview.scrollerStyle = .overlay
         let split = ResizablePanes(); split.firstMinimum = 280; split.secondMinimum = 280
         detailTitle.maximumNumberOfLines = 1; detailTitle.lineBreakMode = .byTruncatingTail
         detailMetadata.maximumNumberOfLines = 1; detailMetadata.lineBreakMode = .byTruncatingMiddle
@@ -66,7 +68,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate {
         branchesTable.addTableColumn(branchColumn); branchesTable.headerView = nil; branchesTable.rowHeight = 30; branchesTable.dataSource = self; branchesTable.delegate = self
         branchesTable.backgroundColor = Theme.panel; branchesTable.autoresizingMask = [.width]
         branchesTable.target = self; branchesTable.doubleAction = #selector(checkoutSelectedBranch)
-        let branchScroll = NSScrollView(); branchScroll.documentView = branchesTable; branchScroll.hasVerticalScroller = true; branchScroll.drawsBackground = false
+        let branchScroll = ResponsiveScrollView(); branchScroll.documentView = branchesTable; branchScroll.hasVerticalScroller = true; branchScroll.drawsBackground = false
         Theme.pin(Theme.stack([repoName,pending,graph,Theme.label("BRANCHES",size:10,color:Theme.secondary,weight:.semibold),branchScroll,branches],orientation:.vertical,spacing:12),in:navigation,inset:14)
         let details = Theme.stack([bar,network,operations,hunkControls,commitBar,split],orientation:.vertical,spacing:14)
         let root = ResizablePanes(); root.firstMinimum = 150; root.secondMinimum = 540; root.position = 190

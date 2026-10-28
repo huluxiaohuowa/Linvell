@@ -47,17 +47,30 @@ public enum GitError: LocalizedError {
 }
 
 public struct GitRepository {
-    public let root: URL
-    public init(root: URL) { self.root = root }
+    public var root: URL { URL(fileURLWithPath:directory,isDirectory:true) }
+    public private(set) var directory: String
+    public let remote: SSHRemote?
+    typealias Executor = (String,[String],Data?,TimeInterval) throws -> String
+    private let executor: Executor?
+    public init(root: URL) { directory = root.path; remote = nil; executor = nil }
+    public init(remote: SSHRemote,directory: String) {
+        self.directory = directory; self.remote = remote
+        executor = { try remote.git($1,directory:$0,input:$2,timeout:$3) }
+    }
+    init(directory: String,remote: SSHRemote?,executor: @escaping Executor) { self.directory = directory; self.remote = remote; self.executor = executor }
     public func resolvedWorkingTree() throws -> GitRepository {
         var path = try run(["rev-parse","--show-toplevel"])
         if path.hasSuffix("\n") { path.removeLast() }
-        return GitRepository(root:URL(fileURLWithPath:path,isDirectory:true))
+        var resolved = self; resolved.directory = path; return resolved
     }
-    public func run(_ arguments: [String],timeout: TimeInterval = 30) throws -> String {
-        let result = try ToolCommand.run(URL(fileURLWithPath:"/usr/bin/git"),arguments:["--no-pager","--literal-pathspecs","-c","color.ui=false","-c","core.fsmonitor=false","-C",root.path]+arguments,directory:root,timeout:timeout,trimOutput:false)
+    public func run(_ arguments: [String],timeout: TimeInterval = 30,input: Data? = nil) throws -> String {
+        if let executor { return try executor(directory,arguments,input,timeout) }
+        let result = try ToolCommand.run(URL(fileURLWithPath:"/usr/bin/git"),arguments:Self.arguments(directory:directory,arguments:arguments),directory:root,timeout:timeout,input:input,trimOutput:false,maximumOutputBytes:16*1024*1024)
         guard result.succeeded else { throw GitError.command(result.timedOut ? "Git operation timed out." : result.output) }
         return result.output
+    }
+    static func arguments(directory: String,arguments: [String]) -> [String] {
+        ["--no-pager","--literal-pathspecs","-c","color.ui=false","-c","core.fsmonitor=false","-C",directory]+arguments
     }
     public func changes() throws -> [GitChange] { Self.parseStatus(try run(["status","--porcelain=v1","-z","--untracked-files=all"])) }
     public static func parseStatus(_ text: String) -> [GitChange] {
@@ -84,6 +97,13 @@ public struct GitRepository {
     public func diff(_ change: GitChange,staged: Bool) throws -> String {
         if change.index == "?" {
             let file = root.appendingPathComponent(try checked(change.path))
+            if let remote {
+                let reply = try remote.request("read",path:file.path)
+                guard let content = reply.content,let data = Data(base64Encoded:content) else { throw GitError.command("The remote response is incomplete.") }
+                guard data.count <= 1024*1024 else { return "File too large for an untracked-file preview." }
+                guard !data.contains(0),let value = String(data:data,encoding:.utf8) else { return "Binary file" }
+                return "+++ \(change.path)\n"+value.components(separatedBy:"\n").map { "+"+$0 }.joined(separator:"\n")
+            }
             let attrs = try file.resourceValues(forKeys:[.fileSizeKey])
             guard (attrs.fileSize ?? 0) <= 1024*1024 else { return "File too large for an untracked-file preview." }
             let data = try Data(contentsOf:file)
@@ -98,9 +118,9 @@ public struct GitRepository {
         _ = try run(["add","--"]+paths)
     }
     public func applyHunk(_ hunk: GitHunk,unstage: Bool) throws {
-        let result = try ToolCommand.run(URL(fileURLWithPath:"/usr/bin/git"),arguments:["--no-pager","-C",root.path,"apply","--cached","--whitespace=nowarn"]+(unstage ? ["--reverse"] : [])+["-"],directory:root,input:Data(hunk.patch.utf8))
-        guard result.succeeded else { throw GitError.command(result.output) }
+        _ = try run(["apply","--cached","--whitespace=nowarn"]+(unstage ? ["--reverse"] : [])+["-"],input:Data(hunk.patch.utf8))
     }
+
     public func unstage(_ change: GitChange) throws {
         let paths = try [change.path,change.originalPath].compactMap { $0 }.map(checked)
         if (try? run(["rev-parse","--verify","HEAD"])) != nil { _ = try run(["restore","--staged","--"]+paths) }

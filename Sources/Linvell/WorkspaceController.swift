@@ -28,7 +28,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     let workspaceArea = NSView()
     let center = Surface(Theme.canvas)
     let tabs = NSStackView()
-    let tabScroll = NSScrollView()
+    let tabScroll = ResponsiveScrollView()
     let editorHost = NSView()
     let status = Theme.label("Ready",size:12,color:Theme.secondary)
     let modeLabel = Theme.label("TEXT",size:11,color:Theme.accent,weight:.semibold)
@@ -49,6 +49,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     var sidebarKind = "files"
     var activityButtons: [NSButton] = []
     var activeActivity = 0
+    var gitRepositoryFactory: (SSHRemote,String) -> GitRepository = { GitRepository(remote:$0,directory:$1) }
     var preferences: PreferencesController?
     var restoringLayout = true
     var loading: [URL:UUID] = [:]
@@ -143,7 +144,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         outline.backgroundColor = Theme.panel; outline.style = .plain; outline.intercellSpacing = NSSize(width:0,height:4)
         outline.target = self; outline.action = #selector(fileClicked)
         outline.setAccessibilityLabel("Workspace files")
-        let scroll = NSScrollView(); scroll.documentView = outline; scroll.hasVerticalScroller = true
+        let scroll = ResponsiveScrollView(); scroll.documentView = outline; scroll.hasVerticalScroller = true
         scroll.drawsBackground = true; scroll.backgroundColor = Theme.panel; scroll.borderType = .noBorder
         let foot = Theme.label("⌘K ⌘O  Open folder",size:11,color:Theme.secondary)
         let stack = Theme.stack([row,search,scroll,foot],orientation:.vertical,spacing:10)
@@ -222,11 +223,18 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         selectActivity(4)
     }
     @objc func gitWorkspace() {
-        guard let project = root?.url else { openFolder(); return }
+        let repository: GitRepository
+        if let remoteConnection { repository = gitRepositoryFactory(remoteConnection,remoteDirectory) }
+        else if let project = root?.url { repository = GitRepository(root:project) }
+        else { openFolder(); return }
         preserveEditorPosition()
         current = nil; activePane = nil; panes = []; markdownView = nil
         editors.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        let git = GitWorkspace(project:project); git.onOpen = { [weak self] in self?.open($0) }
+        let git = GitWorkspace(repository:repository)
+        git.onOpen = { [weak self] url in
+            if let remote = repository.remote { self?.openRemote(url.path,connection:remote) }
+            else { self?.open(url) }
+        }
         editors.addArrangedSubview(git); editors.adjustSubviews(); renderTabs()
         previewButton.isHidden = true; breadcrumb.stringValue = L.text("Source Control")
         status.stringValue = L.text("Git repository"); modeLabel.stringValue = "GIT"
@@ -533,7 +541,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         host.translatesAutoresizingMaskIntoConstraints = false
         let title = Theme.label("TERMINAL",size:11,color:Theme.secondary,weight:.semibold)
         let bar = Theme.stack([title,NSView(),Theme.button("xmark",help:"Hide Terminal",target:self,action:#selector(toggleTerminal))]); bar.heightAnchor.constraint(equalToConstant:32).isActive = true
-        let term = LocalProcessTerminalView(frame:NSRect(x:0,y:0,width:900,height:220))
+        let term = DisplayPacedTerminalView(frame:NSRect(x:0,y:0,width:900,height:220))
         configureTerminal(term)
         let stack = Theme.stack([bar,term],orientation:.vertical,spacing:4)
         Theme.pin(stack,in:host,inset:12)

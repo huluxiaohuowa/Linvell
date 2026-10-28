@@ -11,7 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let icon = Bundle.main.url(forResource:"AppIcon",withExtension:"icns").flatMap({ NSImage(contentsOf:$0) }) {
             NSApp.applicationIconImage = icon
         }
-        buildMenus()
+        buildMenus(); Rendering.install()
         NSApp.servicesProvider = self
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching:.keyDown) { [weak self] event in
             guard let self,let workspace = NSApp.keyWindow?.windowController as? WorkspaceController else { return event }

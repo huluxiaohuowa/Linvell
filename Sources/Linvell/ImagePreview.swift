@@ -5,7 +5,7 @@ final class ImagePreview: NSView {
     static func supports(_ url: URL) -> Bool {
         UTType(filenameExtension:url.pathExtension)?.conforms(to:.image) == true
     }
-    private let scroll = NSScrollView()
+    private let scroll = ResponsiveScrollView()
     private let canvas: ImageCanvas
     private let information = Theme.label("",size:12,color:Theme.secondary)
     private var fitting = true
@@ -45,6 +45,7 @@ final class ImagePreview: NSView {
 }
 
 private final class ImageCanvas: NSView {
+    override class var isCompatibleWithResponsiveScrolling: Bool { true }
     let image: NSImage?
     var scale: CGFloat = 1
     init(image: NSImage?) { self.image = image; super.init(frame:.zero); wantsLayer = true; clipsToBounds = true }
