@@ -4,11 +4,11 @@
 
 A native macOS editor built in Swift and AppKit. The workspace follows the familiar activity-bar, explorer, editor-tab and terminal-panel structure, with an independent visual identity and a gourd-inspired icon.
 
-**Early development preview.** Full Vim compatibility and the complete development-tool workflow remain in progress. See [development status](docs/STATUS.md).
+**Under active development.** Full Vim compatibility and the complete development-tool workflow remain in progress. See [development status](docs/STATUS.md).
 
 ![Linvell welcome screen in the built-in light theme, showing the file explorer and project and file actions](docs/images/linvell-workspace.webp)
 
-Actual development-preview welcome screen with the built-in Linvell Light theme.
+Actual welcome screen with the built-in Linvell Light theme.
 
 ## Run locally
 
@@ -34,11 +34,15 @@ iCloud Drive can synchronize the preference allowlist in `Linvell/Preferences.js
 Build and package **locally**, then distribute through [GitHub Releases](https://github.com/huluxiaohuowa/Linvell/releases). There is no GitHub runner app build and no App Store upload. The local release script reuses only the team-wide Developer ID and notarization credentials in `~/.apple.json`, in a temporary protected signing keychain.
 
 ```sh
-python3 script/release.py --version 0.1.0-preview.2
+# Increment patch by default; pass minor or major for those changes.
+python3 script/update_version.py
+# python3 script/update_version.py minor
+# python3 script/update_version.py major
+python3 script/release.py --version 0.1.1
 # After reviewing the resulting artifacts and release notes:
-python3 script/release.py --version 0.1.0-preview.2 --publish
+python3 script/release.py --version 0.1.1 --publish
 ```
 
-The script runs tests, builds a Universal app, signs with Hardened Runtime, submits for notarization, staples the ticket, checks Gatekeeper, and creates ZIP/DMG artifacts with SHA-256 checksums. `--publish` pushes the committed source and creates a GitHub prerelease. Credentials are never committed or uploaded to GitHub.
+The script runs tests, builds a Universal app, signs with Hardened Runtime, submits for notarization, staples the ticket, checks Gatekeeper, and creates ZIP/DMG artifacts with SHA-256 checksums. `--publish` pushes the committed source and creates a GitHub release. Credentials are never committed or uploaded to GitHub.
 
 SwiftTerm and its license are recorded in [third-party notices](Resources/ThirdPartyNotices.txt).

@@ -41,7 +41,7 @@ def main():
     parser.add_argument(
         "--publish",
         action="store_true",
-        help="Publish the prepared, notarized artifacts as a GitHub prerelease",
+        help="Publish the prepared, notarized artifacts as a GitHub release",
     )
     parser.add_argument("--config", type=Path, default=Path.home() / ".apple.json")
     parser.add_argument(
@@ -49,8 +49,8 @@ def main():
         help="Create a separately signed local baseline app for update integration tests",
     )
     args = parser.parse_args()
-    if not re.fullmatch(r"\d+\.\d+\.\d+-preview\.\d+", args.version):
-        raise SystemExit("Expected a preview version, e.g. 0.1.0-preview.1")
+    if not re.fullmatch(r"\d+\.\d+\.\d+", args.version):
+        raise SystemExit("Expected a release version, e.g. 0.1.1")
     if args.update_test_base_version and not re.fullmatch(
         r"\d+\.\d+\.\d+-preview\.\d+", args.update_test_base_version
     ):
@@ -294,7 +294,7 @@ def main():
                 revision,
                 "--title",
                 "Linvell " + args.version,
-                "--prerelease",
+                "--latest",
                 "--notes-file",
                 notes,
                 zip_path,
@@ -303,7 +303,7 @@ def main():
                 manifest_path,
             ]
         )
-        print("Published GitHub preview release v" + args.version, flush=True)
+        print("Published GitHub release v" + args.version, flush=True)
     print("Artifacts: " + str(output), flush=True)
 
 

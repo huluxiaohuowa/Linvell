@@ -10,6 +10,8 @@ final class ResizablePanes: NSView {
     var position: CGFloat?
     var onResize: ((CGFloat) -> Void)?
     var arrangedSubviews: [NSView] { subviews.filter { $0 !== handle } }
+    override func didAddSubview(_ subview: NSView) { super.didAddSubview(subview); needsLayout = true }
+    override func willRemoveSubview(_ subview: NSView) { super.willRemoveSubview(subview); needsLayout = true }
     private lazy var handle = PaneHandle(owner:self)
     override var isFlipped: Bool { true }
     func addArrangedSubview(_ view: NSView) {

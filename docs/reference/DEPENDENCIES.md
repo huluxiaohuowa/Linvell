@@ -18,6 +18,12 @@
 - License: MIT; complete license and provenance are bundled in `Resources/FileIcons/`.
 - Original SVG assets and generated 64-pixel PNGs provide native file-type icons. These are static resources, with no additional runtime dependency. Trademark rights remain with their respective owners.
 
+## Ink
+
+- Upstream: https://github.com/JohnSundell/Ink
+- Version: 0.6.0, commit `bcc9f219900a62c4210e6db726035d7f03ae757b`.
+- Pure Swift Markdown parser, MIT license bundled in `Resources/ThirdPartyNotices.txt`. No transitive dependencies.
+
 ## Product references
 
 Nova 14.1 was downloaded from Panic as the original plan's reference, then exited and moved to Trash after the visual-direction correction. Nova is not the visual acceptance baseline.

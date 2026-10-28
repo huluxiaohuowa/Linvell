@@ -18,9 +18,15 @@ cp "$BIN_DIR/Linvell" "$APP/Contents/MacOS/Linvell"
 cp "$BIN_DIR/LinvellUpdater" "$APP/Contents/Helpers/LinvellUpdater"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/Brand/Linvell.png "$APP/Contents/Resources/Linvell.png"
+for wordmark in Resources/Brand/Wordmark*.png; do
+  [[ -f "$wordmark" ]] && cp "$wordmark" "$APP/Contents/Resources/"
+done
 if [[ -f Resources/AppIcon.icns ]]; then cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"; fi
 if [[ -f Resources/ThirdPartyNotices.txt ]]; then cp Resources/ThirdPartyNotices.txt "$APP/Contents/Resources/ThirdPartyNotices.txt"; fi
 if [[ -d Resources/FileIcons ]]; then ditto Resources/FileIcons "$APP/Contents/Resources/FileIcons"; fi
+for localization in Resources/*.lproj; do
+  [[ -d "$localization" ]] && ditto "$localization" "$APP/Contents/Resources/$(basename "$localization")"
+done
 for resource in "$BIN_DIR"/*.bundle; do
   [[ -d "$resource" ]] && ditto "$resource" "$APP/Contents/Resources/$(basename "$resource")"
 done

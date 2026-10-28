@@ -1,6 +1,6 @@
 # Development status
 
-2026-10-28 · 0.1.0 preview series
+2026-10-28 · 0.1.1
 
 ## Implemented foundation
 
@@ -15,16 +15,20 @@
 - SwiftTerm PTY terminal with the project directory passed as a process parameter.
 - Native initial Vim command engine: Normal/Insert, basic character/line/word motions, counts, dd/dw/d$/yy, put, deletion, undo/redo, insert entry and a small Ex command set.
 - Optional iCloud Drive preference file with an explicit allowlist and per-setting merge. No document or credential sync.
-- Local packaging, Developer ID signing, notarization and GitHub prerelease scripts.
-- GitHub update checks, independent automatic download/install switches, checksum and signing-identity verification, and an installer helper that waits for normal quit and retains the previous app. Signed end-to-end update acceptance is still pending.
+- Local packaging, Developer ID signing, notarization and GitHub release scripts.
+- GitHub update checks, independent automatic download/install switches, checksum and signing-identity verification, and an installer helper that waits for normal quit and retains the previous app. Signed download, verification and install/restart passed with a disposable baseline.
 - Background file decoding, an incremental line index and noncontiguous native text layout. Large-file performance remains under measurement and is not claimed to match Sublime.
+
+- Image preview and live Markdown/HTML right-side previews with local assets.
+- Live Chinese/English UI selection, custom wordmark, installed monospace font discovery and the native font chooser.
+- Initial read-only runtime/package manifest and Git tools, plus native system metrics. Package modifications, databases and task chains remain open.
 
 ## Still open
 
 The original full-editor goal is **not complete**. In particular:
 
 - Full Vim behavior, Visual/Replace modes, operators/text objects, macros, registers beyond the initial register, mappings, Vim regex, full Ex, Vimscript/Vim9 and differential compatibility coverage.
-- Full multi-cursor/column selection behavior, folding, minimap, robust language-aware syntax parsing, LSP, DAP, Git write workflows, tasks, remote files, previews and comprehensive settings/keybinding management.
+- Full multi-cursor/column selection behavior, folding, minimap, robust language-aware syntax parsing, LSP, DAP, Git write workflows, tasks, remote files and comprehensive settings/keybinding management.
 - Per-workspace restoration of all files, split sessions and scroll/cursor state. Recovery snapshots currently restore as untitled copies.
 - Encoding selection/conversion UI and mixed-line-ending normalization. Saving mixed endings is intentionally blocked until the format can be chosen explicitly.
 - Project replacement previews, cancellation-aware large-project indexing/search and larger-file performance acceptance. Current scans exclude common generated directories and have explicit caps.

@@ -78,4 +78,38 @@ final class NativeEditingTests: XCTestCase {
         }
         XCTAssertGreaterThan(fragments,1)
     }
+    func testWelcomeActionsKeepFullWidthInWideAndCompactLayouts() {
+        let controller = WorkspaceController()
+        let welcome = WelcomeView(owner:controller)
+        defer { controller.window?.orderOut(nil) }
+        window.contentView = welcome
+        func buttons(_ view: NSView) -> [NSButton] {
+            view.subviews.flatMap { child -> [NSButton] in
+                if let button = child as? NSButton { return [button] }
+                return buttons(child)
+            }
+        }
+        for width: CGFloat in [480,1000] {
+            window.setContentSize(NSSize(width:width,height:650)); window.contentView?.layoutSubtreeIfNeeded()
+            let actions = buttons(welcome)
+            XCTAssertEqual(actions.count,3)
+            actions.forEach { XCTAssertGreaterThanOrEqual($0.bounds.width,320) }
+        }
+    }
+    func testRemovingSplitPaneExpandsRemainingViewWithoutAResize() {
+        let split = ResizablePanes(frame:NSRect(x:0,y:0,width:1000,height:600)),left = NSView(),right = NSView()
+        split.addArrangedSubview(left); split.addArrangedSubview(right); split.setPosition(400,ofDividerAt:0)
+        XCTAssertEqual(left.frame.width,400,accuracy:1)
+        right.removeFromSuperview(); split.layoutSubtreeIfNeeded()
+        XCTAssertEqual(split.arrangedSubviews.count,1)
+        XCTAssertEqual(left.frame,split.bounds)
+    }
+    func testLanguageRefreshPreservesIconOnlyControlsAndSearchValue() {
+        let root = NSView(),icon = Theme.button("folder",help:"Open Folder…",target:self,action:#selector(NSResponder.cancelOperation(_:))),search = NSSearchField()
+        search.stringValue = "my unmodified query"; search.placeholderString = "Filter files"
+        root.addSubview(icon); root.addSubview(search)
+        L.apply(to:root); L.apply(to:root)
+        XCTAssertEqual(icon.title,""); XCTAssertEqual(icon.imagePosition,.imageOnly)
+        XCTAssertEqual(search.stringValue,"my unmodified query")
+    }
 }

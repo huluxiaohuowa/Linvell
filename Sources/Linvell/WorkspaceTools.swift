@@ -100,9 +100,9 @@ final class ToolSidebar: NSView, NSTableViewDataSource, NSTableViewDelegate, NSS
         self.project = project; self.kind = kind
         super.init(frame:.zero)
         let heading = Theme.label(kind == "search" ? "SEARCH" : "SOURCE CONTROL",size:11,color:Theme.secondary,weight:.semibold)
-        let refreshButton = NSButton(title:"Refresh",target:self,action:#selector(refresh)); refreshButton.bezelStyle = .inline
+        let refreshButton = NSButton(title:L.text("Refresh"),target:self,action:#selector(refresh)); refreshButton.bezelStyle = .inline
         let row = Theme.stack([heading,NSView(),refreshButton]); row.heightAnchor.constraint(equalToConstant:36).isActive = true
-        query.placeholderString = "Search project text"; query.delegate = self; query.font = .systemFont(ofSize:13)
+        query.placeholderString = L.text("Search project text"); query.delegate = self; query.font = .systemFont(ofSize:13)
         let c = NSTableColumn(identifier:NSUserInterfaceItemIdentifier("results")); table.addTableColumn(c); table.headerView = nil
         table.rowHeight = 48; table.dataSource = self; table.delegate = self; table.backgroundColor = Theme.panel
         table.target = self; table.action = #selector(selected); table.setAccessibilityLabel(kind == "search" ? "Project search results" : "Changed files")

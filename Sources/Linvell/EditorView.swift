@@ -6,9 +6,19 @@ final class OpenDocument: NSObject, NSTextStorageDelegate {
     let storage = NSTextStorage()
     let vim = VimEngine()
     let lines: LineIndex
+    let imageURL: URL?
+    var markdownPreview = false
+    var fileURL: URL? { imageURL ?? buffer.url }
+    var displayName: String { imageURL?.lastPathComponent ?? buffer.url?.lastPathComponent ?? L.text("Untitled") }
+    var isMarkdown: Bool { ["md","markdown","mdown"].contains(fileURL?.pathExtension.lowercased() ?? "") }
+    var isHTML: Bool { ["html","htm"].contains(fileURL?.pathExtension.lowercased() ?? "") }
+    var supportsPreview: Bool { isMarkdown || isHTML }
     init(_ buffer: DocumentBuffer,lines: LineIndex? = nil) {
-        self.buffer = buffer; self.lines = lines ?? LineIndex(buffer.text); super.init()
+        self.buffer = buffer; self.lines = lines ?? LineIndex(buffer.text); imageURL = nil; super.init()
         storage.setAttributedString(NSAttributedString(string:buffer.text)); storage.delegate = self
+    }
+    init(imageURL: URL) {
+        buffer = DocumentBuffer(); lines = LineIndex(""); self.imageURL = imageURL; super.init()
     }
     func textStorage(_ textStorage: NSTextStorage,didProcessEditing editedMask: NSTextStorageEditActions,range editedRange: NSRange,changeInLength delta: Int) {
         guard editedMask.contains(.editedCharacters) else { return }
@@ -224,6 +234,7 @@ final class EditorPane: NSView, NSTextViewDelegate {
     let gutter = LineNumbers()
     let document: OpenDocument
     var onChange: (() -> Void)?
+    var onTextChanged: (() -> Void)?
     var onFocus: (() -> Void)?
     private var highlighting = false
     private var highlightWork: DispatchWorkItem?
@@ -270,6 +281,7 @@ final class EditorPane: NSView, NSTextViewDelegate {
         let before = document.buffer.text
         if !textView.applyingVim { document.vim.recordInsertion(before:before,cursor:textView.selectedRange().location) }
         document.buffer.update(document.storage.string)
+        onTextChanged?()
         gutter.needsDisplay = true; onChange?()
         highlightWork?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.highlight() }

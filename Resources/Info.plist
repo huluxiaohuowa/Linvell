@@ -1,21 +1,88 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>CFBundleExecutable</key><string>Linvell</string>
-<key>CFBundleIdentifier</key><string>top.fuluwa.linvell</string>
-<key>CFBundleName</key><string>Linvell</string>
-<key>CFBundleIconFile</key><string>AppIcon</string>
-<key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.1.0</string>
-<key>CFBundleVersion</key><string>2</string>
-<key>LinvellReleaseVersion</key><string>0.1.0-preview.2</string>
-<key>LSMinimumSystemVersion</key><string>15.6</string>
-<key>NSPrincipalClass</key><string>NSApplication</string>
-<key>NSHighResolutionCapable</key><true/>
-<key>CFBundleDocumentTypes</key><array><dict>
-<key>CFBundleTypeName</key><string>Source and Text</string>
-<key>CFBundleTypeRole</key><string>Editor</string>
-<key>LSHandlerRank</key><string>Alternate</string>
-<key>LSItemContentTypes</key><array><string>public.text</string><string>public.source-code</string></array>
-</dict></array>
-</dict></plist>
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key>
+	<string>Linvell</string>
+	<key>CFBundleIdentifier</key>
+	<string>top.fuluwa.linvell</string>
+	<key>CFBundleName</key>
+	<string>Linvell</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.1</string>
+	<key>CFBundleVersion</key>
+	<string>3</string>
+	<key>LinvellReleaseVersion</key>
+	<string>0.1.1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>15.6</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>zh-Hans</string>
+	</array>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Source and Text</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.text</string>
+				<string>public.source-code</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Folder</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.folder</string>
+			</array>
+		</dict>
+	</array>
+	<key>NSServices</key>
+	<array>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>Open in Linvell</string>
+				<key>zh-Hans</key>
+				<string>用 Linvell 打开</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>openInLinvell</string>
+			<key>NSPortName</key>
+			<string>Linvell</string>
+			<key>NSSendTypes</key>
+			<array>
+				<string>public.file-url</string>
+			</array>
+			<key>NSRequiredContext</key>
+			<dict>
+				<key>NSApplicationIdentifier</key>
+				<string>com.apple.finder</string>
+			</dict>
+		</dict>
+	</array>
+</dict>
+</plist>

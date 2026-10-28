@@ -4,12 +4,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var workspaces: [WorkspaceController] = []
     var keyMonitor: Any?
     var chordDeadline: Date?
+    var receivedOpenFiles = false
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         if let icon = Bundle.main.url(forResource:"AppIcon",withExtension:"icns").flatMap({ NSImage(contentsOf:$0) }) {
             NSApp.applicationIconImage = icon
         }
         buildMenus()
+        NSApp.servicesProvider = self
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching:.keyDown) { [weak self] event in
             guard let self,let workspace = NSApp.keyWindow?.windowController as? WorkspaceController else { return event }
             let command = event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command
@@ -25,7 +27,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return event
         }
         NotificationCenter.default.addObserver(self,selector:#selector(preferencesApplied),name:PreferencesSync.didApply,object:nil)
-        let controller = newWorkspace()
+        NotificationCenter.default.addObserver(self,selector:#selector(languageApplied),name:L.changed,object:nil)
+        // Launch Services can deliver openFiles before didFinishLaunching.
+        // Reuse that window and do not restore a second welcome workspace.
+        let controller = workspaceForOpening()
         let args = CommandLine.arguments.dropFirst()
         if let at = args.firstIndex(of:"--benchmark-open"),args.index(after:at) < args.endIndex,
            let out = args.firstIndex(of:"--benchmark-report"),args.index(after:out) < args.endIndex {
@@ -50,9 +55,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let index = args.firstIndex(of:"--demo"), args.index(after:index) < args.endIndex {
             controller.window?.setContentSize(NSSize(width:1320,height:860)); controller.window?.center()
             let file = URL(fileURLWithPath:args[args.index(after:index)])
-            controller.setProject(file.deletingLastPathComponent().deletingLastPathComponent())
-            controller.open(file.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Package.swift")); controller.open(file)
-        } else { controller.restore() }
+            let folder = file.deletingLastPathComponent(),project = folder.lastPathComponent == "Samples" ? folder.deletingLastPathComponent() : folder
+            controller.setProject(project)
+            let manifest = project.appendingPathComponent("Package.swift")
+            if manifest != file,FileManager.default.fileExists(atPath:manifest.path) { controller.open(manifest) }
+            controller.open(file)
+        } else if !receivedOpenFiles { controller.restore() }
         NSApp.activate(ignoringOtherApps:true)
         PreferencesSync.shared.start()
         UpdateManager.shared.start()
@@ -64,18 +72,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             workspace.applyTheme(); workspace.updateStatus()
         }
     }
+    @objc private func languageApplied() {
+        buildMenus()
+        for workspace in workspaces { workspace.relocalize() }
+    }
     @discardableResult @objc func newWorkspace() -> WorkspaceController {
         let controller = WorkspaceController(); workspaces.append(controller)
         controller.showWindow(nil); controller.window?.makeKeyAndOrderFront(nil)
         return controller
     }
     @objc func newWindow(_ sender: Any?) { newWorkspace() }
+    func workspaceForOpening() -> WorkspaceController {
+        workspaces.first(where:{ $0.window?.isKeyWindow == true })
+            ?? workspaces.last(where:{ $0.window?.isVisible == true }) ?? newWorkspace()
+    }
     func application(_ sender: NSApplication,openFiles filenames: [String]) {
-        let controller = workspaces.first(where: { $0.window?.isKeyWindow == true }) ?? workspaces.last ?? newWorkspace()
+        receivedOpenFiles = true
+        let controller = workspaceForOpening()
         filenames.forEach { controller.open(URL(fileURLWithPath:$0)) }; sender.reply(toOpenOrPrint:.success)
     }
+    @objc func openInLinvell(_ pasteboard: NSPasteboard,userData: String?,error: AutoreleasingUnsafeMutablePointer<NSString?>) {
+        let urls = FileDrop.urls(pasteboard)
+        guard !urls.isEmpty else { return }
+        receivedOpenFiles = true
+        let controller = workspaceForOpening()
+        urls.forEach { controller.open($0) }
+        controller.window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps:true)
+    }
     func applicationShouldHandleReopen(_ sender: NSApplication,hasVisibleWindows flag: Bool) -> Bool {
-        if !flag { newWorkspace() }; return true
+        if !flag { workspaceForOpening().window?.makeKeyAndOrderFront(nil) }; return true
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         for workspace in workspaces where workspace.window?.isVisible == true {
@@ -111,25 +136,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         PreferencesSync.shared.changed()
     }
     @objc func about() {
-        NSApp.orderFrontStandardAboutPanel(options:[.applicationName:"Linvell",.applicationVersion:"0.1.0 · Development Preview",.credits:NSAttributedString(string:"Native Swift editor\nFull Vim and expanded IDE features are in development.\nlinvell.fuluwa.top")])
+        NSApp.orderFrontStandardAboutPanel(options:[.applicationName:"Linvell",.applicationVersion:UpdateManager.currentVersion,.credits:NSAttributedString(string:"Native Swift editor\nFull Vim and expanded IDE features are in development.\nlinvell.fuluwa.top")])
     }
     private func buildMenus() {
         let bar = NSMenu(); NSApp.mainMenu = bar
-        func menu(_ title: String) -> NSMenu { let item = NSMenuItem(); let m = NSMenu(title:title); item.submenu = m; bar.addItem(item); return m }
+        func menu(_ title: String) -> NSMenu { let item = NSMenuItem(); let m = NSMenu(title:L.text(title)); item.submenu = m; bar.addItem(item); return m }
         func item(_ m: NSMenu,_ title: String,_ action: Selector,_ key: String = "",_ mods: NSEvent.ModifierFlags = [.command],route: Bool = false) {
-            let i = NSMenuItem(title:title,action:route ? #selector(self.route(_:)) : action,keyEquivalent:key); i.keyEquivalentModifierMask = mods
+            let i = NSMenuItem(title:L.text(title),action:route ? #selector(self.route(_:)) : action,keyEquivalent:key); i.keyEquivalentModifierMask = mods
             if route { i.target = self; i.representedObject = NSStringFromSelector(action) }
             m.addItem(i)
         }
         let app = menu("Linvell")
-        let about = NSMenuItem(title:"About Linvell",action:#selector(self.about),keyEquivalent:""); about.target = self; app.addItem(about)
-        let updates = NSMenuItem(title:"Check for Updates…",action:#selector(checkUpdates),keyEquivalent:""); updates.target = self; app.addItem(updates)
+        let about = NSMenuItem(title:L.text("About Linvell"),action:#selector(self.about),keyEquivalent:""); about.target = self; app.addItem(about)
+        let updates = NSMenuItem(title:L.text("Check for Updates…"),action:#selector(checkUpdates),keyEquivalent:""); updates.target = self; app.addItem(updates)
         app.addItem(.separator()); item(app,"Hide Linvell",#selector(NSApplication.hide(_:)),"h")
         item(app,"Settings…",#selector(WorkspaceController.showSettings),",",route:true)
         app.addItem(.separator()); item(app,"Quit Linvell",#selector(NSApplication.terminate(_:)),"q")
         let file = menu("File")
         item(file,"New File",#selector(WorkspaceController.newFile),"n",route:true)
-        let nw = NSMenuItem(title:"New Window",action:#selector(newWindow(_:)),keyEquivalent:"n"); nw.target = self; nw.keyEquivalentModifierMask = [.command,.shift]; file.addItem(nw)
+        let nw = NSMenuItem(title:L.text("New Window"),action:#selector(newWindow(_:)),keyEquivalent:"n"); nw.target = self; nw.keyEquivalentModifierMask = [.command,.shift]; file.addItem(nw)
         item(file,"Open…",#selector(WorkspaceController.openFile),"o",route:true)
         item(file,"Open Folder…",#selector(WorkspaceController.openFolder),route:true)
         file.addItem(.separator())
@@ -154,13 +179,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item(view,"Command Palette",#selector(WorkspaceController.commandPalette),"p",[.command,.shift],route:true)
         item(view,"Open Quickly…",#selector(WorkspaceController.quickOpen),"p",route:true)
         item(view,"Go to Symbol…",#selector(WorkspaceController.documentSymbols),"o",[.command,.shift],route:true)
+        item(view,"Toggle Preview",#selector(WorkspaceController.toggleMarkdownPreview),"v",[.command,.shift],route:true)
+        item(view,"Project Tools",#selector(WorkspaceController.projectTools),route:true)
         view.addItem(.separator())
         item(view,"Toggle Sidebar",#selector(WorkspaceController.toggleSidebar),"b",route:true)
         item(view,"Split Editor",#selector(WorkspaceController.toggleSplit),"\\",route:true)
         item(view,"Toggle Terminal",#selector(WorkspaceController.toggleTerminal),"`",[.control],route:true)
         item(view,"Toggle Vim Mode",#selector(WorkspaceController.toggleVim),"",route:true)
         view.addItem(.separator())
-        let themes = NSMenu(title:"Theme"), themeItem = NSMenuItem(title:"Theme",action:nil,keyEquivalent:"")
+        let themes = NSMenu(title:L.text("Theme")), themeItem = NSMenuItem(title:L.text("Theme"),action:nil,keyEquivalent:"")
         themeItem.submenu = themes; view.addItem(themeItem)
         for profile in Theme.Profile.allCases {
             let i = NSMenuItem(title:profile.rawValue,action:#selector(selectTheme(_:)),keyEquivalent:""); i.target = self; i.state = profile == Theme.profile ? .on : .off; themes.addItem(i)
@@ -170,10 +197,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let win = menu("Window"); NSApp.windowsMenu = win
         item(win,"Minimize",#selector(NSWindow.performMiniaturize(_:)),"m")
         item(win,"Zoom",#selector(NSWindow.performZoom(_:)))
-        let help = menu("Help"); let web = NSMenuItem(title:"Linvell Website",action:#selector(website),keyEquivalent:""); web.target = self; help.addItem(web)
+        let help = menu("Help"); let web = NSMenuItem(title:L.text("Linvell Website"),action:#selector(website),keyEquivalent:""); web.target = self; help.addItem(web)
     }
 }
 
+L.configureLaunchLanguage()
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate

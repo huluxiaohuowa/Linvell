@@ -32,22 +32,29 @@ enum Theme {
     }
     static var editorFont: NSFont {
         let name = UserDefaults.standard.string(forKey:"editorFontFamily") ?? "SF Mono"
-        return name == "SF Mono" ? .monospacedSystemFont(ofSize:fontSize,weight:.regular) : NSFont(name:name,size:fontSize) ?? .monospacedSystemFont(ofSize:fontSize,weight:.regular)
+        return EditorFonts.resolve(name,size:fontSize) ?? .monospacedSystemFont(ofSize:fontSize,weight:.regular)
     }
     static func label(_ text: String, size: CGFloat = 13, color: NSColor = foreground, weight: NSFont.Weight = .regular) -> NSTextField {
-        let v = ThemedLabel(labelWithString: text)
+        let v = ThemedLabel(labelWithString: L.text(text))
         v.role = color == secondary ? 1 : color == accent ? 2 : 0
         v.font = .systemFont(ofSize: size, weight: weight); v.textColor = color
         return v
     }
     static func button(_ symbol: String, help: String, target: AnyObject, action: Selector) -> NSButton {
         let b = NSButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: help)!, target: target, action: action)
+        b.title = ""; b.imagePosition = .imageOnly; b.identifier = NSUserInterfaceItemIdentifier("Linvell.iconButton")
         b.bezelStyle = .inline; b.isBordered = false; b.contentTintColor = secondary
-        b.toolTip = help; b.setAccessibilityLabel(help)
+        b.toolTip = L.text(help); b.setAccessibilityLabel(L.text(help))
         b.widthAnchor.constraint(equalToConstant: 32).isActive = true
         b.heightAnchor.constraint(equalToConstant: 30).isActive = true
         return b
     }
+    static func actionButton(_ title: String,target: AnyObject,action: Selector) -> NSButton {
+        let button = ActionButton(title:L.text(title),target:target,action:action)
+        button.isBordered = false; button.setButtonType(.momentaryPushIn); button.font = .systemFont(ofSize:13,weight:.medium)
+        return button
+    }
+    static func choiceButton() -> NSPopUpButton { ChoiceButton(frame:.zero,pullsDown:false) }
     static func stack(_ views: [NSView], orientation: NSUserInterfaceLayoutOrientation = .horizontal, spacing: CGFloat = 10) -> NSStackView {
         let s = NSStackView(views: views); s.orientation = orientation; s.spacing = spacing; s.distribution = .fill; s.clipsToBounds = true
         s.alignment = orientation == .vertical ? .leading : .centerY
@@ -64,6 +71,36 @@ enum Theme {
             child.topAnchor.constraint(equalTo: parent.topAnchor, constant: inset),
             child.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -inset)
         ])
+    }
+}
+
+private final class ChoiceButton: NSPopUpButton {
+    override var intrinsicContentSize: NSSize {
+        NSSize(width:min(300,max(160,((titleOfSelectedItem ?? "") as NSString).size(withAttributes:[.font:NSFont.systemFont(ofSize:13)]).width+46)),height:34)
+    }
+    override func draw(_ dirtyRect: NSRect) {
+        let face = NSBezierPath(roundedRect:bounds.insetBy(dx:1,dy:1),xRadius:6,yRadius:6)
+        Theme.selection.setFill(); face.fill(); Theme.accent.withAlphaComponent(0.7).setStroke(); face.lineWidth = 1; face.stroke()
+        let paragraph = NSMutableParagraphStyle(); paragraph.lineBreakMode = .byTruncatingMiddle
+        let title = titleOfSelectedItem ?? "",attributes: [NSAttributedString.Key:Any] = [.font:NSFont.systemFont(ofSize:13,weight:.medium),.foregroundColor:Theme.foreground,.paragraphStyle:paragraph]
+        let size = (title as NSString).size(withAttributes:attributes)
+        (title as NSString).draw(in:NSRect(x:12,y:(bounds.height-size.height)/2,width:max(0,bounds.width-46),height:size.height),withAttributes:attributes)
+        let arrow = NSImage(systemSymbolName:"chevron.down",accessibilityDescription:nil)?.withSymbolConfiguration(.init(paletteColors:[Theme.accent]))
+        arrow?.draw(in:NSRect(x:bounds.width-25,y:(bounds.height-12)/2,width:12,height:12),from:.zero,operation:.sourceOver,fraction:1)
+    }
+}
+
+private final class ActionButton: NSButton {
+    override var intrinsicContentSize: NSSize { NSSize(width:max(34,(title as NSString).size(withAttributes:[.font:font ?? NSFont.systemFont(ofSize:13)]).width+26),height:32) }
+    override func draw(_ dirtyRect: NSRect) {
+        let face = NSBezierPath(roundedRect:bounds.insetBy(dx:1,dy:1),xRadius:6,yRadius:6)
+        let alpha: CGFloat = isEnabled ? 1 : 0.4
+        (isHighlighted ? Theme.accent.withAlphaComponent(0.22) : Theme.selection.withAlphaComponent(0.65)).withAlphaComponent(alpha).setFill(); face.fill()
+        Theme.accent.withAlphaComponent(isEnabled ? 0.65 : 0.25).setStroke(); face.lineWidth = 1; face.stroke()
+        let attributes: [NSAttributedString.Key:Any] = [.font:font ?? NSFont.systemFont(ofSize:13),.foregroundColor:Theme.foreground.withAlphaComponent(alpha)]
+        let size = (title as NSString).size(withAttributes:attributes)
+        (title as NSString).draw(at:NSPoint(x:(bounds.width-size.width)/2,y:(bounds.height-size.height)/2),withAttributes:attributes)
+        if window?.firstResponder === self { Theme.accent.setStroke(); let ring = NSBezierPath(roundedRect:bounds.insetBy(dx:3,dy:3),xRadius:4,yRadius:4); ring.lineWidth = 1; ring.stroke() }
     }
 }
 

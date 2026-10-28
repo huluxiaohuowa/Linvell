@@ -7,7 +7,9 @@ final class UpdateManager {
     static let shared = UpdateManager()
     static let changed = Notification.Name("Linvell.UpdateStatusChanged")
     struct Prepared: Codable { let tag: String; let replacement: URL }
-    private(set) var status = "Updates are delivered through GitHub Releases."
+    private var statusKey = "Updates are delivered through GitHub Releases."
+    private var statusValues: [CVarArg] = []
+    var status: String { String(format:L.text(statusKey),arguments:statusValues.map { ($0 as? String).map(L.existing) ?? $0 }) }
     private(set) var offer: UpdateOffer?
     private(set) var prepared: Prepared?
     private(set) var busy = false
@@ -19,7 +21,7 @@ final class UpdateManager {
         config.httpCookieStorage = nil; config.httpShouldSetCookies = false
         return URLSession(configuration:config)
     }()
-    static var currentVersion: String { Bundle.main.object(forInfoDictionaryKey:"LinvellReleaseVersion") as? String ?? "0.1.0-preview.2" }
+    static var currentVersion: String { Bundle.main.object(forInfoDictionaryKey:"LinvellReleaseVersion") as? String ?? "0.1.1" }
     var automaticChecks: Bool {
         get { UserDefaults.standard.object(forKey:"updateAutomaticChecks") == nil || UserDefaults.standard.bool(forKey:"updateAutomaticChecks") }
         set { UserDefaults.standard.set(newValue,forKey:"updateAutomaticChecks"); notify() }
@@ -41,7 +43,7 @@ final class UpdateManager {
     func start() {
         if let data = UserDefaults.standard.data(forKey:"preparedUpdate"),let value = try? JSONDecoder().decode(Prepared.self,from:data),
            let next = ReleaseVersion(value.tag),let current = ReleaseVersion(Self.currentVersion),next > current,FileManager.default.fileExists(atPath:value.replacement.path) {
-            prepared = value; status = "\(value.tag) is ready to install."
+            prepared = value; setStatus("%@ is ready to install.",value.tag)
         } else { UserDefaults.standard.removeObject(forKey:"preparedUpdate") }
         timer = Timer.scheduledTimer(withTimeInterval:6*60*60,repeats:true) { [weak self] _ in self?.checkAutomatically() }
         DispatchQueue.main.asyncAfter(deadline:.now()+30) { [weak self] in self?.checkAutomatically() }
@@ -52,7 +54,7 @@ final class UpdateManager {
         if Date().timeIntervalSince1970-last >= 6*60*60 { check() }
     }
     private func notify() { NotificationCenter.default.post(name:Self.changed,object:nil) }
-    private func setStatus(_ value: String) { status = value; notify() }
+    private func setStatus(_ key: String,_ values: CVarArg...) { statusKey = key; statusValues = values; notify() }
     func check() {
         guard !busy else { return }; busy = true; setStatus("Checking GitHub Releases…")
         let previews = includePreviews
@@ -67,13 +69,15 @@ final class UpdateManager {
                 offer = UpdateOffer.select(releases,installed:Self.currentVersion,previews:previews)
                 UserDefaults.standard.set(Date().timeIntervalSince1970,forKey:"updateLastChecked")
                 busy = false
-                setStatus(offer.map { "\($0.tag) is available." } ?? (prepared == nil ? "No newer eligible public release was found." : "\(prepared!.tag) is ready to install."))
+                if let offer { setStatus("%@ is available.",offer.tag) }
+                else if let prepared { setStatus("%@ is ready to install.",prepared.tag) }
+                else { setStatus("No newer eligible public release was found.") }
                 if offer != nil && automaticDownloads { download() }
-            } catch { busy = false; setStatus("Could not check for updates. \(error.localizedDescription)") }
+            } catch { busy = false; setStatus("Could not check for updates. %@",error.localizedDescription) }
         }
     }
     func download() {
-        guard !busy,let offer else { return }; busy = true; setStatus("Downloading \(offer.tag)…")
+        guard !busy,let offer else { return }; busy = true; setStatus("Downloading %@…",offer.tag)
         Task { @MainActor in
             do {
                 let (checksumData,response) = try await session.data(from:offer.checksum.browser_download_url)
@@ -84,7 +88,7 @@ final class UpdateManager {
                 let zip = root.appendingPathComponent("update.zip")
                 let receiver = BoundedDownload(destination:zip,limit:offer.archive.size)
                 try await receiver.fetch(offer.archive.browser_download_url)
-                setStatus("Verifying \(offer.tag)…")
+                setStatus("Verifying %@…",offer.tag)
                 let current = Bundle.main.bundleURL
                 let replacement: URL = try await Task.detached(priority:.utility) {
                     let bytes = try Data(contentsOf:zip,options:.mappedIfSafe)
@@ -104,8 +108,8 @@ final class UpdateManager {
                 }.value
                 prepared = Prepared(tag:offer.tag,replacement:replacement)
                 UserDefaults.standard.set(try JSONEncoder().encode(prepared),forKey:"preparedUpdate")
-                busy = false; setStatus("\(offer.tag) verified. " + (automaticInstall ? "It will install when Linvell quits." : "Ready to install and restart."))
-            } catch { busy = false; setStatus("Update download was not accepted. \(error.localizedDescription)") }
+                busy = false; setStatus("%@ verified. %@",offer.tag,automaticInstall ? "It will install when Linvell quits." : "Ready to install and restart.")
+            } catch { busy = false; setStatus("Update download was not accepted. %@",error.localizedDescription) }
         }
     }
     func requestInstall() {

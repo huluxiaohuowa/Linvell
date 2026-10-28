@@ -8,7 +8,8 @@ final class PreferencesSync {
     struct Record: Codable { var value: String; var modified: TimeInterval }
     struct Snapshot: Codable { var version = 1; var settings: [String:Record] = [:] }
     static let defaults: [String:String] = ["theme":"Linvell Dark","editorFontSize":"15","editorFontFamily":"SF Mono","vimEnabled":"false","lineNumbers":"true","wordWrap":"true","tabWidth":"4","useSpaces":"true"]
-    private(set) var status = "Local preferences"
+    private var statusKey = "Local preferences"
+    var status: String { L.text(statusKey) }
     private var records = Snapshot()
     private var timer: Timer?
     private let queue = DispatchQueue(label:"top.fuluwa.linvell.preferences-sync",qos:.utility)
@@ -17,7 +18,7 @@ final class PreferencesSync {
     var available: Bool { var directory: ObjCBool = false; return FileManager.default.fileExists(atPath:drive.path,isDirectory:&directory) && directory.boolValue }
     var enabled: Bool {
         get { UserDefaults.standard.bool(forKey:"iCloudSyncEnabled") }
-        set { UserDefaults.standard.set(newValue,forKey:"iCloudSyncEnabled"); if newValue { sync() } else { status = "Sync is off. Preferences stay on this Mac." } }
+        set { UserDefaults.standard.set(newValue,forKey:"iCloudSyncEnabled"); if newValue { sync() } else { statusKey = "Sync is off. Preferences stay on this Mac." } }
     }
     private init() {
         if let data = UserDefaults.standard.data(forKey:"preferenceSyncRecords"),let stored = try? JSONDecoder().decode(Snapshot.self,from:data) { records = stored }
@@ -43,10 +44,10 @@ final class PreferencesSync {
     }
     private func persist() { UserDefaults.standard.set(try? JSONEncoder().encode(records),forKey:"preferenceSyncRecords") }
     func sync() {
-        guard enabled else { status = "Sync is off. Preferences stay on this Mac."; return }
-        guard available else { status = "iCloud Drive is unavailable. Local preferences are safe."; return }
+        guard enabled else { statusKey = "Sync is off. Preferences stay on this Mac."; return }
+        guard available else { statusKey = "iCloud Drive is unavailable. Local preferences are safe."; return }
         guard !inFlight else { return }
-        inFlight = true; status = "Syncing with iCloud Drive…"
+        inFlight = true; statusKey = "Syncing with iCloud Drive…"
         let file = drive.appendingPathComponent("Linvell/Preferences.json"), local = records
         let initial = Dictionary(uniqueKeysWithValues:Self.defaults.keys.map { ($0,Self.value($0)) })
         queue.async { [weak self] in
@@ -80,7 +81,7 @@ final class PreferencesSync {
             } catch { failure = error }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }; self.inFlight = false
-                guard failure == nil else { self.status = "iCloud sync could not finish. Local preferences are safe."; return }
+                guard failure == nil else { self.statusKey = "iCloud sync could not finish. Local preferences are safe."; return }
                 guard self.enabled else { return }
                 var applied = false
                 for (key,record) in merged.settings {
@@ -89,7 +90,7 @@ final class PreferencesSync {
                     self.records.settings[key] = record
                     if Self.value(key) != record.value { UserDefaults.standard.set(record.value,forKey:key); applied = true }
                 }
-                self.persist(); self.status = "Preferences saved to iCloud Drive. Delivery to other Macs is managed by iCloud."
+                self.persist(); self.statusKey = "Preferences saved to iCloud Drive. Delivery to other Macs is managed by iCloud."
                 if applied { NotificationCenter.default.post(name:Self.didApply,object:nil) }
             }
         }
@@ -98,7 +99,7 @@ final class PreferencesSync {
         switch key {
         case "theme": return Theme.Profile(rawValue:value) != nil
         case "editorFontSize": return Double(value).map { (11...30).contains($0) } ?? false
-        case "editorFontFamily": return ["SF Mono","Menlo","Monaco"].contains(value)
+        case "editorFontFamily": return !value.isEmpty && value.utf8.count <= 128 && !value.unicodeScalars.contains(where:{ CharacterSet.controlCharacters.contains($0) })
         case "tabWidth": return ["2","4","8"].contains(value)
         case "vimEnabled","lineNumbers","wordWrap","useSpaces": return value == "true" || value == "false"
         default: return false
