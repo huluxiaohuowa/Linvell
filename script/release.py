@@ -13,6 +13,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,9 +51,32 @@ def run(args, **kwargs):
         if os.environ.get("GITHUB_ACTIONS") == "true" and Path(args[0]).name == "codesign":
             print(signing_failure_reason(result.stdout),file=sys.stderr)
         raise SystemExit(
-            f"{Path(args[0]).name} failed; inspect the protected local release-error.log"
+            f"{command_stage(args)} failed; inspect the protected local release-error.log"
         )
     return result.stdout
+
+
+def command_stage(args):
+    if Path(args[0]).name == "xcrun" and len(args) > 2:
+        if str(args[1]) == "notarytool" and str(args[2]) in {"submit", "info", "history"}:
+            return "Apple notarization "+str(args[2])
+        if str(args[1]) == "stapler" and str(args[2]) in {"staple", "validate"}:
+            return "Apple ticket "+str(args[2])
+    return Path(args[0]).name
+
+
+def staple(app):
+    # An accepted submission can precede ticket availability on Apple's CDN.
+    for attempt in range(4):
+        try:
+            run(["xcrun", "stapler", "staple", app])
+            run(["xcrun", "stapler", "validate", app])
+            return
+        except SystemExit:
+            if attempt == 3:
+                raise
+            print("Apple ticket is not ready; retrying attachment/validation…",flush=True)
+            time.sleep(15)
 
 
 def main():
@@ -105,6 +129,12 @@ def main():
     os.environ["SWIFTPM_MODULECACHE_OVERRIDE"] = str(build_root / "cache/swift")
     output = build_root / "releases" / args.version
     output.mkdir(parents=True, exist_ok=True)
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        with tempfile.TemporaryDirectory(dir=build_root / "tmp",prefix="notary-auth-") as check:
+            auth_key = Path(check) / "notary.p8"
+            auth_key.write_bytes(base64.b64decode(asc["privateKeyBase64"],validate=True)); auth_key.chmod(0o600)
+            run(["xcrun", "notarytool", "history", "--key", auth_key, "--key-id", asc["keyId"], "--issuer", asc["issuerId"], "--output-format", "json"])
+        print("Apple notarization authentication passed.",flush=True)
     print("Running tests and building Universal macOS app on GitHub Actions…" if os.environ.get("GITHUB_ACTIONS") == "true" else "Running tests and building Universal macOS app locally…", flush=True)
     run(["swift", "test", "--scratch-path", build_root / "swiftpm", "--cache-path", build_root / "cache", "--config-path", build_root / "config", "--security-path", build_root / "security"])
     env = dict(os.environ, CONFIGURATION="release", LINVELL_UNIVERSAL="1")
@@ -230,8 +260,8 @@ def main():
                 raise SystemExit(
                     "Notarization was not accepted. No release was published."
                 )
-            run(["xcrun", "stapler", "staple", app])
-            run(["xcrun", "stapler", "validate", app])
+            print("Apple notarization accepted; attaching ticket…",flush=True)
+            staple(app)
             run(["spctl", "--assess", "--type", "execute", app])
             print(
                 "Notarization accepted; staple and Gatekeeper checks passed.",
