@@ -26,3 +26,9 @@
 - DAP supports launch with internal-console adapters. Attach, reverse runInTerminal, changing breakpoints during a session, arbitrary VS Code debug extension compatibility, and a full graphical variable inspector are not included. The current window shows formatted stack/variable text and evaluation results.
 - Remote transfers include only explicitly declared executable files. Programs must be self-contained or use preinstalled system tools/libraries. Resources and native views stay local. No server daemon, credentials, remote toolchain installer, sandbox, marketplace or automatic update system is added.
 - Linux x86_64 was physically exercised. Linux aarch64 target selection is supported but an aarch64 binary/device run was not performed. Network cable loss was not simulated; actual SSH process termination, EOF and explicit reconnection were exercised. No automatic replay or exactly-once guarantee is claimed.
+
+## Release evidence
+
+- Published stable GitHub release [v0.2.0](https://github.com/huluxiaohuowa/Linvell/releases/tag/v0.2.0), built from `f1776e421dbd3c7a22aab10028e04aa05f45fc83` in a clean checkout. The complete default Swift test run succeeded before packaging; the five release-script tests also passed.
+- Universal arm64/x86_64 executable and macOS 15.6 minimum verified. Developer ID / Hardened Runtime signing, Apple Accepted notarization, stapled ticket validation and Gatekeeper assessment passed. DMG and ZIP SHA-256 matched their checksum file. Intel runtime execution was not tested.
+- The final Universal executable was also exercised in an isolated bundle identity copy, ad-hoc re-signed solely for QA. It loaded ToolPlugin, stopped at main.c, stepped to the next line and displayed `count: int = 7`; stop/close returned to the unchanged editor. The published signed archives were not modified, and the installed application was not replaced.

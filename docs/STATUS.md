@@ -1,6 +1,6 @@
 # Plugin P4/P5 — 0.2.0
 
-Implemented manifest LSP language providers, native task terminals, DAP launch controls, bounded logs and SSH workspace plugin runtimes. The SDK is independently buildable on Linux. Validation and limits: [P4/P5](verification/plugins-p4-p5.md). Release packaging and publication are tracked separately from development acceptance.
+Implemented manifest LSP language providers, native task terminals, DAP launch controls, bounded logs and SSH workspace plugin runtimes. The SDK is independently buildable on Linux. Validation and limits: [P4/P5](verification/plugins-p4-p5.md). Released as [0.2.0](https://github.com/huluxiaohuowa/Linvell/releases/tag/v0.2.0): Universal Developer ID signed, Apple notarized, stapled and Gatekeeper accepted. The installed application was not replaced.
 
 # Development status
 
