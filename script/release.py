@@ -13,8 +13,22 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def signing_failure_reason(output):
+    text = output.decode(errors="replace").lower()
+    reasons = {
+        "unable to build chain": "Apple intermediate certificate chain is unavailable",
+        "errsecinternalcomponent": "Keychain signing access or certificate trust failed (errSecInternalComponent)",
+        "no identity found": "Configured signing identity is unavailable in the temporary keychain",
+        "specified item could not be found": "Signing key is unavailable in the temporary keychain",
+        "user interaction is not allowed": "Keychain requested interactive access",
+        "timestamp service is not available": "Apple timestamp service is unavailable",
+    }
+    return next((reason for pattern,reason in reasons.items() if pattern in text), "Code signing failed; raw diagnostic retained only in protected storage")
 
 
 def run(args, **kwargs):
@@ -33,6 +47,8 @@ def run(args, **kwargs):
         if os.environ.get("GITHUB_ACTIONS") == "true" and Path(args[0]).name in {"swift", "bash"}:
             # These build commands have no credential arguments; signing/notary output stays private.
             print(result.stdout.decode(errors="replace")[-64000:], file=sys.stderr)
+        if os.environ.get("GITHUB_ACTIONS") == "true" and Path(args[0]).name == "codesign":
+            print(signing_failure_reason(result.stdout),file=sys.stderr)
         raise SystemExit(
             f"{Path(args[0]).name} failed; inspect the protected local release-error.log"
         )
@@ -120,6 +136,23 @@ def main():
             run(["security", "create-keychain", "-p", password, keychain])
             run(["security", "set-keychain-settings", "-lut", "21600", keychain])
             run(["security", "unlock-keychain", "-p", password, keychain])
+            search_list = shlex.split(run(["security", "list-keychains", "-d", "user"]).decode())
+            run(["security", "list-keychains", "-d", "user", "-s", str(keychain), *[p for p in search_list if Path(p) != keychain]])
+            if os.environ.get("GITHUB_ACTIONS") == "true":
+                # Fresh runners must not rely on intermediates cached on a developer Mac.
+                # Public Apple PKI certificates, pinned to the verified official DER bytes.
+                intermediates = {
+                    "DeveloperIDCA": "7afc9d01a62f03a2de9637936d4afe68090d2de18d03f29c88cfb0b1ba63587f",
+                    "DeveloperIDG2CA": "f16cd3c54c7f83cea4bf1a3e6a0819c8aaa8e4a1528fd144715f350643d2df3a",
+                }
+                for name,expected in intermediates.items():
+                    with urllib.request.urlopen("https://www.apple.com/certificateauthority/"+name+".cer",timeout=30) as response:
+                        data = response.read(64*1024)
+                    if hashlib.sha256(data).hexdigest() != expected:
+                        raise SystemExit("Apple intermediate certificate checksum mismatch")
+                    intermediate = temp / (name+".cer")
+                    intermediate.write_bytes(data)
+                    run(["security", "add-certificates", "-k", keychain, intermediate])
             run(
                 [
                     "security",
