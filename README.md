@@ -35,7 +35,7 @@ Read the bilingual [usage guide](https://linvell.fuluwa.top/guide.html) for SSH 
 
 SSH uses the system configuration and authentication; the remote file protocol needs Python 3. This is a native remote editing and running workflow, without a VS Code extension or debug-adapter host.
 
-Version 0.1.7 adds optional auto-save, semantic navigation/completion/rename, project-local multilingual toolchains, submodule management and extended native Git operation forms/console. See [development status](docs/STATUS.md) for tested behavior and limits. Bilingual draft instructions are maintained in the sibling `linvell-web` repository as `docs/development-next.en.md` and `docs/development-next.zh.md`.
+Version 0.1.7 adds optional auto-save, semantic navigation/completion/rename, project-local multilingual toolchains, submodule management and extended native Git operation forms/console. See [development status](docs/STATUS.md) for tested behavior and limits. Bilingual instructions are maintained in the sibling `linvell-web` repository as `docs/guide-0.1.7.en.md` and `docs/guide-0.1.7.zh.md`.
 
 ## Distribution
 
