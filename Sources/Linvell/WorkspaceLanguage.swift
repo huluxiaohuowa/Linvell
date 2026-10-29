@@ -45,7 +45,7 @@ extension WorkspaceController {
         if let remote,remoteConnection?.host == remote.host,remoteDirectory.hasPrefix("/"),path.hasPrefix(remoteDirectory+"/") { directory = remoteDirectory }
         else if remote == nil,let project = root?.url.path,path.hasPrefix(project+"/") { directory = project }
         else { directory = URL(fileURLWithPath:path).deletingLastPathComponent().path }
-        guard let language = LanguageTools.language(path:path,remote:remote,root:directory) else { return nil }
+        guard let language = pluginLanguage(path:path,remote:remote,root:directory) ?? LanguageTools.language(path:path,remote:remote,root:directory) else { return nil }
         return EditorCodeSnapshot(id:document.buffer.id,uri:URL(fileURLWithPath:path).absoluteString,path:path,text:forClosing ? "" : document.buffer.text,version:document.buffer.revision,language:language,root:directory,remote:remote)
     }
     func configureLanguageEditor(_ pane: EditorPane) {

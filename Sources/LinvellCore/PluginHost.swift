@@ -22,6 +22,12 @@ public struct PluginManifest: Codable, Equatable {
     public let themes: [PluginTheme]?
     public let icons: [PluginIcon]?
     public let snippets: [PluginSnippet]?
+    /// local (default) or workspace; workspace follows the SSH project host.
+    public let execution: String?
+    public let executables: [String:String]?
+    public let languageServers: [PluginLanguageServer]?
+    public let tasks: [PluginTask]?
+    public let debuggers: [PluginDebugger]?
 }
 
 public enum PluginError: LocalizedError, Equatable {
@@ -71,8 +77,9 @@ public struct PluginPackage {
             }
         }
         try PluginContributions.validate(manifest,directory:directory)
+        try PluginTools.validate(manifest,directory:directory)
         let executable: URL?
-        if let path = manifest.executable {
+        if let path = manifest.executable ?? manifest.executables?.sorted(by:{ $0.key < $1.key }).first?.value {
             guard !path.isEmpty,!path.hasPrefix("/"),!path.split(separator:"/").contains("..") else { throw PluginError.invalidPackage }
             let file = directory.appendingPathComponent(path).standardizedFileURL.resolvingSymlinksInPath()
             guard file.path.hasPrefix(directory.path+"/"),(try? file.resourceValues(forKeys:[.isRegularFileKey]).isRegularFile) == true,FileManager.default.isExecutableFile(atPath:file.path) else { throw PluginError.invalidPackage }
@@ -80,7 +87,7 @@ public struct PluginPackage {
         } else {
             guard manifest.commands.isEmpty,(manifest.events ?? []).isEmpty else { throw PluginError.invalidPackage }; executable = nil
         }
-        guard !manifest.commands.isEmpty || !(manifest.views ?? []).isEmpty || !(manifest.settings ?? []).isEmpty || !(manifest.themes ?? []).isEmpty || !(manifest.icons ?? []).isEmpty || !(manifest.snippets ?? []).isEmpty else { throw PluginError.invalidPackage }
+        guard !manifest.commands.isEmpty || !(manifest.views ?? []).isEmpty || !(manifest.settings ?? []).isEmpty || !(manifest.themes ?? []).isEmpty || !(manifest.icons ?? []).isEmpty || !(manifest.snippets ?? []).isEmpty || !(manifest.languageServers ?? []).isEmpty || !(manifest.tasks ?? []).isEmpty || !(manifest.debuggers ?? []).isEmpty else { throw PluginError.invalidPackage }
         self.directory = directory; self.executableURL = executable; self.manifest = manifest
     }
 }
@@ -93,12 +100,18 @@ public final class PluginSession {
     private let lock = NSLock()
     private let queue = DispatchQueue(label:"top.fuluwa.linvell.plugin",qos:.userInitiated)
     private var rpc: LanguageRPC?
+    public let workspace: PluginWorkspace?
+    public let runtime: PluginRuntime
+    public let logs = PluginLogBuffer()
     private var stopped = false, draining = false, commandPending = false
     private var events: [(PluginDocumentEvent,PluginWorkspace?)] = []
     public var uiUpdated: (([PluginViewUpdate]) -> Void)?
     public var isStopped: Bool { lock.lock(); defer { lock.unlock() }; return stopped }
     public var eventFailure: ((Error) -> Void)?
-    public init(package: PluginPackage,persistence: PluginPersistence = PluginPersistence()) { self.package = package; self.persistence = persistence }
+    public init(package: PluginPackage,persistence: PluginPersistence = PluginPersistence(),workspace: PluginWorkspace? = nil) {
+        self.package = package; self.persistence = persistence; self.workspace = workspace
+        self.runtime = PluginRuntime(package:package,workspace:workspace)
+    }
     deinit { stop() }
     public func execute(command: String, document: PluginDocument? = nil, workspace: PluginWorkspace? = nil, uiEvent: PluginUIEvent? = nil, timeout: TimeInterval = 10) throws -> PluginCommandResult {
         lock.lock()
@@ -124,6 +137,7 @@ public final class PluginSession {
                     _ = try PluginEdits.apply(edits,to:document.text)
                 }
                 guard (result.replacementText?.utf8.count ?? 0) <= 2*1024*1024,(result.message?.count ?? 0) <= 2000 else { throw PluginError.invalidPackage }
+                try recordLogs(result.logs ?? [])
                 try PluginContributions.validate(result.viewUpdates ?? [],manifest:package.manifest)
                 try persist(result.stateUpdates ?? [],workspace:workspace)
                 try checkRunning()
@@ -159,6 +173,7 @@ public final class PluginSession {
             let raw = try request("documents/event",params:value,timeout:10)
             let result = try JSONDecoder().decode(PluginCommandResult.self,from:JSONSerialization.data(withJSONObject:raw))
             guard result.edits == nil,result.replacementText == nil else { throw PluginError.permissionDenied }
+            try recordLogs(result.logs ?? [])
             try PluginContributions.validate(result.viewUpdates ?? [],manifest:package.manifest)
             try persist(result.stateUpdates ?? [],workspace:workspace)
             try checkRunning(); uiUpdated?(result.viewUpdates ?? [])
@@ -172,9 +187,11 @@ public final class PluginSession {
             if stopped { lock.unlock(); throw PluginError.unavailable }
             if let existing = rpc { channel = existing; lock.unlock() }
             else {
-                guard let executable = package.executableURL else { lock.unlock(); throw PluginError.unavailable }
-                do { channel = try LanguageRPC(executable:executable,arguments:[],directory:package.directory) }
-                catch { lock.unlock(); throw error }
+                lock.unlock()
+                guard package.executableURL != nil else { throw PluginError.unavailable }
+                channel = try runtime.launch(PluginProgram(executable:package.manifest.executable,executables:package.manifest.executables),log:logs.append)
+                lock.lock()
+                if stopped { lock.unlock(); channel.stop(); throw PluginError.unavailable }
                 rpc = channel; lock.unlock()
                 let raw = try channel.request("initialize",params:["protocolVersion":1],timeout:timeout)
                 guard let value = raw as? [String:Any],value["protocolVersion"] as? Int == 1 else { throw PluginError.unsupportedProtocol }
@@ -185,10 +202,14 @@ public final class PluginSession {
             let object = try JSONSerialization.jsonObject(with:JSONEncoder().encode(params)) as! [String:Any]
             return try channel.request(method,params:object,timeout:timeout)
         } catch {
-            stop()
+            logs.append(error.localizedDescription); stop()
             if let error = error as? PluginError { throw error }
             throw PluginError.failed
         }
+    }
+    private func recordLogs(_ values: [PluginLog]) throws {
+        guard values.count <= 100,values.allSatisfy({ ["info","warning","error"].contains($0.level) && $0.message.utf8.count <= 8192 }) else { throw PluginError.invalidPackage }
+        values.forEach { logs.append("["+$0.level+"] "+$0.message) }
     }
     private func checkRunning() throws { lock.lock(); defer { lock.unlock() }; if stopped { throw PluginError.unavailable } }
     private func persist(_ updates: [PluginStateUpdate],workspace: PluginWorkspace?) throws {
@@ -198,6 +219,6 @@ public final class PluginSession {
     }
     public func stop() {
         lock.lock(); stopped = true; let channel = rpc; rpc = nil; events.removeAll(); lock.unlock()
-        channel?.stop()
+        channel?.stop(); runtime.stop()
     }
 }

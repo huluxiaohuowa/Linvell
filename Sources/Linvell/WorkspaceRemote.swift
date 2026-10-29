@@ -45,7 +45,7 @@ extension WorkspaceController {
             if terminal != nil {
                 guard mayCloseTerminal() else { return }; terminateTerminal(); terminalHost?.removeFromSuperview(); terminalHost = nil; terminal = nil
             }
-            latestOpenRequest = nil; resetLanguageServices()
+            latestOpenRequest = nil; stopPlugins(); resetLanguageServices()
             remoteConnection = connection; remoteDirectory = "~"; root = nil; fileIndex = []
             projectTitle.stringValue = "SSH · "+host; window?.title = "SSH · "+host
             sidebarKind = "files"; sidebar.subviews.forEach { $0.removeFromSuperview() }

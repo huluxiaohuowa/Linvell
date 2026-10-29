@@ -17,14 +17,15 @@ public struct PluginDocument: Codable {
 }
 
 public struct PluginCommandResult: Codable {
+    public var logs: [PluginLog]?
     public var message: String?
     public var replacementText: String?
     public var edits: [PluginTextEdit]?
     public var documentRevision: Int?
     public var stateUpdates: [PluginStateUpdate]?
     public var viewUpdates: [PluginViewUpdate]?
-    public init(message: String? = nil, replacementText: String? = nil, edits: [PluginTextEdit]? = nil, documentRevision: Int? = nil, stateUpdates: [PluginStateUpdate]? = nil,viewUpdates: [PluginViewUpdate]? = nil) {
-        self.message = message; self.replacementText = replacementText; self.edits = edits; self.documentRevision = documentRevision; self.stateUpdates = stateUpdates; self.viewUpdates = viewUpdates
+    public init(message: String? = nil, replacementText: String? = nil, edits: [PluginTextEdit]? = nil, documentRevision: Int? = nil, stateUpdates: [PluginStateUpdate]? = nil,viewUpdates: [PluginViewUpdate]? = nil,logs: [PluginLog]? = nil) {
+        self.logs = logs; self.message = message; self.replacementText = replacementText; self.edits = edits; self.documentRevision = documentRevision; self.stateUpdates = stateUpdates; self.viewUpdates = viewUpdates
     }
 }
 

@@ -355,6 +355,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         }
         latestOpenRequest = nil
         remoteConnection = nil; remoteBrowser = nil
+        if pluginWorkspace?.identityKey != PluginWorkspace(root:url.path).identityKey { stopPlugins(); resetLanguageServices() }
         root = FileNode(url.resolvingSymlinksInPath()); projectTitle.stringValue = url.lastPathComponent
         outline.reloadData(); UserDefaults.standard.set(url.path,forKey:"lastProject")
         WorkspaceSession.save(.local(path:url.path))

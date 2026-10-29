@@ -816,3 +816,23 @@
 "Load a plugin to configure its native settings." = "加载插件后可配置其原生设置。";
 "User" = "用户";
 "Workspace" = "工作区";
+
+"Plugin Task" = "插件任务";
+"Plugin Debugger" = "插件调试器";
+"Plugin Logs" = "插件日志";
+"Reconnect Plugin" = "重新连接插件";
+"Refresh Plugin Logs" = "刷新插件日志";
+"Preparing plugin tool…" = "正在准备插件工具…";
+"Pause" = "暂停";
+"Step Over" = "单步跳过";
+"Step Into" = "单步进入";
+"Step Out" = "单步跳出";
+"Stack & Variables" = "调用栈与变量";
+"Stop Debugging" = "停止调试";
+"Debug expression" = "调试表达式";
+"Evaluate" = "求值";
+"stopped" = "已暂停";
+"continued" = "已继续";
+"exited" = "已退出";
+"terminated" = "已终止";
+"Workspace programs will be copied to and executed on the connected SSH host." = "工作区程序将复制到已连接的 SSH 主机并在那里执行。";

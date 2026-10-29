@@ -816,3 +816,23 @@
 "Load a plugin to configure its native settings." = "Load a plugin to configure its native settings.";
 "User" = "User";
 "Workspace" = "Workspace";
+
+"Plugin Task" = "Plugin Task";
+"Plugin Debugger" = "Plugin Debugger";
+"Plugin Logs" = "Plugin Logs";
+"Reconnect Plugin" = "Reconnect Plugin";
+"Refresh Plugin Logs" = "Refresh Plugin Logs";
+"Preparing plugin tool…" = "Preparing plugin tool…";
+"Pause" = "Pause";
+"Step Over" = "Step Over";
+"Step Into" = "Step Into";
+"Step Out" = "Step Out";
+"Stack & Variables" = "Stack & Variables";
+"Stop Debugging" = "Stop Debugging";
+"Debug expression" = "Debug expression";
+"Evaluate" = "Evaluate";
+"stopped" = "stopped";
+"continued" = "continued";
+"exited" = "exited";
+"terminated" = "terminated";
+"Workspace programs will be copied to and executed on the connected SSH host." = "Workspace programs will be copied to and executed on the connected SSH host.";

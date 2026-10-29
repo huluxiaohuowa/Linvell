@@ -91,6 +91,7 @@ extension WorkspaceController {
         } catch { show(error) }
     }
     func clearPluginUI(_ session: PluginSession) {
+        refreshPluginProviders()
         let prefix = session.sessionID.uuidString+"/"
         if sidebarKind.hasPrefix("plugin:"+prefix) { showSidebar("files") }
         for key in Array(pluginWindows.keys) where key.hasPrefix(prefix) { pluginWindows.removeValue(forKey:key)?.close() }

@@ -1,0 +1,5 @@
+# C Tools Example
+
+Open a scratch project containing `main.c` (copy the included sample), then explicitly load this package from Plugins. It declares a clangd language provider, a build/run task in a native terminal, and an lldb-dap debugger. Select the task to compile, then place the caret on a source line and select Debug main: that line becomes the initial breakpoint. The debug window supports continue, pause, stepping, stack/variables, expression evaluation and stop. Reopen a closed task/debug window before starting a new run.
+
+Requires Python 3, cc, clangd and lldb-dap on the project host. On macOS the wrappers also find Xcode tools via xcrun. `execution: workspace` uses the connected SSH Linux host when present. Only the declared `tools` executable is transferred; the project source stays on its host. This package does not install system toolchains. Keep deployment scripts self-contained or package a single executable. Linux x86_64 and aarch64 are accepted, subject to each executable's actual architecture/runtime requirements.

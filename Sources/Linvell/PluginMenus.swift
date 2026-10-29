@@ -19,6 +19,11 @@ final class PluginMenus: NSObject, NSMenuItemValidation {
         guard let workspace = workspace ?? activeWorkspace else { return }
         for session in workspace.pluginSessions.values.sorted(by:{ $0.package.manifest.id < $1.package.manifest.id }) {
             let group = NSMenuItem(title:session.package.manifest.name,action:nil,keyEquivalent:""); group.submenu = NSMenu(title:session.package.manifest.name); root.addItem(group)
+            if session.isStopped {
+                for (title,kind) in [("Plugin Logs","logs"),("Reconnect Plugin","reconnect")] {
+                    let item = NSMenuItem(title:L.text(title),action:#selector(contribute(_:)),keyEquivalent:""); item.target = shared; item.representedObject = [session.package.manifest.id,kind,""]; group.submenu?.addItem(item)
+                }; continue
+            }
             for command in session.package.manifest.commands where command.menu == "plugins" {
                 let item = NSMenuItem(title:command.title,action:#selector(run(_:)),keyEquivalent:"")
                 if let raw = command.keybinding,let keybinding = try? PluginKeybinding(raw) { item.keyEquivalent = keybinding.key; item.keyEquivalentModifierMask = modifiers(keybinding) }
@@ -36,6 +41,10 @@ final class PluginMenus: NSObject, NSMenuItemValidation {
             for theme in session.package.manifest.themes ?? [] { contribution(L.text("Plugin Theme")+": "+theme.title,"theme",theme.id) }
             if (session.package.manifest.icons ?? []).contains(where:{ !($0.fileExtensions ?? []).isEmpty }) { contribution(L.text("Use Plugin File Icons"),"icons") }
             for snippet in session.package.manifest.snippets ?? [] { contribution(L.text("Plugin Snippet")+": "+snippet.title,"snippet",snippet.id) }
+            for task in session.package.manifest.tasks ?? [] { contribution(L.text("Plugin Task")+": "+task.title,"task",task.id) }
+            for debugger in session.package.manifest.debuggers ?? [] { contribution(L.text("Plugin Debugger")+": "+debugger.title,"debug",debugger.id) }
+            contribution(L.text("Plugin Logs"),"logs")
+            contribution(L.text("Reconnect Plugin"),"reconnect")
             group.submenu?.addItem(.separator())
             for (title,scope) in [("User Plugin Configuration…","user"),("Workspace Plugin Configuration…","workspace")] {
                 let item = NSMenuItem(title:L.text(title),action:#selector(configuration(_:)),keyEquivalent:"")
@@ -86,6 +95,10 @@ final class PluginMenus: NSObject, NSMenuItemValidation {
     @objc private func contribute(_ item: NSMenuItem) {
         guard let workspace = Self.activeWorkspace,let ids = item.representedObject as? [String],let session = workspace.pluginSessions[ids[0]] else { return }
         switch ids[1] {
+        case "task": workspace.runPluginTask(ids[2],session:session)
+        case "debug": workspace.startPluginDebugger(ids[2],session:session)
+        case "logs": workspace.showPluginLogs(session)
+        case "reconnect": workspace.reconnectPlugin(session)
         case "view": workspace.showPluginView(ids[2],session:session)
         case "settings": workspace.openPluginSettings(session)
         case "theme": workspace.selectPluginTheme(ids[2],session:session)

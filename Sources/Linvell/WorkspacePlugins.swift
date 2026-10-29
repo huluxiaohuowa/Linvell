@@ -12,7 +12,7 @@ extension WorkspaceController {
             do {
                 let package = try PluginPackage(directory:directory)
                 let alert = NSAlert(); alert.messageText = L.format("Load plugin: %@?",package.manifest.name)
-                alert.informativeText = L.text("Only load code you trust. Plugins run as your user account, outside a security sandbox. Declared permissions restrict editor APIs, not direct file, network or process access.")+"\n\n"+L.text("Editor permissions")+": "+(package.manifest.permissions.isEmpty ? L.text("None") : package.manifest.permissions.joined(separator:", "))+"\n\n"+directory.path
+                alert.informativeText = (package.manifest.execution == "workspace" && self.remoteConnection != nil ? L.text("Workspace programs will be copied to and executed on the connected SSH host.")+"\n\n" : "")+L.text("Only load code you trust. Plugins run as your user account, outside a security sandbox. Declared permissions restrict editor APIs, not direct file, network or process access.")+"\n\n"+L.text("Editor permissions")+": "+(package.manifest.permissions.isEmpty ? L.text("None") : package.manifest.permissions.joined(separator:", "))+"\n\n"+directory.path
                 alert.addButton(withTitle:L.text("Cancel")); alert.addButton(withTitle:L.text("Load Plugin"))
                 alert.beginSheetModal(for:window) { [weak self] response in
                     guard response == .alertSecondButtonReturn,let self else { return }
@@ -24,11 +24,13 @@ extension WorkspaceController {
     @objc func stopPlugins() {
         let sessions = Array(pluginSessions.values); pluginSessions.removeAll()
         sessions.forEach { $0.stop(); clearPluginUI($0) }; PluginMenus.refresh()
+        refreshPluginProviders()
         NotificationCenter.default.post(name:PluginMenus.changed,object:self)
         status.stringValue = L.text("Plugins stopped. Load a plugin folder to start it again.")
     }
     func pluginCommandOptions() -> [PickerOption] {
         pluginSessions.values.sorted { $0.package.manifest.id < $1.package.manifest.id }.flatMap { session in
+            if session.isStopped { return self.pluginToolOptions(session) }
             var options = session.package.manifest.commands.map { command in
                 PickerOption(title:command.title,detail:session.package.manifest.name+" · "+command.id,invoke:{ [weak self] in
                     self?.executePlugin(session,command:command.id)
@@ -40,6 +42,7 @@ extension WorkspaceController {
             options += (session.package.manifest.themes ?? []).map { theme in PickerOption(title:theme.title,detail:L.text("Plugin Theme")+" · "+session.package.manifest.name,invoke:{ [weak self] in self?.selectPluginTheme(theme.id,session:session) }) }
             options += (session.package.manifest.snippets ?? []).map { snippet in PickerOption(title:snippet.title,detail:L.text("Plugin Snippet")+" · "+session.package.manifest.name,invoke:{ [weak self] in self?.insertPluginSnippet(snippet.id,session:session) }) }
             if !(session.package.manifest.settings ?? []).isEmpty { options.append(PickerOption(title:session.package.manifest.name+" — "+L.text("Plugin Settings"),detail:"Linvell",invoke:{ [weak self] in self?.openPluginSettings(session) })) }
+            options += self.pluginToolOptions(session)
             return options
         }
     }
@@ -66,7 +69,7 @@ extension WorkspaceController {
                     }
                     self.status.stringValue = result.message ?? L.text("Plugin command completed.")
                 } catch {
-                    if session.isStopped { self.pluginSessions.removeValue(forKey:session.package.manifest.id); self.clearPluginUI(session); PluginMenus.refresh(); NotificationCenter.default.post(name:PluginMenus.changed,object:self) }
+                    if session.isStopped { self.clearPluginUI(session); PluginMenus.refresh(); NotificationCenter.default.post(name:PluginMenus.changed,object:self) }
                     self.show(error); self.status.stringValue = L.existing(error.localizedDescription)
                 }
             }
@@ -94,7 +97,10 @@ extension WorkspaceController {
         return root.map { PluginWorkspace(root:$0.url.path) }
     }
     func installPlugin(_ package: PluginPackage,persistence: PluginPersistence = PluginPersistence()) throws {
-        let session = PluginSession(package:package,persistence:persistence)
+        let session = PluginSession(package:package,persistence:persistence,workspace:pluginWorkspace)
+        let contributed = Set((package.manifest.languageServers ?? []).flatMap(\.languages))
+        let existing = Set(pluginSessions.values.filter { $0.package.manifest.id != package.manifest.id }.flatMap { ($0.package.manifest.languageServers ?? []).flatMap(\.languages) })
+        guard contributed.isDisjoint(with:existing) else { throw LanguageServiceError.message("Another loaded plugin already provides this language. Stop it before loading a replacement.") }
         try PluginMenus.validate(pluginSessions.values.filter { $0.package.manifest.id != package.manifest.id }+[session])
         synchronizePluginDocuments()
         if let previous = pluginSessions.removeValue(forKey:package.manifest.id) { previous.stop(); clearPluginUI(previous) }
@@ -102,7 +108,7 @@ extension WorkspaceController {
         session.eventFailure = { [weak self,weak session] error in
             DispatchQueue.main.async {
                 guard let self,let session,self.pluginSessions[package.manifest.id] === session else { return }
-                self.pluginSessions.removeValue(forKey:package.manifest.id); self.clearPluginUI(session); PluginMenus.refresh(); NotificationCenter.default.post(name:PluginMenus.changed,object:self)
+                self.clearPluginUI(session); PluginMenus.refresh(); NotificationCenter.default.post(name:PluginMenus.changed,object:self)
                 self.status.stringValue = L.existing(error.localizedDescription)
             }
         }
@@ -110,6 +116,7 @@ extension WorkspaceController {
             guard !updates.isEmpty else { return }
             DispatchQueue.main.async { if let session { self?.receivePluginViews(updates,session:session) } }
         }
+        refreshPluginProviders()
         renderPluginStatus()
         for document in documents where document.imageURL == nil { session.enqueue(pluginEvent(.open,document:document),workspace:pluginWorkspace) }
         PluginMenus.refresh(); NotificationCenter.default.post(name:PluginMenus.changed,object:self)

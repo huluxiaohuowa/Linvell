@@ -14,3 +14,5 @@ The package declares `document.read`, `document.write` and `storage`, and subscr
 P3 adds Example Tree, Example List, Example Status and Example Tools, typed settings, the Plugin Forest theme, SF Symbol/file icons and a Swift Greeting Function snippet. `hello.inspect` reports UI item identity; `hello.refresh` publishes a new list snapshot. `onDocumentEvent` updates the status counter while persisting event state. Use the plugin menu for views/settings/resources; the command palette also exposes views, themes and snippets.
 
 Snippets support one editor selection, numbered unique tab stops and Tab/Shift-Tab navigation; mirrors, nested placeholders and VSIX compatibility are outside this preview.
+
+The example now depends on the standalone `Sources/LinvellPluginKit` package and can build on Linux with Swift 6. For SSH execution set `execution` to `workspace` and provide a Linux binary through the `executables` target map. See the website guide for build, runtime and transfer limits. Strip release binaries before packaging; static Swift linking still requires the host system C/C++ libraries.

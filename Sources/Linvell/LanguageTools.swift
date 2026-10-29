@@ -2,6 +2,7 @@ import AppKit
 import CryptoKit
 import Darwin
 import LinvellCore
+import LinvellPluginKit
 
 /// Host-specific executable paths never enter preference synchronization.
 enum LanguageTools {
@@ -151,6 +152,7 @@ enum LanguageTools {
 
 final class WorkspaceLanguageServices {
     let queue = DispatchQueue(label:"top.fuluwa.linvell.language-services",qos:.userInitiated)
+    var pluginProviders: [String:(PluginSession,PluginLanguageServer)] = [:]
     var didCreateSession: ((LanguageSession,CodeLanguage,String,SSHRemote?) -> Void)?
     private var sessions: [String:LanguageSession] = [:]
     private var backendIdentities: [String:String] = [:]
@@ -173,6 +175,16 @@ final class WorkspaceLanguageServices {
             for alias in Array(sessions.keys) where sessions[alias] === session { sessions.removeValue(forKey:alias); backendIdentities.removeValue(forKey:alias) }
         }
         let scope = (remote?.host ?? "local")+"|"+root
+        if let (owner,provider) = pluginProviders[language.id],!owner.isStopped {
+            guard owner.runtime.remote?.host == remote?.host,owner.runtime.root == root else { throw PluginError.unavailable }
+            let rpc = try owner.runtime.launch(provider.program,log:owner.logs.append)
+            do {
+                let settings = try JSONSerialization.jsonObject(with:JSONEncoder().encode(provider.settings ?? [:])) as? [String:Any] ?? [:]
+                let session = try LanguageSession(rpc:rpc,root:root,runtime:"",configuration:settings)
+                sessions[key] = session; backendIdentities[key] = owner.sessionID.uuidString+"/"+provider.id
+                didCreateSession?(session,language,root,remote); return session
+            } catch { rpc.stop(); throw error }
+        }
         let available: [String:String]
         if let existing = tools[scope] { available = existing }
         else { available = try LanguageTools.discover(remote:remote,root:root); tools[scope] = available }

@@ -1,3 +1,7 @@
+# Plugin P4/P5 — 0.2.0
+
+Implemented manifest LSP language providers, native task terminals, DAP launch controls, bounded logs and SSH workspace plugin runtimes. The SDK is independently buildable on Linux. Validation and limits: [P4/P5](verification/plugins-p4-p5.md). Release packaging and publication are tracked separately from development acceptance.
+
 # Development status
 
 2026-10-29 · 0.1.7 — published

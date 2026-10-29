@@ -29,9 +29,9 @@ The **Updates** category provides independent switches for automatic checks, dow
 
 iCloud Drive can synchronize the preference allowlist in `Linvell/Preferences.json`: theme, font, text size, wrapping, line numbers, indentation and Vim mode. Preferences are merged per setting using their modification times. The sync switch and machine-specific layout stay local. Documents, recovery snapshots, project paths, terminal environment and credentials never enter this preference file. iCloud Drive must be available; actual delivery to another Mac is managed by iCloud and needs cross-device verification.
 
-## Plugin development preview
+## Plugin development
 
-The unpublished source on `main` includes `LinvellPluginKit`, a Swift SDK with an independent process host, document events, command palette/native menu contributions, shortcuts, versioned range edits, layered configuration and persistent state, plus native trees/lists/status/settings/tool windows and theme/icon/snippet resources. Start with [the bilingual plugin guide](https://linvell.fuluwa.top/plugins.html) and [`Examples/HelloPlugin`](Examples/HelloPlugin). This preview requires a source build; it is not part of the current published app. Plugins run with your user account’s OS access; manifest permissions gate editor APIs, not a security sandbox. See [verification and limits](docs/verification/plugins-p3.md).
+Linvell 0.2.0 includes the P1–P5 plugin APIs: an independent Swift process SDK, document events, commands/menus/shortcuts, versioned edits, layered configuration/state, native views and resources, LSP/task/DAP programs, logs and SSH workspace execution. Start with [the bilingual plugin guide](https://linvell.fuluwa.top/plugins.html), [`Examples/HelloPlugin`](Examples/HelloPlugin) or [`Examples/ToolPlugin`](Examples/ToolPlugin). Code plugins have the user account’s OS access; manifest permissions gate editor APIs, not a security sandbox. See [P4/P5 verification and limits](docs/verification/plugins-p4-p5.md). The standalone SDK is `Sources/LinvellPluginKit`; Linux builds produce plugin programs, while Linvell remains a macOS app.
 
 ## Remote development, running and Git
 
@@ -56,3 +56,4 @@ gh workflow run release.yml --field bump=patch
 The workflow uses the repository Actions Secret `APPLE_RELEASE_CONFIG`, containing only the shared Developer ID Application certificate and App Store Connect notarization key. It materializes these outside the checkout, uses a temporary protected keychain, removes the credentials after the run, and uploads only signed distribution artifacts. Pull requests never receive these secrets.
 
 `python3 script/update_version.py` still defaults to a patch increment for manual version preparation; `minor` and `major` remain explicit. Pushing a matching stable `vX.Y.Z` tag also builds the already-committed version. See [CI release details](docs/CI_RELEASE.md). Local debug builds remain available through the Run script.
+

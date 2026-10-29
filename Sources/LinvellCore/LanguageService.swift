@@ -167,10 +167,11 @@ public struct LSPFrames {
 }
 
 public final class LanguageRPC {
-    private let process = Process(),input = Pipe(),output = Pipe()
+    private let process = Process(),input = Pipe(),output = Pipe(),errors = Pipe()
     private let reader = DispatchQueue(label:"top.fuluwa.linvell.lsp.read",qos:.userInitiated)
     private let writer = DispatchQueue(label:"top.fuluwa.linvell.lsp.write",qos:.userInitiated)
     private let lock = NSLock()
+    private let dap: Bool
     private var nextID = 0,pending: [Int:(Result<Any,Error>) -> Void] = [:]
     private var stopped = false,frames = LSPFrames()
     private var onNotification: ((String,[String:Any]) -> Void)?
@@ -184,10 +185,15 @@ public final class LanguageRPC {
         get { lock.lock(); defer { lock.unlock() }; return settings }
         set { lock.lock(); settings = newValue; lock.unlock() }
     }
-    public init(executable: URL,arguments: [String],directory: URL?,environment: [String:String]? = nil) throws {
+    public init(executable: URL,arguments: [String],directory: URL?,environment: [String:String]? = nil,stderr: ((String) -> Void)? = nil,dap: Bool = false) throws {
+        self.dap = dap
         _ = fcntl(input.fileHandleForWriting.fileDescriptor,F_SETNOSIGPIPE,1)
         process.executableURL = executable; process.arguments = arguments; process.currentDirectoryURL = directory
-        process.environment = environment; process.standardInput = input; process.standardOutput = output; process.standardError = FileHandle.nullDevice
+        process.environment = environment; process.standardInput = input; process.standardOutput = output; process.standardError = stderr == nil ? FileHandle.nullDevice : errors
+        if let stderr { errors.fileHandleForReading.readabilityHandler = { handle in
+            let bytes = handle.availableData
+            if bytes.isEmpty { handle.readabilityHandler = nil } else { stderr(String(decoding:bytes.prefix(8192),as:UTF8.self)) }
+        } }
         output.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let bytes = handle.availableData
             guard let self else { return }
@@ -209,7 +215,12 @@ public final class LanguageRPC {
             do { try self.input.fileHandleForWriting.write(contentsOf:LSPFrames.encode(object)) } catch { self.finish() }
         }
     }
-    public func notify(_ method: String,params: [String:Any]) { send(["jsonrpc":"2.0","method":method,"params":params]) }
+    public func notify(_ method: String,params: [String:Any]) {
+        if dap {
+            lock.lock(); nextID += 1; let id = nextID; lock.unlock()
+            send(["seq":id,"type":"request","command":method == "$/cancelRequest" ? "cancel" : method,"arguments":method == "$/cancelRequest" ? ["requestId":params["id"] ?? 0] : params])
+        } else { send(["jsonrpc":"2.0","method":method,"params":params]) }
+    }
     public func request(_ method: String,params: [String:Any],timeout: TimeInterval = 12,cancellation: LanguageRequestCancellation? = nil) throws -> Any {
         if cancellation?.isCancelled == true { throw CancellationError() }
         let signal = DispatchSemaphore(value:0),resultLock = NSLock()
@@ -218,7 +229,7 @@ public final class LanguageRPC {
         guard !stopped else { lock.unlock(); throw LanguageServiceError.stopped }
         nextID += 1; let id = nextID
         pending[id] = { result in resultLock.lock(); outcome = result; resultLock.unlock(); signal.signal() }
-        lock.unlock(); send(["jsonrpc":"2.0","id":id,"method":method,"params":params])
+        lock.unlock(); send(dap ? ["seq":id,"type":"request","command":method,"arguments":params] : ["jsonrpc":"2.0","id":id,"method":method,"params":params])
         let subscription = cancellation?.register { [weak self] in
             guard let self else { return }
             self.lock.lock(); let callback = self.pending.removeValue(forKey:id); self.lock.unlock()
@@ -233,6 +244,14 @@ public final class LanguageRPC {
         return try (outcome ?? .failure(LanguageServiceError.stopped)).get()
     }
     private func receive(_ object: [String:Any]) {
+        if dap {
+            if object["type"] as? String == "event",let event = object["event"] as? String { notification?(event,object["body"] as? [String:Any] ?? [:]); return }
+            if object["type"] as? String == "request",let seq = object["seq"] as? Int { lock.lock(); nextID += 1; let responseID = nextID; lock.unlock(); send(["seq":responseID,"type":"response","request_seq":seq,"command":object["command"] ?? "","success":false,"message":"Reverse adapter requests are unsupported; use an internal console launch."]); return }
+            guard let id = object["request_seq"] as? Int else { return }
+            lock.lock(); let callback = pending.removeValue(forKey:id); lock.unlock()
+            if object["success"] as? Bool == true { callback?(.success(object["body"] ?? [:])) }
+            else { callback?(.failure(LanguageServiceError.message(object["message"] as? String ?? "Debug request failed."))) }; return
+        }
         if let method = object["method"] as? String {
             let params = object["params"] as? [String:Any] ?? [:]
             if let id = object["id"] {
@@ -261,6 +280,7 @@ public final class LanguageRPC {
         lock.lock(); guard !stopped else { lock.unlock(); return }; stopped = true
         let callbacks = Array(pending.values); pending.removeAll(); lock.unlock()
         output.fileHandleForReading.readabilityHandler = nil
+        errors.fileHandleForReading.readabilityHandler = nil
         callbacks.forEach { $0(.failure(LanguageServiceError.stopped)) }
     }
     public func shutdown() {
@@ -269,6 +289,10 @@ public final class LanguageRPC {
             notify("exit",params:[:])
             DispatchQueue.global(qos:.utility).asyncAfter(deadline:.now()+0.2) { [self] in stop() }
         }
+    }
+    public func closePluginChannel() {
+        if dap { DispatchQueue.global(qos:.utility).async { [self] in _ = try? request("disconnect",params:["terminateDebuggee":true],timeout:2); stop() } }
+        else { stop() }
     }
     public func stop() {
         finish()

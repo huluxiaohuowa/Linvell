@@ -1,0 +1,7 @@
+{
+  "id": "dev.linvell.tools", "name": "C Tools Example", "version": "0.4.0", "protocolVersion": 1,
+  "execution": "workspace", "commands": [], "permissions": ["document.read"],
+  "languageServers": [{"id":"c","title":"C / C++ with clangd","languages":["c","cpp"],"fileExtensions":["c","h","cpp","hpp"],"program":{"executable":"tools","arguments":["language"]}}],
+  "tasks": [{"id":"build","title":"Build and Run main.c","program":{"executable":"tools","arguments":["task"]}}],
+  "debuggers": [{"id":"lldb","title":"Debug main","program":{"executable":"tools","arguments":["debug"]},"launch":{"program":"${workspaceFolder}/main","cwd":"${workspaceFolder}","stopOnEntry":true}}]
+}
