@@ -212,6 +212,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item(go,"Code Suggestions",#selector(WorkspaceController.completionCommand)," ",[.control],route:true)
         item(edit,"Rename Symbol…",#selector(WorkspaceController.renameSymbol),String(UnicodeScalar(NSF2FunctionKey)!),[],route:true)
         item(edit,"Language Tools…",#selector(WorkspaceController.showLanguageTools),route:true)
+        let project = menu("Project")
+        item(project,"Project Settings…",#selector(WorkspaceController.showProjectSettings),route:true)
         let view = menu("View")
         item(view,"Command Palette",#selector(WorkspaceController.commandPalette),"p",[.command,.shift],route:true)
         item(view,"Open Quickly…",#selector(WorkspaceController.quickOpen),"p",route:true)

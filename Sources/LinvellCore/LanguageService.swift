@@ -64,12 +64,22 @@ public struct CodeLocation: Decodable {
         }
     }
 }
+public enum LanguageToolStorage: String, Codable { case project,user }
 public struct LanguageToolchain: Codable, Equatable {
     public var runtime = ""
     public var server = ""
     public var arguments: [String] = []
     public var enabled = true
+    public var storage: LanguageToolStorage = .project
+    public var addGitIgnore = true
     public init() {}
+    private enum CodingKeys: String,CodingKey { case runtime,server,arguments,enabled,storage,addGitIgnore }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy:CodingKeys.self)
+        runtime = try c.decodeIfPresent(String.self,forKey:.runtime) ?? ""; server = try c.decodeIfPresent(String.self,forKey:.server) ?? ""
+        arguments = try c.decodeIfPresent([String].self,forKey:.arguments) ?? []; enabled = try c.decodeIfPresent(Bool.self,forKey:.enabled) ?? true
+        storage = try c.decodeIfPresent(LanguageToolStorage.self,forKey:.storage) ?? .project; addGitIgnore = try c.decodeIfPresent(Bool.self,forKey:.addGitIgnore) ?? true
+    }
 }
 public struct CodeLanguage: Equatable {
     public let id: String,title: String,extensions: [String],runtimes: [String],servers: [String],arguments: [String]
@@ -247,6 +257,7 @@ public final class LanguageSession {
     public let rpc: LanguageRPC
     public private(set) var capabilities: [String:Any] = [:]
     private var versions: [String:Int] = [:]
+    public var openDocumentCount: Int { versions.count }
     public init(rpc: LanguageRPC,root: String,runtime: String) throws {
         self.rpc = rpc
         rpc.configuration = ["python":["pythonPath":runtime,"analysis":["autoSearchPaths":true,"useLibraryCodeForTypes":true]],"pylsp":["plugins":["jedi":["environment":runtime.isEmpty ? NSNull() : runtime as Any]]]]

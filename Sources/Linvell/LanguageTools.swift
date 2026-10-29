@@ -40,8 +40,9 @@ enum LanguageTools {
         "approvedProjectLanguageTools."+SHA256.hash(data:Data((scope(remote:remote,root:root)+"|"+language.id).utf8)).map { String(format:"%02x",$0) }.joined()
     }
     private static func fingerprint(_ profile: LanguageToolchain) -> String {
-        let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
-        return SHA256.hash(data:(try? encoder.encode(profile)) ?? Data()).map { String(format:"%02x",$0) }.joined()
+        // Installation preferences do not change approval of an existing executable.
+        let value: [String:Any] = ["runtime":profile.runtime,"server":profile.server,"arguments":profile.arguments,"enabled":profile.enabled]
+        return SHA256.hash(data:(try? JSONSerialization.data(withJSONObject:value,options:.sortedKeys)) ?? Data()).map { String(format:"%02x",$0) }.joined()
     }
     static func approved(_ profile: LanguageToolchain,language: CodeLanguage,remote: SSHRemote?,root: String) -> Bool {
         if profile.runtime.isEmpty && profile.server.isEmpty && profile.arguments.isEmpty { return true }
@@ -154,7 +155,11 @@ final class WorkspaceLanguageServices {
         sessions[key] = session; return session
     }
     func close(_ snapshot: EditorCodeSnapshot) {
-        queue.async { [self] in sessions[(snapshot.remote?.host ?? "local")+"|"+snapshot.root+"|"+snapshot.language.id]?.close(uri:snapshot.uri) }
+        queue.async { [self] in
+            let key = (snapshot.remote?.host ?? "local")+"|"+snapshot.root+"|"+snapshot.language.id
+            guard let session = sessions[key] else { return }; session.close(uri:snapshot.uri)
+            if session.openDocumentCount == 0 { session.rpc.stop(); sessions.removeValue(forKey:key) }
+        }
     }
     func saved(_ snapshot: EditorCodeSnapshot) {
         queue.async { [self] in sessions[(snapshot.remote?.host ?? "local")+"|"+snapshot.root+"|"+snapshot.language.id]?.saved(uri:snapshot.uri,text:snapshot.text) }

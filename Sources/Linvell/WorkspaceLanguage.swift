@@ -34,15 +34,15 @@ extension WorkspaceController {
         let root = URL(fileURLWithPath:path).deletingLastPathComponent().deletingLastPathComponent().path
         LanguageTools.invalidate(remote:document.remote?.connection,root:root); resetLanguageServices()
     }
-    func codeSnapshot(_ document: OpenDocument) -> EditorCodeSnapshot? {
-        guard document.imageURL == nil,let path = document.remote?.path ?? document.fileURL?.path,document.storage.length <= 2*1024*1024 else { return nil }
+    func codeSnapshot(_ document: OpenDocument,forClosing: Bool = false) -> EditorCodeSnapshot? {
+        guard document.imageURL == nil,let path = document.remote?.path ?? document.fileURL?.path,forClosing || document.storage.length <= 2*1024*1024 else { return nil }
         let remote = document.remote?.connection
         let directory: String
         if let remote,remoteConnection?.host == remote.host,remoteDirectory.hasPrefix("/"),path.hasPrefix(remoteDirectory+"/") { directory = remoteDirectory }
         else if remote == nil,let project = root?.url.path,path.hasPrefix(project+"/") { directory = project }
         else { directory = URL(fileURLWithPath:path).deletingLastPathComponent().path }
         guard let language = LanguageTools.language(path:path,remote:remote,root:directory) else { return nil }
-        return EditorCodeSnapshot(id:document.buffer.id,uri:URL(fileURLWithPath:path).absoluteString,path:path,text:document.buffer.text,version:document.buffer.revision,language:language,root:directory,remote:remote)
+        return EditorCodeSnapshot(id:document.buffer.id,uri:URL(fileURLWithPath:path).absoluteString,path:path,text:forClosing ? "" : document.buffer.text,version:document.buffer.revision,language:language,root:directory,remote:remote)
     }
     func configureLanguageEditor(_ pane: EditorPane) {
         pane.textView.codeAction = { [weak self,weak pane] action,offset in
@@ -144,7 +144,7 @@ extension WorkspaceController {
         services.queue.async { ticket.run() }
     }
     @objc func showLanguageTools() {
-        if preferences == nil { preferences = PreferencesController(owner:self) }; preferences?.showLanguageTools()
+        showProjectSettings()
     }
     @objc func definitionCommand() { goToDefinition() }
     func goToDefinition(at offset: Int? = nil) {

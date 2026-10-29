@@ -652,3 +652,67 @@
 "Fold All" = "全部折叠";
 
 "Unfold All" = "全部展开";
+
+"Project Settings" = "项目设置";
+
+"Project Settings…" = "项目设置…";
+
+"Applies only to this folder. Configuration is stored in its .linvell/settings.json." = "仅适用于当前文件夹。配置保存在项目的 .linvell/settings.json 中。";
+
+"Add the Git ignore rule when installing" = "安装时自动添加 Git 忽略规则";
+
+"Advanced server configuration" = "高级服务配置";
+
+"Project folder (.linvell/tools)" = "项目文件夹（.linvell/tools）";
+
+"Host user folder (~/.linvell/language-services)" = "代码所在机器的用户文件夹（~/.linvell/language-services）";
+
+"Download and Install…" = "下载并安装…";
+
+"Download and Install" = "下载并安装";
+
+"Clear Language Service…" = "清除语言服务…";
+
+"Add Git Ignore Rule" = "添加 Git 忽略规则";
+
+"Language service installation location" = "语言服务安装位置";
+
+"Choose this project’s interpreter and install code intelligence only when needed. Remote packages are downloaded on this Mac, transferred to the selected host and then removed from the Mac. Automatic installation currently supports Python and JavaScript/TypeScript; other languages can use installed SDKs or custom servers." = "选择当前项目的解释器，按需安装代码智能服务。远程服务由本机下载、传输到目标主机，完成后清除本机中转文件。目前支持自动安装 Python、JavaScript/TypeScript 服务；其他语言可使用已有 SDK 或自定义服务。";
+
+"No service configured. Download and Install sets it up for this project." = "尚未配置语言服务，点击“下载并安装”即可为当前项目配置。";
+
+"Choose an installed SDK, or expand Advanced server configuration." = "请选择已安装的 SDK，或展开“高级服务配置”。";
+
+"Project services live in .linvell/tools. Add /.linvell/tools/ to the project’s root .gitignore; settings.json remains available to Git." = "项目服务存放在 .linvell/tools 中。请向项目根目录的 .gitignore 添加 /.linvell/tools/；settings.json 仍可由 Git 管理。";
+
+"Services are stored on this host under ~/.linvell/language-services and can be reused by its projects. No Git ignore rule is needed." = "服务存放在代码所在机器的 ~/.linvell/language-services 中，可由该机器上的项目复用，无需 Git 忽略规则。";
+
+"Cancelling language tool installation…" = "正在取消语言工具安装…";
+
+"Install project code intelligence?" = "为项目安装代码智能服务？";
+
+"Installs only inside this project’s .linvell/tools folder. This Mac retains no relay package after remote installation." = "安装在当前项目的 .linvell/tools 文件夹内。远程安装完成后，本机不保留中转安装包。";
+
+"Installs under the target host user’s ~/.linvell/language-services folder. Shared files are removed only when no other project uses them." = "安装在代码所在机器用户的 ~/.linvell/language-services 文件夹中。其他项目仍在使用的共享文件不会被清除。";
+
+"Installed and configured for this project. Temporary downloads were removed." = "已为当前项目安装并配置，临时下载文件已清除。";
+
+"Installation cancelled. Temporary downloads were removed." = "安装已取消，临时下载文件已清除。";
+
+"Clear this language service?" = "清除当前语言服务？";
+
+"Only Linvell-managed files at the selected location are eligible for removal. Shared user-folder services remain if another project uses them. The interpreter, project source and other language services are preserved. JavaScript and TypeScript share one service." = "仅清理所选位置中由 Linvell 管理的服务文件。其他项目仍在使用的用户目录共享服务会保留。解释器、项目源码及其他语言服务均会保留。JavaScript 与 TypeScript 共用一个服务。";
+
+"Current project service cleared. Other projects and languages were preserved." = "已清理当前项目的服务关联，保留其他项目和语言的服务。";
+
+"Git ignore rule is present. Existing entries were not duplicated." = "Git 忽略规则已就绪，没有重复添加已有规则。";
+
+"Checking remote platform…" = "正在检查目标机器平台…";
+
+"Downloading the target host’s runtime on this Mac…" = "正在本机下载目标机器所需的运行时…";
+
+"Downloading language service on this Mac…" = "正在本机下载语言服务…";
+
+"Installing in the selected location…" = "正在安装到所选位置…";
+
+"Uploading and installing in this project…" = "正在上传并安装语言服务…";

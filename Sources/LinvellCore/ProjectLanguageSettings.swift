@@ -26,11 +26,13 @@ public struct JSONCSettings {
         profile.server = object["linvell.languageServerPath"] as? String ?? ""
         profile.arguments = object["linvell.languageServerArguments"] as? [String] ?? []
         profile.enabled = object["linvell.languageServiceEnabled"] as? Bool ?? true
+        profile.storage = (object["linvell.languageServiceStorage"] as? String).flatMap(LanguageToolStorage.init(rawValue:)) ?? .project
+        profile.addGitIgnore = object["linvell.languageServiceAddGitIgnore"] as? Bool ?? true
         return profile
     }
     public func updating(_ language: String,profile: LanguageToolchain) throws -> Data {
         var result = data
-        for (key,value) in [("linvell.interpreterPath",profile.runtime as Any),("linvell.languageServerPath",profile.server as Any),("linvell.languageServerArguments",profile.arguments as Any),("linvell.languageServiceEnabled",profile.enabled as Any)] {
+        for (key,value) in [("linvell.interpreterPath",profile.runtime as Any),("linvell.languageServerPath",profile.server as Any),("linvell.languageServerArguments",profile.arguments as Any),("linvell.languageServiceEnabled",profile.enabled as Any),("linvell.languageServiceStorage",profile.storage.rawValue as Any),("linvell.languageServiceAddGitIgnore",profile.addGitIgnore as Any)] {
             result = try Self.set(result,path:["["+language+"]"],key:key,value:value)
         }
         return result

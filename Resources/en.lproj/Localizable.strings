@@ -652,3 +652,67 @@
 "Fold All" = "Fold All";
 
 "Unfold All" = "Unfold All";
+
+"Project Settings" = "Project Settings";
+
+"Project Settings…" = "Project Settings…";
+
+"Applies only to this folder. Configuration is stored in its .linvell/settings.json." = "Applies only to this folder. Configuration is stored in its .linvell/settings.json.";
+
+"Add the Git ignore rule when installing" = "Add the Git ignore rule when installing";
+
+"Advanced server configuration" = "Advanced server configuration";
+
+"Project folder (.linvell/tools)" = "Project folder (.linvell/tools)";
+
+"Host user folder (~/.linvell/language-services)" = "Host user folder (~/.linvell/language-services)";
+
+"Download and Install…" = "Download and Install…";
+
+"Download and Install" = "Download and Install";
+
+"Clear Language Service…" = "Clear Language Service…";
+
+"Add Git Ignore Rule" = "Add Git Ignore Rule";
+
+"Language service installation location" = "Language service installation location";
+
+"Choose this project’s interpreter and install code intelligence only when needed. Remote packages are downloaded on this Mac, transferred to the selected host and then removed from the Mac. Automatic installation currently supports Python and JavaScript/TypeScript; other languages can use installed SDKs or custom servers." = "Choose this project’s interpreter and install code intelligence only when needed. Remote packages are downloaded on this Mac, transferred to the selected host and then removed from the Mac. Automatic installation currently supports Python and JavaScript/TypeScript; other languages can use installed SDKs or custom servers.";
+
+"No service configured. Download and Install sets it up for this project." = "No service configured. Download and Install sets it up for this project.";
+
+"Choose an installed SDK, or expand Advanced server configuration." = "Choose an installed SDK, or expand Advanced server configuration.";
+
+"Project services live in .linvell/tools. Add /.linvell/tools/ to the project’s root .gitignore; settings.json remains available to Git." = "Project services live in .linvell/tools. Add /.linvell/tools/ to the project’s root .gitignore; settings.json remains available to Git.";
+
+"Services are stored on this host under ~/.linvell/language-services and can be reused by its projects. No Git ignore rule is needed." = "Services are stored on this host under ~/.linvell/language-services and can be reused by its projects. No Git ignore rule is needed.";
+
+"Cancelling language tool installation…" = "Cancelling language tool installation…";
+
+"Install project code intelligence?" = "Install project code intelligence?";
+
+"Installs only inside this project’s .linvell/tools folder. This Mac retains no relay package after remote installation." = "Installs only inside this project’s .linvell/tools folder. This Mac retains no relay package after remote installation.";
+
+"Installs under the target host user’s ~/.linvell/language-services folder. Shared files are removed only when no other project uses them." = "Installs under the target host user’s ~/.linvell/language-services folder. Shared files are removed only when no other project uses them.";
+
+"Installed and configured for this project. Temporary downloads were removed." = "Installed and configured for this project. Temporary downloads were removed.";
+
+"Installation cancelled. Temporary downloads were removed." = "Installation cancelled. Temporary downloads were removed.";
+
+"Clear this language service?" = "Clear this language service?";
+
+"Only Linvell-managed files at the selected location are eligible for removal. Shared user-folder services remain if another project uses them. The interpreter, project source and other language services are preserved. JavaScript and TypeScript share one service." = "Only Linvell-managed files at the selected location are eligible for removal. Shared user-folder services remain if another project uses them. The interpreter, project source and other language services are preserved. JavaScript and TypeScript share one service.";
+
+"Current project service cleared. Other projects and languages were preserved." = "Current project service cleared. Other projects and languages were preserved.";
+
+"Git ignore rule is present. Existing entries were not duplicated." = "Git ignore rule is present. Existing entries were not duplicated.";
+
+"Checking remote platform…" = "Checking remote platform…";
+
+"Downloading the target host’s runtime on this Mac…" = "Downloading the target host’s runtime on this Mac…";
+
+"Downloading language service on this Mac…" = "Downloading language service on this Mac…";
+
+"Installing in the selected location…" = "Installing in the selected location…";
+
+"Uploading and installing in this project…" = "Uploading and installing in this project…";

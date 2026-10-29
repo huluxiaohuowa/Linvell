@@ -51,6 +51,7 @@ public struct RemoteEntry: Decodable, Equatable {
     public let directory: Bool
 }
 public struct RemoteReply: Decodable {
+    public let installTarget: LanguageInstallTarget?
     public let path: String?
     public let entries: [RemoteEntry]?
     public let content: String?
@@ -167,6 +168,14 @@ try:
                     if os.path.exists(temporary): os.unlink(temporary)
         value,checksum=readsettings()
         reply=dict(path=config,content=base64.b64encode(value).decode(),digest=checksum)
+    elif op=='language-tool-probe':
+        import platform,shutil,subprocess
+        node=shutil.which('node') or ''
+        version=''
+        if node:
+            probe=subprocess.run([node,'--version'],capture_output=True,timeout=10)
+            if probe.returncode==0:version=probe.stdout.decode().strip()
+        reply=dict(path=os.path.realpath(path),installTarget=dict(platform=sys.platform,architecture=platform.machine().lower(),libc=platform.libc_ver()[0],node=node,nodeVersion=version))
     elif op=='toolchains':
         import shutil
         names=['swift','sourcekit-lsp','python3','python','pyright-langserver','basedpyright-langserver','pylsp','node','typescript-language-server','clang','gcc','clangd','go','gopls','rustc','rust-analyzer','java','jdtls','dotnet','csharp-ls','ruby','ruby-lsp','php','phpactor','bash','zsh','bash-language-server','lua','luajit','lua-language-server','R','vscode-html-language-server','vscode-css-language-server','vscode-json-language-server','clang++','g++','iverilog','verilator','verible-verilog-ls','ghdl','vhdl_ls','dart']

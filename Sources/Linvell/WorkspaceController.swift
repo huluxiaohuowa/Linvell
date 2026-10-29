@@ -61,6 +61,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     var activeActivity = 0
     var gitRepositoryFactory: (SSHRemote,String) -> GitRepository = { GitRepository(remote:$0,directory:$1) }
     var preferences: PreferencesController?
+    var projectSettings: ProjectSettingsController?
     var restoringLayout = true
     var loading: [URL:UUID] = [:]
     var latestOpenRequest: UUID?
@@ -100,7 +101,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         command.layer?.borderColor = Theme.secondary.withAlphaComponent(0.20).cgColor; command.layer?.borderWidth = 1
         command.heightAnchor.constraint(equalToConstant:30).isActive = true
         let heading = Theme.stack([
-            projectTitle,NSView(),command,NSView(),
+            projectTitle,Theme.button("slider.horizontal.3",help:"Project Settings",target:self,action:#selector(showProjectSettings)),NSView(),command,NSView(),
             Theme.button("sidebar.left",help:"Toggle Sidebar",target:self,action:#selector(toggleSidebar)),
             Theme.button("folder.badge.plus",help:"Open Folder…",target:self,action:#selector(openFolder)),
             Theme.button("rectangle.split.2x1",help:"Split Editor",target:self,action:#selector(toggleSplit)),
@@ -435,7 +436,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         autoSaveWork.removeValue(forKey:doc.buffer.id)?.cancel()
         guard mayClose(doc) else { return }
         do { try recovery.remove(doc.buffer.id) } catch { show(error); return }
-        if let snapshot = codeSnapshot(doc) { languageServices.close(snapshot) }
+        if let snapshot = codeSnapshot(doc,forClosing:true) { languageServices.close(snapshot) }
         languageEdits.removeValue(forKey:doc.buffer.id)?.cancel()
         documents.removeAll { $0 === doc }
         if current === doc {
