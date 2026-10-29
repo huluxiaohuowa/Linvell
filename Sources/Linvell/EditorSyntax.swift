@@ -96,6 +96,7 @@ extension EditorPane {
         }
     }
     func toggleFold(line: Int) {
+        guard document.syntax.version == document.buffer.revision else { document.syntax.request(document); return }
         guard let fold = document.syntax.analysis.folds.first(where:{ $0.line == line }),fold.range.length > 0 else { return }
         if let i = folding.hidden.firstIndex(of:fold.range) { folding.hidden.remove(at:i) }
         else {
@@ -110,6 +111,7 @@ extension EditorPane {
     }
     func unfoldAll() { if !folding.hidden.isEmpty { folding.hidden = []; textView.needsDisplay = true; gutter.needsDisplay = true } }
     func foldAll() {
+        guard document.syntax.version == document.buffer.revision else { document.syntax.request(document); return }
         textView.setSelectedRange(NSRange(location:0,length:0))
         folding.hidden = document.syntax.analysis.folds.map(\.range)
         textView.needsDisplay = true; gutter.needsDisplay = true

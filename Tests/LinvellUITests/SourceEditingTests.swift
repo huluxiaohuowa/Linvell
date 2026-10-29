@@ -34,6 +34,11 @@ final class SourceEditingTests: XCTestCase {
         XCTAssertEqual(doc.storage.string,source); XCTAssertEqual(doc.buffer.text,source); XCTAssertEqual(doc.buffer.isModified,modifiedBefore)
         pane.unfoldAll(); pane.folding.ensureLayout(for:container)
         XCTAssertEqual(pane.folding.usedRect(for:container).height,original,accuracy:1)
+        pane.toggleFold(line:0)
+        pane.textView.setSelectedRange(NSRange(location:0,length:0))
+        pane.textView.performMultiEdit([NSRange(location:0,length:0)],replacement:"// added header\n")
+        XCTAssertTrue(pane.folding.hidden.isEmpty)
+        XCTAssertEqual(doc.storage.string,"// added header\n"+source)
     }
     func testNewlineIsNativeUndoableAndUsesLanguageIndentation() throws {
         _ = NSApplication.shared

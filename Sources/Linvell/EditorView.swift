@@ -27,6 +27,9 @@ final class OpenDocument: NSObject, NSTextStorageDelegate {
     }
     func textStorage(_ textStorage: NSTextStorage,didProcessEditing editedMask: NSTextStorageEditActions,range editedRange: NSRange,changeInLength delta: Int) {
         guard editedMask.contains(.editedCharacters) else { return }
+        // Vim, multi-edit, refactor and native input all pass through this shared
+        // delegate. Never carry old hidden offsets across a text replacement.
+        for manager in textStorage.layoutManagers.compactMap({ $0 as? FoldingLayoutManager }) where !manager.hidden.isEmpty { manager.hidden = [] }
         let old = NSRange(location:editedRange.location,length:editedRange.length-delta)
         lines.apply(range:old,replacement:(textStorage.string as NSString).substring(with:editedRange))
     }
