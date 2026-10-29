@@ -2,6 +2,10 @@
 
 2026-10-29 · 0.1.7 — published
 
+## Plugin development preview — source only (2026-10-29)
+
+Protocol 1 now provides explicit per-window local package loading, a Swift `LinvellPluginKit` SDK, a lazily started independent process, command palette contributions and optional revision-checked, undoable current-document replacements. The HelloPlugin example builds and ran through the actual development UI. See [verification and remaining scope](verification/plugins-protocol-1.md) and the [bilingual developer guide](https://linvell.fuluwa.top/plugins.html). This has not been packaged as a new public app release.
+
 ## Added in 0.1.7
 
 [0.1.7 is published](https://github.com/huluxiaohuowa/Linvell/releases/tag/v0.1.7). [GitHub Actions](https://github.com/huluxiaohuowa/Linvell/actions/runs/40815230849) built Universal binaries, signed, notarized, stapled and published the release. No installed application was launched or replaced by the agent.

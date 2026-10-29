@@ -222,6 +222,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item(go,"Code Suggestions",#selector(WorkspaceController.completionCommand)," ",[.control],route:true)
         item(edit,"Rename Symbol…",#selector(WorkspaceController.renameSymbol),String(UnicodeScalar(NSF2FunctionKey)!),[],route:true)
         item(edit,"Language Tools…",#selector(WorkspaceController.showLanguageTools),route:true)
+        item(edit,"Load Development Plugin…",#selector(WorkspaceController.loadDevelopmentPlugin),route:true)
+        item(edit,"Stop Plugins",#selector(WorkspaceController.stopPlugins),route:true)
         let project = menu("Project")
         item(project,"Project Settings…",#selector(WorkspaceController.showProjectSettings),route:true)
         let view = menu("View")

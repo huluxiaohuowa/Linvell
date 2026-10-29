@@ -1,0 +1,14 @@
+{
+  "originHash" : "febd64760c227d561ae6a8c4bacbf3e03ab2737132979b1594b51689482e4c74",
+  "pins" : [
+    {
+      "identity" : "ink",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/JohnSundell/Ink.git",
+      "state" : {
+        "revision" : "bcc9f219900a62c4210e6db726035d7f03ae757b"
+      }
+    }
+  ],
+  "version" : 3
+}

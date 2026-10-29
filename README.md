@@ -29,6 +29,10 @@ The **Updates** category provides independent switches for automatic checks, dow
 
 iCloud Drive can synchronize the preference allowlist in `Linvell/Preferences.json`: theme, font, text size, wrapping, line numbers, indentation and Vim mode. Preferences are merged per setting using their modification times. The sync switch and machine-specific layout stay local. Documents, recovery snapshots, project paths, terminal environment and credentials never enter this preference file. iCloud Drive must be available; actual delivery to another Mac is managed by iCloud and needs cross-device verification.
 
+## Plugin development preview
+
+The source branch includes `LinvellPluginKit`, a Swift SDK with an independent process host, command palette contributions and optional undoable document transformations. Start with [the bilingual plugin guide](https://linvell.fuluwa.top/plugins.html) and [`Examples/HelloPlugin`](Examples/HelloPlugin). This preview requires a source build; it is not part of the current published app. Plugins run with your user account’s OS access; manifest permissions gate editor APIs, not a security sandbox. See [verification and limits](docs/verification/plugins-protocol-1.md).
+
 ## Remote development, running and Git
 
 Read the bilingual [usage guide](https://linvell.fuluwa.top/guide.html) for SSH workspaces, local/remote run and web preview, Git Graph, VS Code-style shortcuts and normal/Vim multi-selection editing. Guide source is maintained in [linvell-web](https://github.com/huluxiaohuowa/linvell-web/tree/main/docs).

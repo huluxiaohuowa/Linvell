@@ -770,3 +770,23 @@
 "Language intelligence is disabled for this language." = "此语言的代码智能功能已禁用。";
 
 "The language service does not support this action." = "此语言服务不支持这项操作。";
+
+"Load Development Plugin…" = "加载开发插件…";
+"Stop Plugins" = "停止插件";
+"Choose a plugin folder containing plugin.json and its executable." = "选择包含 plugin.json 和可执行程序的插件目录。";
+"Load plugin: %@?" = "加载插件：%@？";
+"Only load code you trust. Plugins run as your user account, outside a security sandbox. Declared permissions restrict editor APIs, not direct file, network or process access." = "仅加载你信任的代码。插件以当前用户身份在安全沙箱外运行。声明的权限约束编辑器 API，不限制程序直接访问文件、网络或启动进程。";
+"Editor permissions" = "编辑器权限";
+"None" = "无";
+"Load Plugin" = "加载插件";
+"Plugin loaded: %@" = "插件已加载：%@";
+"Plugins stopped. Load a plugin folder to start it again." = "插件已停止，重新加载插件目录即可再次启动。";
+"Running plugin command…" = "正在运行插件命令…";
+"Plugin command completed." = "插件命令已完成。";
+"Plugin Edit" = "插件编辑";
+"Invalid plugin package. Check plugin.json and the executable inside the selected folder." = "插件包无效，请检查 plugin.json 与所选目录中的可执行程序。";
+"This plugin requires an unsupported protocol version." = "此插件要求的协议版本不受支持。";
+"The plugin has not declared the document permissions required for this operation." = "插件未声明此操作所需的文档权限。";
+"The document changed while the plugin was running. Run the command again." = "插件运行期间文档已变化，请重新运行命令。";
+"The plugin is stopped or another command is running." = "插件已停止或有其他命令正在运行。";
+"The plugin failed or timed out. Check its executable and protocol; load it again to restart." = "插件失败或超时，请检查可执行程序和协议，重新加载即可重启。";

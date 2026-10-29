@@ -15,6 +15,7 @@ final class FileNode: NSObject {
 
 final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutlineViewDataSource, NSOutlineViewDelegate, NSSearchFieldDelegate {
     var documents: [OpenDocument] = []
+    var pluginSessions: [String:PluginSession] = [:]
     let languageServices = WorkspaceLanguageServices()
     var languageEdits: [UUID:DispatchWorkItem] = [:]
     var languageSyncs: [UUID:LanguageQueryTicket] = [:]
@@ -518,6 +519,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         terminal.terminate()
     }
     func windowWillClose(_ notification: Notification) {
+        stopPlugins()
         picker?.dismiss(); picker = nil
         window?.undoManager?.removeAllActions(withTarget:self)
         completionPanel?.dismiss(); hoverPopover?.close(); languageServices.stop()
@@ -744,6 +746,9 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
             options.append(PickerOption(title:title,detail:"Linvell command",invoke:{ [weak self] in self?.perform(selector) }))
         }
         options.append(PickerOption(title:L.text("Preferences: Theme and Font"),detail:"Appearance",invoke:{ [weak self] in self?.showSettings() }))
+        options.append(PickerOption(title:L.text("Load Development Plugin…"),detail:"Linvell",invoke:{ [weak self] in self?.loadDevelopmentPlugin() }))
+        options.append(PickerOption(title:L.text("Stop Plugins"),detail:"Linvell",invoke:{ [weak self] in self?.stopPlugins() }))
+        options += pluginCommandOptions()
         picker = QuickPicker(title:L.text("Search commands"),options:options,owner:window!)
     }
     private func showEx(_ prefix: String = ":") {

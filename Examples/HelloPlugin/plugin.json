@@ -1,0 +1,12 @@
+{
+  "id": "dev.linvell.hello",
+  "name": "Hello Swift",
+  "version": "0.1.0",
+  "protocolVersion": 1,
+  "executable": "HelloPlugin",
+  "permissions": ["document.read", "document.write"],
+  "commands": [
+    {"id": "hello.greet", "title": "Hello: Greet"},
+    {"id": "hello.uppercase", "title": "Hello: Uppercase Document"}
+  ]
+}

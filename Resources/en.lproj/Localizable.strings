@@ -770,3 +770,23 @@
 "Language intelligence is disabled for this language." = "Language intelligence is disabled for this language.";
 
 "The language service does not support this action." = "The language service does not support this action.";
+
+"Load Development Plugin…" = "Load Development Plugin…";
+"Stop Plugins" = "Stop Plugins";
+"Choose a plugin folder containing plugin.json and its executable." = "Choose a plugin folder containing plugin.json and its executable.";
+"Load plugin: %@?" = "Load plugin: %@?";
+"Only load code you trust. Plugins run as your user account, outside a security sandbox. Declared permissions restrict editor APIs, not direct file, network or process access." = "Only load code you trust. Plugins run as your user account, outside a security sandbox. Declared permissions restrict editor APIs, not direct file, network or process access.";
+"Editor permissions" = "Editor permissions";
+"None" = "None";
+"Load Plugin" = "Load Plugin";
+"Plugin loaded: %@" = "Plugin loaded: %@";
+"Plugins stopped. Load a plugin folder to start it again." = "Plugins stopped. Load a plugin folder to start it again.";
+"Running plugin command…" = "Running plugin command…";
+"Plugin command completed." = "Plugin command completed.";
+"Plugin Edit" = "Plugin Edit";
+"Invalid plugin package. Check plugin.json and the executable inside the selected folder." = "Invalid plugin package. Check plugin.json and the executable inside the selected folder.";
+"This plugin requires an unsupported protocol version." = "This plugin requires an unsupported protocol version.";
+"The plugin has not declared the document permissions required for this operation." = "The plugin has not declared the document permissions required for this operation.";
+"The document changed while the plugin was running. Run the command again." = "The document changed while the plugin was running. Run the command again.";
+"The plugin is stopped or another command is running." = "The plugin is stopped or another command is running.";
+"The plugin failed or timed out. Check its executable and protocol; load it again to restart." = "The plugin failed or timed out. Check its executable and protocol; load it again to restart.";
