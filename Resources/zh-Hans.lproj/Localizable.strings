@@ -790,3 +790,11 @@
 "The document changed while the plugin was running. Run the command again." = "插件运行期间文档已变化，请重新运行命令。";
 "The plugin is stopped or another command is running." = "插件已停止或有其他命令正在运行。";
 "The plugin failed or timed out. Check its executable and protocol; load it again to restart." = "插件失败或超时，请检查可执行程序和协议，重新加载即可重启。";
+
+"Plugins" = "插件";
+"User Plugin Configuration…" = "用户插件配置…";
+"Workspace Plugin Configuration…" = "工作区插件配置…";
+"This plugin shortcut conflicts with an existing command. Change its keybinding before loading." = "插件快捷键与现有命令冲突，请修改 keybinding 后再加载。";
+"Plugin configuration or state is invalid, too large, or unavailable for this workspace." = "插件配置或状态无效、过大，或当前工作区不可用。";
+
+"The plugin has not declared the permissions required for this operation." = "插件未声明此操作所需的权限。";

@@ -20,7 +20,11 @@
 - Website quick-start build block extracted and executed in Bash (app launch omitted because the development app had already been verified). Example executable and manifest produced successfully under `~/dev/build`.
 - Website Chinese/English content, navigation and code examples checked in a browser; website release metadata tests passed (3 tests).
 
-## Remaining scope
+## Remaining scope at P1
+
+Document events, range edits, native plugin menus/shortcuts and configuration/state have since been added by [P2](plugins-p2.md). The list below records the original P1 boundary.
+
+### Original boundary
 
 This preview does not enforce an OS security sandbox. Manifest permissions restrict host API data and edits, not a program’s direct file/network/process access. Only trusted local development programs should be loaded. Processes execute on the Mac, even when transforming a remote editor buffer.
 

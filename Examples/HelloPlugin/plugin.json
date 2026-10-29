@@ -1,12 +1,45 @@
 {
   "id": "dev.linvell.hello",
   "name": "Hello Swift",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "protocolVersion": 1,
   "executable": "HelloPlugin",
-  "permissions": ["document.read", "document.write"],
+  "permissions": [
+    "document.read",
+    "document.write",
+    "storage"
+  ],
   "commands": [
-    {"id": "hello.greet", "title": "Hello: Greet"},
-    {"id": "hello.uppercase", "title": "Hello: Uppercase Document"}
-  ]
+    {
+      "id": "hello.greet",
+      "title": "Hello: Greet",
+      "menu": "plugins"
+    },
+    {
+      "id": "hello.uppercase",
+      "title": "Hello: Uppercase Document",
+      "menu": "plugins"
+    },
+    {
+      "id": "hello.prefix",
+      "title": "Hello: Insert Prefix",
+      "menu": "plugins",
+      "keybinding": "cmd+ctrl+9"
+    },
+    {
+      "id": "hello.events",
+      "title": "Hello: Document Events",
+      "menu": "plugins"
+    }
+  ],
+  "events": [
+    "open",
+    "change",
+    "save",
+    "close"
+  ],
+  "configuration": {
+    "greeting": "Hello from a Swift plugin!",
+    "prefix": "Hello: "
+  }
 }

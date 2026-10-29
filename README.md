@@ -31,7 +31,7 @@ iCloud Drive can synchronize the preference allowlist in `Linvell/Preferences.js
 
 ## Plugin development preview
 
-The source branch includes `LinvellPluginKit`, a Swift SDK with an independent process host, command palette contributions and optional undoable document transformations. Start with [the bilingual plugin guide](https://linvell.fuluwa.top/plugins.html) and [`Examples/HelloPlugin`](Examples/HelloPlugin). This preview requires a source build; it is not part of the current published app. Plugins run with your user account’s OS access; manifest permissions gate editor APIs, not a security sandbox. See [verification and limits](docs/verification/plugins-protocol-1.md).
+The unpublished source on `main` includes `LinvellPluginKit`, a Swift SDK with an independent process host, document events, command palette/native menu contributions, shortcuts, versioned range edits, layered configuration and persistent state. Start with [the bilingual plugin guide](https://linvell.fuluwa.top/plugins.html) and [`Examples/HelloPlugin`](Examples/HelloPlugin). This preview requires a source build; it is not part of the current published app. Plugins run with your user account’s OS access; manifest permissions gate editor APIs, not a security sandbox. See [verification and limits](docs/verification/plugins-protocol-1.md).
 
 ## Remote development, running and Git
 

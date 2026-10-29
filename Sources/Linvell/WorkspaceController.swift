@@ -16,6 +16,7 @@ final class FileNode: NSObject {
 final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutlineViewDataSource, NSOutlineViewDelegate, NSSearchFieldDelegate {
     var documents: [OpenDocument] = []
     var pluginSessions: [String:PluginSession] = [:]
+    var pluginDocumentVersions: [UUID:Int] = [:]
     let languageServices = WorkspaceLanguageServices()
     var languageEdits: [UUID:DispatchWorkItem] = [:]
     var languageSyncs: [UUID:LanguageQueryTicket] = [:]
@@ -415,12 +416,13 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         pane.translatesAutoresizingMaskIntoConstraints = false
         pane.onFocus = { [weak self,weak pane] in self?.activePane = pane }
         pane.onChange = { [weak self] in self?.updateStatus(); self?.updateTabTitles() }
-        pane.onTextChanged = { [weak self] in self?.markdownView?.render(document.buffer.text); self?.scheduleAutoSave(document); self?.languageDocumentChanged(document) }
+        pane.onTextChanged = { [weak self] in self?.markdownView?.render(document.buffer.text); self?.scheduleAutoSave(document); self?.languageDocumentChanged(document); self?.synchronizePluginDocuments() }
         pane.textView.exCommand = { [weak self] prefix in self?.showEx(prefix) }
         configureLanguageEditor(pane)
         panes.append(pane); return pane
     }
     func renderTabs() {
+        synchronizePluginDocuments()
         tabs.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for (index,doc) in documents.enumerated() {
             let b = NSButton(title:doc.displayName,target:self,action:#selector(tabClicked(_:)))

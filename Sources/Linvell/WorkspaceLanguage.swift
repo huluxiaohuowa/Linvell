@@ -30,6 +30,7 @@ extension WorkspaceController {
         if let current { synchronizeLanguage(current) }
     }
     func codeDocumentSaved(_ document: OpenDocument,savedVersion: Int? = nil) {
+        pluginDocumentSaved(document,revision:savedVersion ?? document.buffer.revision)
         if let metadata = codeSnapshot(document,forClosing:true) {
             let directory = metadata.path.hasSuffix("/.linvell/settings.json") ? URL(fileURLWithPath:metadata.path).deletingLastPathComponent().deletingLastPathComponent().path : metadata.root
             languageServices.queue.async { [services = languageServices] in services.filesChanged([metadata.path],root:directory,remote:metadata.remote) }

@@ -2,6 +2,10 @@
 
 2026-10-29 · 0.1.7 — published
 
+## P2 plugins — unpublished source on main (2026-10-29)
+
+Document open/change/save/close events, revision-checked UTF-16 range edits with grouped undo, native Plugins menu/shortcuts with conflict detection, default/user/workspace configuration and persistent plugin/global-workspace state are implemented. The example now demonstrates events, configured greetings, persistent invocation counts and a shortcut-driven prefix edit. See [P2 acceptance](verification/plugins-p2.md) and the [bilingual SDK guide](https://linvell.fuluwa.top/plugins.html). This is source on `main`, not a separate dev branch or a new published app release. The local build’s “Linvell Dev” label only distinguishes the debug app.
+
 ## Plugin development preview — source only (2026-10-29)
 
 Protocol 1 now provides explicit per-window local package loading, a Swift `LinvellPluginKit` SDK, a lazily started independent process, command palette contributions and optional revision-checked, undoable current-document replacements. The HelloPlugin example builds and ran through the actual development UI. See [verification and remaining scope](verification/plugins-protocol-1.md) and the [bilingual developer guide](https://linvell.fuluwa.top/plugins.html). This has not been packaged as a new public app release.

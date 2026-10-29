@@ -120,6 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             catch { NSAlert(error:error).runModal(); return .terminateCancel }
         }
         for workspace in workspaces {
+            workspace.stopPlugins()
             workspace.terminateTerminal()
             for doc in workspace.documents { try? workspace.recovery.remove(doc.buffer.id) }
         }
@@ -253,6 +254,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let win = menu("Window"); NSApp.windowsMenu = win
         item(win,"Minimize",#selector(NSWindow.performMiniaturize(_:)),"m")
         item(win,"Zoom",#selector(NSWindow.performZoom(_:)))
+        PluginMenus.install(in:bar)
         let help = menu("Help"); let web = NSMenuItem(title:L.text("Linvell Website"),action:#selector(website),keyEquivalent:""); web.target = self; help.addItem(web)
     }
 }

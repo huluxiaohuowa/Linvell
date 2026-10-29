@@ -48,6 +48,9 @@ public struct JSONCSettings {
         }
         return result
     }
+    public func updatingPlugin(_ id: String,configuration: [String:Any]) throws -> Data {
+        try Self.set(data,path:["plugins"],key:id,value:configuration)
+    }
     private static func set(_ data: Data,path: [String],key: String,value: Any) throws -> Data {
         guard data.count <= 1024*1024 else { throw ProjectSettingsError.invalidJSONC }
         var parser = JSONCParser(data); var node = try parser.document()
@@ -151,7 +154,12 @@ public struct ProjectLanguageSettings {
         return Self(data:bytes,digest:exists ? hash(bytes) : "missing",root:root,remote:nil)
     }
     public func write(language: String,profile: LanguageToolchain) throws -> ProjectLanguageSettings {
-        let bytes = try JSONCSettings(data).updating(language,profile:profile)
+        try write(try JSONCSettings(data).updating(language,profile:profile))
+    }
+    public func writePlugin(_ id: String,configuration: [String:Any]) throws -> ProjectLanguageSettings {
+        try write(try JSONCSettings(data).updatingPlugin(id,configuration:configuration))
+    }
+    private func write(_ bytes: Data) throws -> ProjectLanguageSettings {
         if let remote { _ = try remote.request("settings-write",path:root,content:bytes,digest:digest); return try Self.read(root:root,remote:remote) }
         let folder = URL(fileURLWithPath:root).appendingPathComponent(".linvell"),path = folder.appendingPathComponent("settings.json")
         try Self.checkSymlink(folder); try Self.checkSymlink(path)

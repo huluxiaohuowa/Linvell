@@ -790,3 +790,11 @@
 "The document changed while the plugin was running. Run the command again." = "The document changed while the plugin was running. Run the command again.";
 "The plugin is stopped or another command is running." = "The plugin is stopped or another command is running.";
 "The plugin failed or timed out. Check its executable and protocol; load it again to restart." = "The plugin failed or timed out. Check its executable and protocol; load it again to restart.";
+
+"Plugins" = "Plugins";
+"User Plugin Configuration…" = "User Plugin Configuration…";
+"Workspace Plugin Configuration…" = "Workspace Plugin Configuration…";
+"This plugin shortcut conflicts with an existing command. Change its keybinding before loading." = "This plugin shortcut conflicts with an existing command. Change its keybinding before loading.";
+"Plugin configuration or state is invalid, too large, or unavailable for this workspace." = "Plugin configuration or state is invalid, too large, or unavailable for this workspace.";
+
+"The plugin has not declared the permissions required for this operation." = "The plugin has not declared the permissions required for this operation.";
