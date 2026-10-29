@@ -1,7 +1,7 @@
 {
   "id": "dev.linvell.hello",
   "name": "Hello Swift",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "protocolVersion": 1,
   "executable": "HelloPlugin",
   "permissions": [
@@ -30,6 +30,16 @@
       "id": "hello.events",
       "title": "Hello: Document Events",
       "menu": "plugins"
+    },
+    {
+      "id": "hello.inspect",
+      "title": "Hello: Inspect Selected Item",
+      "menu": "plugins"
+    },
+    {
+      "id": "hello.refresh",
+      "title": "Hello: Refresh Native Views",
+      "menu": "plugins"
     }
   ],
   "events": [
@@ -40,6 +50,145 @@
   ],
   "configuration": {
     "greeting": "Hello from a Swift plugin!",
-    "prefix": "Hello: "
-  }
+    "prefix": "Hello: ",
+    "enabled": true,
+    "limit": 10,
+    "style": "calm"
+  },
+  "icons": [
+    {
+      "id": "spark",
+      "symbol": "sparkles",
+      "fileExtensions": [
+        "txt",
+        "swift"
+      ]
+    }
+  ],
+  "views": [
+    {
+      "id": "projectTree",
+      "title": "Example Tree",
+      "kind": "tree",
+      "refreshCommand": "hello.refresh",
+      "items": [
+        {
+          "id": "root",
+          "title": "Plugin Workspace",
+          "icon": "spark",
+          "children": [
+            {
+              "id": "guide",
+              "title": "Developer Guide",
+              "detail": "Double-click or Run Selected",
+              "command": "hello.inspect",
+              "icon": "spark"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "actions",
+      "title": "Example List",
+      "kind": "list",
+      "refreshCommand": "hello.refresh",
+      "items": [
+        {
+          "id": "greet",
+          "title": "Configured Greeting",
+          "command": "hello.greet",
+          "icon": "spark"
+        },
+        {
+          "id": "prefix",
+          "title": "Insert Prefix",
+          "command": "hello.prefix"
+        }
+      ]
+    },
+    {
+      "id": "counter",
+      "title": "Example Status",
+      "kind": "status",
+      "text": "Plugin ready",
+      "icon": "spark",
+      "command": "hello.events"
+    },
+    {
+      "id": "tools",
+      "title": "Example Tools",
+      "kind": "panel",
+      "text": "Native AppKit tool panel. Select an action and press Run Selected.",
+      "items": [
+        {
+          "id": "inspect",
+          "title": "Inspect this action",
+          "detail": "The command receives uiEvent.viewID and itemID.",
+          "command": "hello.inspect",
+          "icon": "spark"
+        }
+      ]
+    }
+  ],
+  "settings": [
+    {
+      "key": "greeting",
+      "title": "Greeting",
+      "kind": "string",
+      "description": "Text shown by Hello: Greet."
+    },
+    {
+      "key": "prefix",
+      "title": "Prefix",
+      "kind": "string"
+    },
+    {
+      "key": "enabled",
+      "title": "Enable example option",
+      "kind": "boolean"
+    },
+    {
+      "key": "limit",
+      "title": "Result limit",
+      "kind": "number"
+    },
+    {
+      "key": "style",
+      "title": "Style",
+      "kind": "choice",
+      "choices": [
+        "calm",
+        "bright"
+      ]
+    }
+  ],
+  "themes": [
+    {
+      "id": "forest",
+      "title": "Plugin Forest",
+      "isDark": true,
+      "colors": {
+        "canvas": "#10241E",
+        "panel": "#18352B",
+        "foreground": "#E2F4EB",
+        "secondary": "#9BBEAC",
+        "accent": "#88D9AD",
+        "keyword": "#C4B3F4",
+        "number": "#EEC380",
+        "selection": "#315C49"
+      }
+    }
+  ],
+  "snippets": [
+    {
+      "id": "greeting",
+      "title": "Greeting Function",
+      "prefix": "greetfn",
+      "scope": [
+        "swift"
+      ],
+      "body": "func ${1:greet}(_ name: String) {\n    print(\"${2:Hello}, \\(name)\")\n}\n$0"
+    }
+  ]
 }

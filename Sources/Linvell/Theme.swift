@@ -1,4 +1,6 @@
 import AppKit
+import LinvellCore
+import LinvellPluginKit
 
 enum Theme {
     enum Profile: String, CaseIterable {
@@ -13,19 +15,25 @@ enum Theme {
             }
         }
     }
+    private static var pluginPalette: [UInt32]?
+    static var pluginTheme: (UUID,PluginTheme)? { didSet {
+        pluginPalette = pluginTheme.map { entry in PluginContributions.colorKeys.map { UInt32(entry.1.colors[$0]!.dropFirst(),radix:16)! } }
+    } }
+    static var isDark: Bool { pluginTheme?.1.isDark ?? profile.isDark }
+    static var palette: [UInt32] { pluginPalette ?? profile.colors }
     static var profile: Profile {
         get { Profile(rawValue:UserDefaults.standard.string(forKey:"theme") ?? "") ?? .dark }
-        set { UserDefaults.standard.set(newValue.rawValue,forKey:"theme") }
+        set { pluginTheme = nil; UserDefaults.standard.set(newValue.rawValue,forKey:"theme") }
     }
     static func color(_ value: UInt32) -> NSColor { NSColor(calibratedRed:CGFloat((value>>16)&255)/255,green:CGFloat((value>>8)&255)/255,blue:CGFloat(value&255)/255,alpha:1) }
-    static var canvas: NSColor { color(profile.colors[0]) }
-    static var panel: NSColor { color(profile.colors[1]) }
-    static var foreground: NSColor { color(profile.colors[2]) }
-    static var secondary: NSColor { color(profile.colors[3]) }
-    static var accent: NSColor { color(profile.colors[4]) }
-    static var keyword: NSColor { color(profile.colors[5]) }
-    static var number: NSColor { color(profile.colors[6]) }
-    static var selection: NSColor { color(profile.colors[7]) }
+    static var canvas: NSColor { color(palette[0]) }
+    static var panel: NSColor { color(palette[1]) }
+    static var foreground: NSColor { color(palette[2]) }
+    static var secondary: NSColor { color(palette[3]) }
+    static var accent: NSColor { color(palette[4]) }
+    static var keyword: NSColor { color(palette[5]) }
+    static var number: NSColor { color(palette[6]) }
+    static var selection: NSColor { color(palette[7]) }
     static var fontSize: CGFloat {
         get { let value = UserDefaults.standard.double(forKey: "editorFontSize"); return value == 0 ? 15 : max(11, min(30, value)) }
         set { UserDefaults.standard.set(newValue, forKey: "editorFontSize") }

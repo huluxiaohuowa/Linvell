@@ -798,3 +798,21 @@
 "Plugin configuration or state is invalid, too large, or unavailable for this workspace." = "插件配置或状态无效、过大，或当前工作区不可用。";
 
 "The plugin has not declared the permissions required for this operation." = "插件未声明此操作所需的权限。";
+
+"Choose a plugin folder containing plugin.json." = "选择包含 plugin.json 的插件目录。";
+"Refresh Plugin View" = "刷新插件视图";
+"Run Selected" = "运行所选项";
+"Plugin Settings" = "插件设置";
+"Plugin Settings…" = "插件设置…";
+"Save Plugin Settings" = "保存插件设置";
+"Loading plugin settings…" = "正在加载插件设置…";
+"Saving plugin settings…" = "正在保存插件设置…";
+"Saved files determine the effective configuration." = "生效配置以已保存的文件为准。";
+"Plugin Theme" = "插件主题";
+"Plugin Snippet" = "插件代码片段";
+"Insert Plugin Snippet" = "插入插件代码片段";
+"Use Plugin File Icons" = "使用插件文件图标";
+"Configure the plugins loaded in this workspace." = "配置当前工作区已加载的插件。";
+"Load a plugin to configure its native settings." = "加载插件后可配置其原生设置。";
+"User" = "用户";
+"Workspace" = "工作区";

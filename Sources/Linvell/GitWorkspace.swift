@@ -36,7 +36,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate {
         let project = repository.root
         super.init(frame:.zero)
         wantsLayer = true; layer?.backgroundColor = Theme.canvas.cgColor
-        appearance = NSAppearance(named:Theme.profile.isDark ? .darkAqua : .aqua)
+        appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua)
         mode.selectedSegment = 1; mode.target = self; mode.action = #selector(modeChanged)
         side.selectedSegment = 0; side.target = self; side.action = #selector(selectionChanged)
         message.placeholderString = L.text("Commit message — staged changes only")
@@ -98,7 +98,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate {
         }
     }
     func refreshTheme() {
-        layer?.backgroundColor = Theme.canvas.cgColor; appearance = NSAppearance(named:Theme.profile.isDark ? .darkAqua : .aqua)
+        layer?.backgroundColor = Theme.canvas.cgColor; appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua)
         table.backgroundColor = Theme.panel; diff.backgroundColor = Theme.canvas
         table.reloadData(); selectionChanged()
         actionsPage?.refreshTheme()
@@ -236,8 +236,8 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate {
                 let rendered = NSMutableAttributedString(string:text,attributes:[.font:Theme.editorFont,.foregroundColor:Theme.foreground])
                 (text as NSString).enumerateSubstrings(in:NSRange(location:0,length:text.utf16.count),options:.byLines) { line,range,_,_ in
                     guard let line else { return }
-                    if line.hasPrefix("+") { rendered.addAttribute(.foregroundColor,value:Theme.color(Theme.profile.isDark ? 0x8BCB9B : 0x287A43),range:range) }
-                    else if line.hasPrefix("-") { rendered.addAttribute(.foregroundColor,value:Theme.color(Theme.profile.isDark ? 0xE99B9B : 0xA43D3D),range:range) }
+                    if line.hasPrefix("+") { rendered.addAttribute(.foregroundColor,value:Theme.color(Theme.isDark ? 0x8BCB9B : 0x287A43),range:range) }
+                    else if line.hasPrefix("-") { rendered.addAttribute(.foregroundColor,value:Theme.color(Theme.isDark ? 0xE99B9B : 0xA43D3D),range:range) }
                     else if line.hasPrefix("@@") { rendered.addAttribute(.foregroundColor,value:Theme.accent,range:range) }
                 }
                 self.diff.textStorage?.setAttributedString(rendered)

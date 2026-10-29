@@ -1,5 +1,6 @@
 import AppKit
 import LinvellCore
+import LinvellPluginKit
 import SwiftTerm
 
 final class FileNode: NSObject {
@@ -17,6 +18,11 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     var documents: [OpenDocument] = []
     var pluginSessions: [String:PluginSession] = [:]
     var pluginDocumentVersions: [UUID:Int] = [:]
+    var pluginViewValues: [String:PluginViewUpdate] = [:]
+    var pluginDataViews: [String:PluginDataView] = [:]
+    var pluginImages: [String:NSImage] = [:]
+    var pluginWindows: [String:PluginOwnedWindow] = [:]
+    let pluginStatusBar = NSStackView()
     let languageServices = WorkspaceLanguageServices()
     var languageEdits: [UUID:DispatchWorkItem] = [:]
     var languageSyncs: [UUID:LanguageQueryTicket] = [:]
@@ -86,7 +92,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         super.init(window:window)
         window.contentView = WorkspaceRootView(frame:NSRect(x:0,y:0,width:1320,height:860))
         window.title = "Linvell"; window.titleVisibility = .hidden; window.titlebarAppearsTransparent = true
-        window.appearance = NSAppearance(named:Theme.profile.isDark ? .darkAqua : .aqua); window.backgroundColor = Theme.panel
+        window.appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua); window.backgroundColor = Theme.panel
         window.minSize = NSSize(width:800,height:540); window.delegate = self
         window.setFrameAutosaveName("Linvell.Workspace"); window.center()
         buildUI(); showWelcome()
@@ -135,7 +141,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         shell.addArrangedSubview(area)
         area.widthAnchor.constraint(equalTo:shell.widthAnchor).isActive = true
         area.heightAnchor.constraint(equalTo:rootView.heightAnchor,constant:-84).isActive = true
-        let footer = Theme.stack([modeLabel,languageStatus,NSView(),status]); footer.edgeInsets = NSEdgeInsets(top:0,left:16,bottom:0,right:20)
+        let footer = Theme.stack([modeLabel,languageStatus,NSView(),pluginStatusBar,status]); footer.edgeInsets = NSEdgeInsets(top:0,left:16,bottom:0,right:20)
         footer.heightAnchor.constraint(equalToConstant:30).isActive = true; shell.addArrangedSubview(footer)
         footer.widthAnchor.constraint(equalTo:shell.widthAnchor).isActive = true
         setupActivity()
@@ -193,7 +199,8 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         selectActivity(sender.tag)
         switch sender.tag { case 0: showSidebar("files"); case 1: showSidebar("search"); case 2: gitWorkspace(); case 3: showSymbols(); default: projectTools() }
     }
-    private func showSidebar(_ kind: String) {
+    func showSidebar(_ kind: String) {
+        if kind.hasPrefix("plugin:"),restorePluginSidebar(String(kind.dropFirst(7))) { return }
         sidebarKind = kind; sidebar.isHidden = false
         sidebar.subviews.forEach { $0.removeFromSuperview() }
         if kind == "files",let connection = remoteConnection { setupRemoteSidebar(connection) }
@@ -582,7 +589,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     @objc func decreaseFont() { Theme.fontSize -= 1; PreferencesSync.shared.changed() }
     func applyTheme() {
         let selectedActivity = activeActivity
-        window?.appearance = NSAppearance(named:Theme.profile.isDark ? .darkAqua : .aqua); window?.backgroundColor = Theme.panel
+        window?.appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua); window?.backgroundColor = Theme.panel
         func refresh(_ view: NSView) {
             (view as? Surface)?.refreshTheme(); (view as? ThemedLabel)?.refreshTheme()
             if let button = view as? NSButton { button.contentTintColor = Theme.secondary }
@@ -592,6 +599,10 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         (editors.arrangedSubviews.first as? GitWorkspace)?.refreshTheme()
         runWorkspaceView?.refreshTheme(); remoteBrowser?.table.backgroundColor = Theme.panel
         panes.forEach { $0.updateTheme() }; outline.backgroundColor = Theme.panel; outline.reloadData(); renderTabs()
+        for (index,row) in tabs.arrangedSubviews.enumerated() where documents.indices.contains(index) {
+            if let icon = (row as? NSStackView)?.arrangedSubviews.first as? NSImageView { icon.image = FileIcon.image(for:documents[index].fileURL); icon.contentTintColor = icon.image?.isTemplate == true ? Theme.secondary : nil }
+        }
+        pluginDataViews.values.forEach { $0.refreshAppearance() }; pluginWindows.values.forEach { $0.refreshAppearance() }; renderPluginStatus()
         if let terminal { configureTerminal(terminal) }
         if let current,let markdownView { markdownView.render(current.buffer.text) }
         if sidebarKind != "files" { showSidebar(sidebarKind) }
@@ -632,7 +643,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         terminal.font = editorFont.isFixedPitch ? editorFont : .monospacedSystemFont(ofSize:Theme.fontSize,weight:.regular)
         terminal.nativeBackgroundColor = Theme.canvas; terminal.nativeForegroundColor = Theme.foreground
         terminal.clipsToBounds = true; terminal.caretColor = Theme.accent; terminal.caretTextColor = Theme.canvas; terminal.caretViewTracksFocus = true
-        let colors: [UInt32] = Theme.profile.isDark
+        let colors: [UInt32] = Theme.isDark
             ? [0x27323B,0xED8796,0x8BD5A2,0xEED49F,0x8AADF4,0xC6A0F6,0x8BD5CA,0xCAD3F5,0x6E7B8A,0xF5A2AF,0xA6DA95,0xF5D8A6,0xA5C3FF,0xD5B2FF,0x9EE4DB,0xEFF4FF]
             : [0x35443F,0xB33245,0x247A4F,0x946300,0x245BC5,0x8251A3,0x187583,0xCBD5D0,0x657C71,0xCF3B50,0x34824D,0x956919,0x326BD4,0x985AB3,0x1B8791,0xFCFDFD]
         terminal.installColors(colors.map { value in SwiftTerm.Color(red:UInt16((value>>16)&255)*257,green:UInt16((value>>8)&255)*257,blue:UInt16(value&255)*257) })

@@ -2,6 +2,10 @@
 
 2026-10-29 · 0.1.7 — published
 
+## P3 plugins — unpublished source on main (2026-10-29)
+
+Native AppKit tree/list sidebars, status entries, schema-based settings forms and owned tool windows now accept declarative plugin data. Commands and document event replies can publish validated UI snapshots. Plugins may contribute session themes, PNG/SF Symbol icons with optional file mappings, and explicitly inserted snippets with numbered tab stops. Resource-only packages need no executable. See [P3 acceptance and limits](verification/plugins-p3.md) and the [bilingual SDK guide](https://linvell.fuluwa.top/plugins.html). Automated checks and visible local interaction acceptance passed. These are source changes on `main` without a new public app release; “Linvell Dev” remains only the local debug app label.
+
 ## P2 plugins — unpublished source on main (2026-10-29)
 
 Document open/change/save/close events, revision-checked UTF-16 range edits with grouped undo, native Plugins menu/shortcuts with conflict detection, default/user/workspace configuration and persistent plugin/global-workspace state are implemented. The example now demonstrates events, configured greetings, persistent invocation counts and a shortcut-driven prefix edit. See [P2 acceptance](verification/plugins-p2.md) and the [bilingual SDK guide](https://linvell.fuluwa.top/plugins.html). This is source on `main`, not a separate dev branch or a new published app release. The local build’s “Linvell Dev” label only distinguishes the debug app.

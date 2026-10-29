@@ -12,7 +12,7 @@ final class ProjectSettingsController: NSWindowController {
         let window = NSWindow(contentRect:NSRect(x:0,y:0,width:850,height:720),styleMask:[.titled,.closable,.resizable],backing:.buffered,defer:false)
         window.title = L.text("Project Settings")+" — "+URL(fileURLWithPath:root).lastPathComponent
         window.minSize = NSSize(width:660,height:560); window.center(); window.isReleasedWhenClosed = false
-        window.appearance = NSAppearance(named:Theme.profile.isDark ? .darkAqua : .aqua)
+        window.appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua)
         super.init(window:window)
         let canvas = Surface(Theme.canvas); window.contentView = canvas
         let folder = NSTextField(wrappingLabelWithString:root); folder.font = .monospacedSystemFont(ofSize:12,weight:.regular); folder.textColor = Theme.secondary; folder.isSelectable = true

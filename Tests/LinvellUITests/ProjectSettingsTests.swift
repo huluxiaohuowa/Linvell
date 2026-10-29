@@ -17,7 +17,8 @@ final class ProjectSettingsTests: XCTestCase {
             workspace.recoveryTimer?.invalidate(); workspace.languageServices.stop(); workspace.window?.orderOut(nil)
             try? FileManager.default.removeItem(at:root)
         }
-        XCTAssertEqual(prefs.buttons.count,5)
+        XCTAssertEqual(prefs.buttons.count,6)
+        XCTAssertTrue(prefs.buttons.contains { $0.title == L.text("Plugins") })
         XCTAssertEqual(controller.languageTools.root,root.path)
         XCTAssertEqual(controller.scope,LanguageTools.scope(remote:nil,root:root.path))
         XCTAssertTrue(controller.languageTools.advancedBox.isHidden)

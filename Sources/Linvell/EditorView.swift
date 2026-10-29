@@ -61,6 +61,8 @@ final class EditorTextView: NSTextView {
     var document: OpenDocument?
     var vimEnabled = false
     var statusChanged: (() -> Void)?
+    var pluginSnippet: PluginSnippetCursor?
+    var pluginSnippetOwner: UUID?
     var exCommand: ((String) -> Void)?
     var applyingVim = false
     var selectionHistory: [[NSValue]] = []
@@ -227,6 +229,11 @@ final class EditorTextView: NSTextView {
         guard editingSelections.count > 1,!hasMarkedText() else { super.cut(sender); return }
         copy(sender); performMultiEdit(editingSelections,replacement:"")
     }
+    override func shouldChangeText(in affectedCharRange: NSRange,replacementString: String?) -> Bool {
+        let allowed = super.shouldChangeText(in:affectedCharRange,replacementString:replacementString)
+        if allowed,var snippet = pluginSnippet { pluginSnippet = snippet.edit(affectedCharRange,replacementLength:(replacementString ?? "").utf16.count) ? snippet : nil }
+        return allowed
+    }
     override func insertText(_ insertString: Any,replacementRange: NSRange) {
         let value = (insertString as? NSAttributedString)?.string ?? (insertString as? String) ?? ""
         if value.count == 1,"}])".contains(value),editingSelections.count == 1,!hasMarkedText() {
@@ -285,6 +292,7 @@ final class EditorTextView: NSTextView {
         } catch { NSSound.beep() }
     }
     func restoreMultiEdit(_ text: String,selections: [NSValue]) {
+        pluginSnippet = nil; pluginSnippetOwner = nil
         let before = string,previous = editingSelections.map(NSValue.init(range:))
         let manager = undoManager
         manager?.beginUndoGrouping(); manager?.disableUndoRegistration()
@@ -306,6 +314,13 @@ final class EditorTextView: NSTextView {
         } else { super.insertTab(sender) }
     }
     override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 { pluginSnippet = nil }
+        if let snippet = pluginSnippet { let range = selectedRange(); if range.location < snippet.current.location || NSMaxRange(range) > NSMaxRange(snippet.current) { pluginSnippet = nil } }
+        if event.keyCode == 48,var snippet = pluginSnippet,!hasMarkedText() {
+            if let range = snippet.advance(backwards:event.modifierFlags.contains(.shift)) { setSelectedRange(range); pluginSnippet = snippet.isFinal ? nil : snippet }
+            else { pluginSnippet = nil }
+            return
+        }
         cancelCodeHover()
         if event.modifierFlags.intersection([.command,.control,.option,.shift]) == .option,[123,124].contains(event.keyCode),!hasMarkedText() { codeAction?(event.keyCode == 123 ? "back" : "forward",nil); return }
         if completionKey?(event) == true { return }

@@ -62,7 +62,7 @@ private final class WelcomePage: NSView {
         Theme.canvas.setFill(); dirtyRect.fill()
         NSGraphicsContext.saveGraphicsState(); bounds.clip()
         let center = NSPoint(x:bounds.width*0.25,y:bounds.height*0.42)
-        NSGradient(starting:Theme.accent.withAlphaComponent(Theme.profile.isDark ? 0.10 : 0.065),ending:Theme.canvas.withAlphaComponent(0))?.draw(fromCenter:center,radius:0,toCenter:center,radius:min(bounds.width,700)*0.7,options:[])
+        NSGradient(starting:Theme.accent.withAlphaComponent(Theme.isDark ? 0.10 : 0.065),ending:Theme.canvas.withAlphaComponent(0))?.draw(fromCenter:center,radius:0,toCenter:center,radius:min(bounds.width,700)*0.7,options:[])
         NSGraphicsContext.restoreGraphicsState()
     }
 }
@@ -123,7 +123,7 @@ private final class BrandWordmarkView: NSView {
     override init(frame: NSRect) { super.init(frame:frame); setAccessibilityElement(true); setAccessibilityRole(.image); setAccessibilityLabel("Linvell") }
     required init?(coder: NSCoder) { fatalError() }
     override func draw(_ dirtyRect: NSRect) {
-        (Theme.profile.isDark ? Self.dark : Self.light)?.draw(in:bounds,from:.zero,operation:.sourceOver,fraction:1,respectFlipped:true,hints:nil)
+        (Theme.isDark ? Self.dark : Self.light)?.draw(in:bounds,from:.zero,operation:.sourceOver,fraction:1,respectFlipped:true,hints:nil)
     }
 }
 

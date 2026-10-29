@@ -48,6 +48,11 @@ public struct JSONCSettings {
         }
         return result
     }
+    public func updatingValues(_ values: [String:Any]) throws -> Data {
+        var result = data
+        for key in values.keys.sorted() { result = try Self.set(result,path:[],key:key,value:values[key]!) }
+        return result
+    }
     public func updatingPlugin(_ id: String,configuration: [String:Any]) throws -> Data {
         try Self.set(data,path:["plugins"],key:id,value:configuration)
     }

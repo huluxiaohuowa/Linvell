@@ -1,14 +1,18 @@
 import LinvellPluginKit
 
-try PluginServer.run(onEvent: { event in
+try PluginServer.run(onDocumentEvent: { event in
     let count = event.environment?.globalState["eventCount"]?.number ?? 0
-    return [
+    return PluginCommandResult(stateUpdates:[
         PluginStateUpdate(scope:.global,key:"eventCount",value:.number(count+1)),
         PluginStateUpdate(scope:.global,key:"lastEvent",value:.string("\(event.kind.rawValue) @ revision \(event.revision)"))
-    ]
+    ],viewUpdates:[PluginViewUpdate(id:"counter",text:"Events: \(Int(count+1))")])
 }) { context in
     let environment = context.environment
     switch context.command {
+    case "hello.inspect":
+        return PluginCommandResult(message:"View: \(context.uiEvent?.viewID ?? "none"), item: \(context.uiEvent?.itemID ?? "none")")
+    case "hello.refresh":
+        return PluginCommandResult(message:"Native views refreshed.",viewUpdates:[PluginViewUpdate(id:"actions",text:"Updated by a plugin command.",items:[PluginItem(id:"updated",title:"Updated native row",detail:"No webview or plugin code on the UI thread.",icon:"spark",command:"hello.inspect")])])
     case "hello.greet":
         let greeting = environment?.configuration["greeting"]?.string ?? "Hello from a Swift plugin!"
         let runs = (environment?.globalState["runs"]?.number ?? 0)+1

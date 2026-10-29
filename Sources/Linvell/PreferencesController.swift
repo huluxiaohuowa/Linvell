@@ -12,7 +12,7 @@ final class PreferencesController: NSWindowController {
         self.workspaceOwner = owner
         let window = NSWindow(contentRect:NSRect(x:0,y:0,width:900,height:650),styleMask:[.titled,.closable,.resizable,.miniaturizable],backing:.buffered,defer:false)
         window.title = L.text("Linvell Settings"); window.minSize = NSSize(width:780,height:610); window.center(); window.isReleasedWhenClosed = false
-        window.appearance = NSAppearance(named:Theme.profile.isDark ? .darkAqua : .aqua); window.backgroundColor = Theme.canvas
+        window.appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua); window.backgroundColor = Theme.canvas
         super.init(window:window)
         let stack = Theme.stack([navigation,detail],spacing:0); stack.alignment = .top
         Theme.pin(stack,in:window.contentView!)
@@ -20,7 +20,7 @@ final class PreferencesController: NSWindowController {
         navigation.heightAnchor.constraint(equalTo:stack.heightAnchor).isActive = true; detail.heightAnchor.constraint(equalTo:stack.heightAnchor).isActive = true
         let heading = Theme.label("SETTINGS",size:11,color:Theme.secondary,weight:.semibold)
         var rows: [NSView] = [heading]
-        for (index,entry) in [("paintpalette","Appearance"),("textformat","Editor"),("keyboard","Vim"),("icloud","Sync"),("arrow.triangle.2.circlepath","Updates")].enumerated() {
+        for (index,entry) in [("paintpalette","Appearance"),("textformat","Editor"),("keyboard","Vim"),("icloud","Sync"),("arrow.triangle.2.circlepath","Updates"),("puzzlepiece.extension","Plugins")].enumerated() {
             let b = NSButton(title:L.text(entry.1),image:NSImage(systemSymbolName:entry.0,accessibilityDescription:nil)!,target:self,action:#selector(selectCategory(_:)))
             b.tag = index; b.isBordered = false; b.imagePosition = .imageLeading; b.alignment = .left; b.font = .systemFont(ofSize:14)
             b.heightAnchor.constraint(equalToConstant:40).isActive = true; buttons.append(b); rows.append(b)
@@ -28,6 +28,7 @@ final class PreferencesController: NSWindowController {
         rows.append(NSView()); rows.append(Theme.label("Linvell \(UpdateManager.currentVersion)",size:11,color:Theme.secondary))
         Theme.pin(Theme.stack(rows,orientation:.vertical,spacing:12),in:navigation,inset:20)
         render()
+        NotificationCenter.default.addObserver(self,selector:#selector(pluginsChanged),name:PluginMenus.changed,object:owner)
         NotificationCenter.default.addObserver(self,selector:#selector(preferencesUpdated),name:PreferencesSync.didApply,object:nil)
         NotificationCenter.default.addObserver(self,selector:#selector(updateStatusChanged),name:UpdateManager.changed,object:nil)
         NotificationCenter.default.addObserver(self,selector:#selector(languageApplied),name:L.changed,object:nil)
@@ -42,18 +43,19 @@ final class PreferencesController: NSWindowController {
     @objc private func updateStatusChanged() { if category == 4 { render() } }
     @objc private func languageApplied() {
         window?.title = L.text("Linvell Settings"); L.apply(to:navigation)
-        for (index,title) in ["Appearance","Editor","Vim","Sync","Updates"].enumerated() { buttons[index].title = L.text(title) }
+        for (index,title) in ["Appearance","Editor","Vim","Sync","Updates","Plugins"].enumerated() { buttons[index].title = L.text(title) }
         render()
     }
+    @objc private func pluginsChanged() { if category == 5 { render() } }
     @objc private func preferencesUpdated() {
-        window?.appearance = NSAppearance(named:Theme.profile.isDark ? .darkAqua : .aqua); window?.backgroundColor = Theme.canvas
+        window?.appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua); window?.backgroundColor = Theme.canvas
         navigation.refreshTheme(); detail.refreshTheme(); render()
     }
     private func render() {
         detail.subviews.forEach { $0.removeFromSuperview() }; statusLabel = nil
         buttons.forEach { $0.contentTintColor = $0.tag == category ? Theme.accent : Theme.secondary }
-        let title = ["Appearance","Editor","Vim","iCloud Sync","Updates"][category]
-        let subtitle = ["A workspace that feels like your own.","Comfortable text, deliberate defaults.","A native engine, built one behavior at a time.","Your preferences, across your Macs.","Stay current, on your terms."][category]
+        let title = ["Appearance","Editor","Vim","iCloud Sync","Updates","Plugins"][category]
+        let subtitle = ["A workspace that feels like your own.","Comfortable text, deliberate defaults.","A native engine, built one behavior at a time.","Your preferences, across your Macs.","Stay current, on your terms.","Configure the plugins loaded in this workspace."][category]
         var rows: [NSView] = [Theme.label(title,size:30,weight:.semibold),Theme.label(subtitle,size:14,color:Theme.secondary)]
         switch category {
         case 0:
@@ -72,6 +74,7 @@ final class PreferencesController: NSWindowController {
             rows.append(settingRow("Language",language))
             rows.append(text("Language changes apply immediately. You can also choose its language in macOS System Settings → General → Language & Region → Applications."))
             rows.append(section("COLOR THEME"))
+            if let selected = Theme.pluginTheme?.1 { rows.append(text(L.text("Plugin Theme")+": "+selected.title)) }
             let profiles = Theme.Profile.allCases
             for start in stride(from:0,to:profiles.count,by:2) {
                 var tiles: [NSView] = []
@@ -121,6 +124,13 @@ final class PreferencesController: NSWindowController {
             rows.append(text("Color theme, font family and size, line numbers, wrapping, indentation and Vim mode. Changes to different settings are merged independently."))
             rows.append(section("STAYS ON THIS MAC"))
             rows.append(text("Documents, recovery snapshots, project paths, terminal environment and credentials. iCloud Drive must be enabled in macOS System Settings."))
+        case 5:
+            let sessions = workspaceOwner?.pluginSessions.values.sorted { $0.package.manifest.name < $1.package.manifest.name } ?? []
+            if sessions.isEmpty { rows.append(text("Load a plugin to configure its native settings.")) }
+            for session in sessions where !(session.package.manifest.settings ?? []).isEmpty {
+                let button = Theme.actionButton(session.package.manifest.name,target:self,action:#selector(openPluginSettings(_:)))
+                button.identifier = .init(session.package.manifest.id); rows.append(button)
+            }
         default:
             let updates = UpdateManager.shared
             rows.append(section("GITHUB RELEASES")); rows.append(Theme.label(L.format("Installed: %@",UpdateManager.currentVersion),size:14))
@@ -149,6 +159,9 @@ final class PreferencesController: NSWindowController {
     private func check(_ title: String,key: String) -> NSButton {
         let b = NSButton(checkboxWithTitle:L.text(title),target:self,action:#selector(checkChanged(_:))); b.identifier = NSUserInterfaceItemIdentifier(key)
         b.state = PreferencesSync.value(key) == "true" ? .on : .off; b.font = .systemFont(ofSize:14); return b
+    }
+    @objc private func openPluginSettings(_ sender: NSButton) {
+        if let id = sender.identifier?.rawValue,let session = workspaceOwner?.pluginSessions[id] { workspaceOwner?.openPluginSettings(session) }
     }
     @objc private func themeSelected(_ sender: NSButton) { Theme.profile = Theme.Profile.allCases[sender.tag]; PreferencesSync.shared.changed() }
     @objc private func popupChanged(_ sender: NSPopUpButton) {
@@ -202,7 +215,7 @@ final class ThemePreview: NSButton {
             Theme.color(palette[i%3+4]).withAlphaComponent(0.8).setFill()
             NSBezierPath(roundedRect:NSRect(x:66,y:r.maxY-25-CGFloat(i)*15,width:width,height:4),xRadius:2,yRadius:2).fill()
         }
-        let selected = profile == Theme.profile
+        let selected = profile == Theme.profile && Theme.pluginTheme == nil
         let title = L.text(profile.rawValue) + (selected ? "   ✓" : "")
         (title as NSString).draw(at:NSPoint(x:14,y:10),withAttributes:[.font:NSFont.systemFont(ofSize:13,weight:.medium),.foregroundColor:Theme.color(palette[2])])
         (selected ? Theme.accent : Theme.secondary.withAlphaComponent(0.25)).setStroke()

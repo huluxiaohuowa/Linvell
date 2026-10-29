@@ -1,10 +1,12 @@
 import AppKit
 
 enum FileIcon {
+    static var pluginIcons: (UUID,[String:NSImage])?
     private static var cache: [String:NSImage] = [:]
     static func image(for url: URL?,folder: Bool = false,expanded: Bool = false) -> NSImage {
         if folder { return symbol(expanded ? "folder.fill" : "folder") }
         let ext = url?.pathExtension.lowercased() ?? "",name = url?.lastPathComponent.lowercased() ?? ""
+        if let image = pluginIcons?.1[ext] { return image }
         let types: [String:String] = ["swift":"swift","py":"python","pyw":"python","js":"javascript","mjs":"javascript","cjs":"javascript","ts":"typescript","tsx":"react","jsx":"react","html":"html5","htm":"html5","css":"css3","json":"json","jsonc":"json","yml":"yaml","yaml":"yaml","md":"markdown","markdown":"markdown","rs":"rust","go":"go","c":"c","h":"c","cpp":"cplusplus","cc":"cplusplus","hpp":"cplusplus","cs":"csharp","java":"java","kt":"kotlin","kts":"kotlin","rb":"ruby","php":"php"]
         let key = name == "dockerfile" ? "docker" : name == ".gitignore" || name == ".gitattributes" ? "git" : types[ext]
         if let key {

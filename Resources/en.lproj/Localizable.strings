@@ -798,3 +798,21 @@
 "Plugin configuration or state is invalid, too large, or unavailable for this workspace." = "Plugin configuration or state is invalid, too large, or unavailable for this workspace.";
 
 "The plugin has not declared the permissions required for this operation." = "The plugin has not declared the permissions required for this operation.";
+
+"Choose a plugin folder containing plugin.json." = "Choose a plugin folder containing plugin.json.";
+"Refresh Plugin View" = "Refresh Plugin View";
+"Run Selected" = "Run Selected";
+"Plugin Settings" = "Plugin Settings";
+"Plugin Settings…" = "Plugin Settings…";
+"Save Plugin Settings" = "Save Plugin Settings";
+"Loading plugin settings…" = "Loading plugin settings…";
+"Saving plugin settings…" = "Saving plugin settings…";
+"Saved files determine the effective configuration." = "Saved files determine the effective configuration.";
+"Plugin Theme" = "Plugin Theme";
+"Plugin Snippet" = "Plugin Snippet";
+"Insert Plugin Snippet" = "Insert Plugin Snippet";
+"Use Plugin File Icons" = "Use Plugin File Icons";
+"Configure the plugins loaded in this workspace." = "Configure the plugins loaded in this workspace.";
+"Load a plugin to configure its native settings." = "Load a plugin to configure its native settings.";
+"User" = "User";
+"Workspace" = "Workspace";

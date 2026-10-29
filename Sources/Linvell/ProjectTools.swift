@@ -148,7 +148,7 @@ private final class CoreHeatmap: NSView {
         for (index,load) in loads.enumerated() {
             let rect = NSRect(x:CGFloat(index%columns)*76,y:CGFloat(index/columns)*58+28,width:68,height:50)
             Theme.accent.withAlphaComponent(0.12+load*0.8).setFill(); NSBezierPath(roundedRect:rect,xRadius:7,yRadius:7).fill()
-            let color = !Theme.profile.isDark && load > 0.6 ? NSColor.white : Theme.foreground
+            let color = !Theme.isDark && load > 0.6 ? NSColor.white : Theme.foreground
             ("CPU \(index+1)" as NSString).draw(at:NSPoint(x:rect.minX+8,y:rect.minY+6),withAttributes:[.font:NSFont.monospacedSystemFont(ofSize:9,weight:.medium),.foregroundColor:color])
             (String(format:"%.0f%%",load*100) as NSString).draw(at:NSPoint(x:rect.minX+8,y:rect.minY+23),withAttributes:[.font:NSFont.monospacedSystemFont(ofSize:13,weight:.semibold),.foregroundColor:color])
         }

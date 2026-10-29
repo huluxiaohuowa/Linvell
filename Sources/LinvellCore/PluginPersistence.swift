@@ -66,6 +66,25 @@ public final class PluginPersistence {
             _ = try read(file); return file
         }
     }
+    public struct ConfigurationSnapshot { public let values: [String:PluginValue]; public let data: Data? }
+    public func configurationSnapshot(package: PluginPackage) throws -> ConfigurationSnapshot {
+        try locked {
+            let file = try pluginFolder(package.manifest.id).appendingPathComponent("configuration.json")
+            let values = try read(file)
+            return ConfigurationSnapshot(values:values,data:FileManager.default.fileExists(atPath:file.path) ? try Data(contentsOf:file) : nil)
+        }
+    }
+    public func saveConfiguration(_ values: [String:PluginValue],package: PluginPackage,expected: ConfigurationSnapshot) throws {
+        try locked {
+            let file = try pluginFolder(package.manifest.id).appendingPathComponent("configuration.json")
+            try check(file)
+            let current = FileManager.default.fileExists(atPath:file.path) ? try Data(contentsOf:file) : nil
+            guard current == expected.data else { throw DocumentError.externalChange }
+            let object = try JSONSerialization.jsonObject(with:JSONEncoder().encode(values)) as! [String:Any]
+            let bytes = try JSONCSettings(current ?? Data("{}".utf8)).updatingValues(object)
+            guard bytes.count <= 256*1024 else { throw PluginError.invalidState }; try write(bytes,to:file)
+        }
+    }
     private func stateURL(folder: URL,workspace: PluginWorkspace) -> URL {
         let key = SHA256.hash(data:Data(workspace.identityKey.utf8)).map { String(format:"%02x",$0) }.joined()
         return folder.appendingPathComponent("workspace-"+key+".json")

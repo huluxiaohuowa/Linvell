@@ -22,7 +22,7 @@ final class RunWorkspace: NSView, LocalProcessTerminalViewDelegate {
         preview = WKWebView(frame:.zero,configuration:configuration)
         super.init(frame:.zero)
         wantsLayer = true; layer?.backgroundColor = Theme.canvas.cgColor
-        appearance = NSAppearance(named:Theme.profile.isDark ? .darkAqua : .aqua)
+        appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua)
         command.placeholderString = L.text("Command to run, for example npm run dev")
         command.font = .monospacedSystemFont(ofSize:13,weight:.regular)
         command.target = self; command.action = #selector(run)
@@ -90,7 +90,7 @@ final class RunWorkspace: NSView, LocalProcessTerminalViewDelegate {
     }
     func shutdown() { terminate(); closeForward() }
     func refreshTheme() {
-        layer?.backgroundColor = Theme.canvas.cgColor; appearance = NSAppearance(named:Theme.profile.isDark ? .darkAqua : .aqua)
+        layer?.backgroundColor = Theme.canvas.cgColor; appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua)
         terminal?.nativeBackgroundColor = Theme.canvas; terminal?.nativeForegroundColor = Theme.foreground
         terminal?.font = .monospacedSystemFont(ofSize:Theme.fontSize,weight:.regular)
     }

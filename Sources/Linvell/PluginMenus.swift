@@ -1,8 +1,11 @@
 import AppKit
 import LinvellCore
+import LinvellPluginKit
 
 final class PluginMenus: NSObject, NSMenuItemValidation {
     static let shared = PluginMenus()
+    static let changed = Notification.Name("Linvell.PluginsChanged")
+    static var activeWorkspace: WorkspaceController? { (NSApp.keyWindow?.windowController as? WorkspaceController) ?? (NSApp.keyWindow?.windowController as? PluginOwnedWindow)?.workspaceOwner }
     private static let menuID = NSUserInterfaceItemIdentifier("Linvell.Plugins")
     static func install(in bar: NSMenu) {
         let root = NSMenuItem(); root.identifier = menuID; root.submenu = NSMenu(title:L.text("Plugins")); bar.addItem(root)
@@ -13,7 +16,7 @@ final class PluginMenus: NSObject, NSMenuItemValidation {
         root.removeAllItems()
         let load = NSMenuItem(title:L.text("Load Development Plugin…"),action:#selector(loadPlugin),keyEquivalent:""); load.target = shared; root.addItem(load)
         let stop = NSMenuItem(title:L.text("Stop Plugins"),action:#selector(stopPlugins),keyEquivalent:""); stop.target = shared; root.addItem(stop)
-        guard let workspace = workspace ?? (NSApp.keyWindow?.windowController as? WorkspaceController) else { return }
+        guard let workspace = workspace ?? activeWorkspace else { return }
         for session in workspace.pluginSessions.values.sorted(by:{ $0.package.manifest.id < $1.package.manifest.id }) {
             let group = NSMenuItem(title:session.package.manifest.name,action:nil,keyEquivalent:""); group.submenu = NSMenu(title:session.package.manifest.name); root.addItem(group)
             for command in session.package.manifest.commands where command.menu == "plugins" {
@@ -21,6 +24,18 @@ final class PluginMenus: NSObject, NSMenuItemValidation {
                 if let raw = command.keybinding,let keybinding = try? PluginKeybinding(raw) { item.keyEquivalent = keybinding.key; item.keyEquivalentModifierMask = modifiers(keybinding) }
                 item.target = shared; item.representedObject = [session.package.manifest.id,command.id]; group.submenu?.addItem(item)
             }
+            func contribution(_ title: String,_ kind: String,_ id: String = "") {
+                let item = NSMenuItem(title:title,action:#selector(contribute(_:)),keyEquivalent:"")
+                item.target = shared; item.representedObject = [session.package.manifest.id,kind,id]; group.submenu?.addItem(item)
+            }
+            for view in session.package.manifest.views ?? [] {
+                if view.kind == .status { contribution(view.title,"status",view.id) }
+                else { contribution(view.title,"view",view.id) }
+            }
+            if !(session.package.manifest.settings ?? []).isEmpty { contribution(L.text("Plugin Settings…"),"settings") }
+            for theme in session.package.manifest.themes ?? [] { contribution(L.text("Plugin Theme")+": "+theme.title,"theme",theme.id) }
+            if (session.package.manifest.icons ?? []).contains(where:{ !($0.fileExtensions ?? []).isEmpty }) { contribution(L.text("Use Plugin File Icons"),"icons") }
+            for snippet in session.package.manifest.snippets ?? [] { contribution(L.text("Plugin Snippet")+": "+snippet.title,"snippet",snippet.id) }
             group.submenu?.addItem(.separator())
             for (title,scope) in [("User Plugin Configuration…","user"),("Workspace Plugin Configuration…","workspace")] {
                 let item = NSMenuItem(title:L.text(title),action:#selector(configuration(_:)),keyEquivalent:"")
@@ -58,22 +73,37 @@ final class PluginMenus: NSObject, NSMenuItemValidation {
         for (name,flag) in [("cmd",NSEvent.ModifierFlags.command),("ctrl",.control),("option",.option),("shift",.shift)] where value.modifiers.contains(name) { mask.insert(flag) }
         return mask
     }
-    @objc private func loadPlugin() { (NSApp.keyWindow?.windowController as? WorkspaceController)?.loadDevelopmentPlugin() }
-    @objc private func stopPlugins() { (NSApp.keyWindow?.windowController as? WorkspaceController)?.stopPlugins() }
+    @objc private func loadPlugin() { Self.activeWorkspace?.loadDevelopmentPlugin() }
+    @objc private func stopPlugins() { Self.activeWorkspace?.stopPlugins() }
     @objc private func run(_ item: NSMenuItem) {
-        guard let workspace = NSApp.keyWindow?.windowController as? WorkspaceController,let ids = item.representedObject as? [String],let session = workspace.pluginSessions[ids[0]] else { return }
+        guard let workspace = Self.activeWorkspace,let ids = item.representedObject as? [String],let session = workspace.pluginSessions[ids[0]] else { return }
         workspace.executePlugin(session,command:ids[1])
     }
     @objc private func configuration(_ item: NSMenuItem) {
-        guard let workspace = NSApp.keyWindow?.windowController as? WorkspaceController,let ids = item.representedObject as? [String],let session = workspace.pluginSessions[ids[0]] else { return }
+        guard let workspace = Self.activeWorkspace,let ids = item.representedObject as? [String],let session = workspace.pluginSessions[ids[0]] else { return }
         workspace.openPluginConfiguration(session,workspaceScope:ids[1] == "workspace")
     }
+    @objc private func contribute(_ item: NSMenuItem) {
+        guard let workspace = Self.activeWorkspace,let ids = item.representedObject as? [String],let session = workspace.pluginSessions[ids[0]] else { return }
+        switch ids[1] {
+        case "view": workspace.showPluginView(ids[2],session:session)
+        case "settings": workspace.openPluginSettings(session)
+        case "theme": workspace.selectPluginTheme(ids[2],session:session)
+        case "icons": workspace.selectPluginIcons(session)
+        case "snippet": workspace.insertPluginSnippet(ids[2],session:session)
+        case "status": if let view = session.package.manifest.views?.first(where:{ $0.id == ids[2] }) {
+            if let command = view.command { workspace.executePlugin(session,command:command,uiEvent:PluginUIEvent(viewID:view.id,kind:"activate")) }
+            else { workspace.status.stringValue = workspace.pluginViewValues[workspace.pluginViewKey(session,view.id)]?.text ?? view.text ?? view.title }
+        }
+        default: break
+        }
+    }
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
-        guard let workspace = NSApp.keyWindow?.windowController as? WorkspaceController,workspace.window?.attachedSheet == nil else { return false }
+        guard let workspace = Self.activeWorkspace,NSApp.keyWindow?.attachedSheet == nil else { return false }
         if let ids = item.representedObject as? [String] {
             guard workspace.pluginSessions[ids[0]] != nil else { return false }
             if item.action == #selector(configuration(_:)) { return ids[1] != "workspace" || workspace.pluginWorkspace != nil }
-            if let text = workspace.window?.firstResponder as? NSTextView,!(text is EditorTextView) { return false }
+            if let text = NSApp.keyWindow?.firstResponder as? NSTextView,text.isEditable,!(text is EditorTextView) { return false }
         }
         return true
     }

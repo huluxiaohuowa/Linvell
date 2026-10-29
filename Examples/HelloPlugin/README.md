@@ -10,3 +10,7 @@ Follow the [bilingual quick start](https://linvell.fuluwa.top/plugins.html#quick
 - `hello.uppercase`: replace the active document with uppercase text, using the editor’s undo transaction. Existing auto-save settings still apply.
 
 The package declares `document.read`, `document.write` and `storage`, and subscribes to open/change/save/close. Commands appear under Plugins → Hello Swift. The same menu opens user/workspace JSONC configuration; effective values merge defaults, user and workspace overrides. Events store their count and last kind in the plugin’s own global state. It runs as your user outside a security sandbox. Load only code you trust. It is not a VSIX extension.
+
+P3 adds Example Tree, Example List, Example Status and Example Tools, typed settings, the Plugin Forest theme, SF Symbol/file icons and a Swift Greeting Function snippet. `hello.inspect` reports UI item identity; `hello.refresh` publishes a new list snapshot. `onDocumentEvent` updates the status counter while persisting event state. Use the plugin menu for views/settings/resources; the command palette also exposes views, themes and snippets.
+
+Snippets support one editor selection, numbered unique tab stops and Tab/Shift-Tab navigation; mirrors, nested placeholders and VSIX compatibility are outside this preview.

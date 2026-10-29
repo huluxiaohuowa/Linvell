@@ -5,7 +5,8 @@ public struct PluginCommandContext: Codable {
     public let command: String
     public let document: PluginDocument?
     public let environment: PluginEnvironment?
-    public init(command: String, document: PluginDocument? = nil, environment: PluginEnvironment? = nil) { self.command = command; self.document = document; self.environment = environment }
+    public let uiEvent: PluginUIEvent?
+    public init(command: String, document: PluginDocument? = nil, environment: PluginEnvironment? = nil,uiEvent: PluginUIEvent? = nil) { self.command = command; self.document = document; self.environment = environment; self.uiEvent = uiEvent }
 }
 
 public struct PluginDocument: Codable {
@@ -21,14 +22,15 @@ public struct PluginCommandResult: Codable {
     public var edits: [PluginTextEdit]?
     public var documentRevision: Int?
     public var stateUpdates: [PluginStateUpdate]?
-    public init(message: String? = nil, replacementText: String? = nil, edits: [PluginTextEdit]? = nil, documentRevision: Int? = nil, stateUpdates: [PluginStateUpdate]? = nil) {
-        self.message = message; self.replacementText = replacementText; self.edits = edits; self.documentRevision = documentRevision; self.stateUpdates = stateUpdates
+    public var viewUpdates: [PluginViewUpdate]?
+    public init(message: String? = nil, replacementText: String? = nil, edits: [PluginTextEdit]? = nil, documentRevision: Int? = nil, stateUpdates: [PluginStateUpdate]? = nil,viewUpdates: [PluginViewUpdate]? = nil) {
+        self.message = message; self.replacementText = replacementText; self.edits = edits; self.documentRevision = documentRevision; self.stateUpdates = stateUpdates; self.viewUpdates = viewUpdates
     }
 }
 
 public enum PluginServer {
     /// Reserve stdout for the protocol. Use stderr for development diagnostics.
-    public static func run(onEvent: ((PluginDocumentEvent) throws -> [PluginStateUpdate])? = nil,handler: (PluginCommandContext) throws -> PluginCommandResult) throws {
+    public static func run(onEvent: ((PluginDocumentEvent) throws -> [PluginStateUpdate])? = nil,onDocumentEvent: ((PluginDocumentEvent) throws -> PluginCommandResult)? = nil,handler: (PluginCommandContext) throws -> PluginCommandResult) throws {
         let input = FileHandle.standardInput, output = FileHandle.standardOutput
         while let body = try readFrame(input) {
             guard let request = try JSONSerialization.jsonObject(with:body) as? [String:Any],
@@ -38,11 +40,12 @@ public enum PluginServer {
                 switch request["method"] as? String {
                 case "initialize":
                     guard (request["params"] as? [String:Any])?["protocolVersion"] as? Int == 1 else { throw ProtocolError.invalidFrame }
-                    response["result"] = ["protocolVersion":1,"capabilities":["documentEvents","rangeEdits","configuration","storage"]]
+                    response["result"] = ["protocolVersion":1,"capabilities":["documentEvents","rangeEdits","configuration","storage","nativeUI","resources"]]
                 case "documents/event":
                     let params = try JSONSerialization.data(withJSONObject:request["params"] ?? [:])
-                    let updates = try onEvent?(JSONDecoder().decode(PluginDocumentEvent.self,from:params)) ?? []
-                    response["result"] = ["stateUpdates":try JSONSerialization.jsonObject(with:JSONEncoder().encode(updates))]
+                    let event = try JSONDecoder().decode(PluginDocumentEvent.self,from:params)
+                    let result = try onDocumentEvent?(event) ?? PluginCommandResult(stateUpdates:onEvent?(event) ?? [])
+                    response["result"] = try JSONSerialization.jsonObject(with:JSONEncoder().encode(result))
                 case "commands/execute":
                     let params = try JSONSerialization.data(withJSONObject:request["params"] ?? [:])
                     let result = try handler(JSONDecoder().decode(PluginCommandContext.self,from:params))

@@ -1,0 +1,46 @@
+{
+  "id": "dev.linvell.resources",
+  "name": "Linvell Resource Example",
+  "version": "0.1.0",
+  "protocolVersion": 1,
+  "permissions": [],
+  "commands": [],
+  "themes": [
+    {
+      "id": "forest",
+      "title": "Plugin Forest",
+      "isDark": true,
+      "colors": {
+        "canvas": "#10241E",
+        "panel": "#18352B",
+        "foreground": "#E2F4EB",
+        "secondary": "#9BBEAC",
+        "accent": "#88D9AD",
+        "keyword": "#C4B3F4",
+        "number": "#EEC380",
+        "selection": "#315C49"
+      }
+    }
+  ],
+  "icons": [
+    {
+      "id": "spark",
+      "symbol": "sparkles",
+      "fileExtensions": [
+        "txt",
+        "swift"
+      ]
+    }
+  ],
+  "snippets": [
+    {
+      "id": "greeting",
+      "title": "Greeting Function",
+      "prefix": "greetfn",
+      "scope": [
+        "swift"
+      ],
+      "body": "func ${1:greet}(_ name: String) {\n    print(\"${2:Hello}, \\(name)\")\n}\n$0"
+    }
+  ]
+}

@@ -9,7 +9,7 @@ final class PluginHostTests: XCTestCase {
         try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
     }
     override func tearDownWithError() throws { try FileManager.default.removeItem(at:directory) }
-    func package(permissions: [String] = ["document.read","document.write"],executable: String = "fixture",protocolVersion: Int = 1, events: [String] = []) throws -> PluginPackage {
+    func package(permissions: [String] = ["document.read","document.write"],executable: String = "fixture",protocolVersion: Int = 1, events: [String] = [],views: [[String:Any]] = []) throws -> PluginPackage {
         guard let python = ToolCommand.executable("python3") else { throw XCTSkip("Python fixture runtime unavailable") }
         let script = #"""
 import sys,json,time
@@ -35,13 +35,15 @@ while True:
         if cmd=='fixture.events': result['message']=json.dumps(p['environment']['globalState'].get('events',[]))
         if cmd=='fixture.range': result={'edits':[{'location':0,'length':0,'text':'Hi '}],'documentRevision':p['document']['revision']}
         if cmd=='fixture.state': result={'stateUpdates':[{'scope':'global','key':'count','value':1}]}
+        if cmd=='fixture.ui': result={'message':p.get('uiEvent',{}).get('itemID','none'),'viewUpdates':[{'id':'list','items':[{'id':'new','title':'Native result','command':'fixture.read'}]}]}
+        if cmd=='fixture.invalidUI': result={'viewUpdates':[{'id':'unknown','text':'bad'}]}
     body=json.dumps({'jsonrpc':'2.0','id':req['id'],'result':result},ensure_ascii=False).encode()
     sys.stdout.buffer.write(('Content-Length: %d\r\n\r\n'%len(body)).encode()+body);sys.stdout.buffer.flush()
 """#
         let fixture = directory.appendingPathComponent("fixture")
         try ("#!"+python.path+"\n"+script).write(to:fixture,atomically:true,encoding:.utf8)
         try FileManager.default.setAttributes([.posixPermissions:0o755],ofItemAtPath:fixture.path)
-        let manifest: [String:Any] = ["id":"dev.fixture","name":"Fixture","version":"1","protocolVersion":protocolVersion,"executable":executable,"permissions":permissions,"events":events,"commands":["transform","read","hang","crash","events","range","state"].map { ["id":"fixture."+$0,"title":$0] }]
+        let manifest: [String:Any] = ["id":"dev.fixture","name":"Fixture","version":"1","protocolVersion":protocolVersion,"executable":executable,"permissions":permissions,"events":events,"views":views,"commands":["transform","read","hang","crash","events","range","state","ui","invalidUI"].map { ["id":"fixture."+$0,"title":$0] }]
         try JSONSerialization.data(withJSONObject:manifest).write(to:directory.appendingPathComponent("plugin.json"))
         return try PluginPackage(directory:directory)
     }
@@ -107,6 +109,16 @@ while True:
         let changes = log.filter { $0[0] as? String == "change" }
         XCTAssertEqual(changes.last?[1] as? Int,200); XCTAssertLessThan(changes.count,200)
         XCTAssertEqual(log[log.count-2][0] as? String,"save")
+    }
+
+    func testNativeUIResponsesValidateDeclaredViewsAndForwardItemIdentity() throws {
+        let session = PluginSession(package:try package(views:[["id":"list","title":"List","kind":"list"]]),persistence:PluginPersistence(directory:directory.appendingPathComponent("state")))
+        defer { session.stop() }; var updates: [PluginViewUpdate] = []
+        session.uiUpdated = { updates = $0 }
+        let result = try session.execute(command:"fixture.ui",uiEvent:PluginUIEvent(viewID:"list",kind:"activate",itemID:"selected"))
+        XCTAssertEqual(result.message,"selected"); XCTAssertEqual(updates.first?.items?.first?.title,"Native result")
+        XCTAssertThrowsError(try session.execute(command:"fixture.invalidUI")); XCTAssertTrue(session.isStopped)
+        XCTAssertEqual(updates.first?.id,"list")
     }
 
 }

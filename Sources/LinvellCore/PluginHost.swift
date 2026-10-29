@@ -12,11 +12,16 @@ public struct PluginManifest: Codable, Equatable {
     public let name: String
     public let version: String
     public let protocolVersion: Int
-    public let executable: String
+    public let executable: String?
     public let permissions: [String]
     public let commands: [Command]
     public let events: [PluginDocumentEvent.Kind]?
     public let configuration: [String:PluginValue]?
+    public let views: [PluginView]?
+    public let settings: [PluginSetting]?
+    public let themes: [PluginTheme]?
+    public let icons: [PluginIcon]?
+    public let snippets: [PluginSnippet]?
 }
 
 public enum PluginError: LocalizedError, Equatable {
@@ -38,7 +43,7 @@ public enum PluginError: LocalizedError, Equatable {
 /// User-selected development packages only; never discovered or executed from a project automatically.
 public struct PluginPackage {
     public let directory: URL
-    public let executableURL: URL
+    public let executableURL: URL?
     public let manifest: PluginManifest
     public init(directory: URL) throws {
         let directory = directory.standardizedFileURL.resolvingSymlinksInPath()
@@ -52,11 +57,9 @@ public struct PluginPackage {
         let allowed = Set(["document.read","document.write","storage"])
         guard validID(manifest.id),!manifest.name.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,manifest.name.count <= 100,
               !manifest.version.isEmpty,manifest.version.count <= 64,
-              !manifest.executable.isEmpty,!manifest.executable.hasPrefix("/"),
-              !manifest.executable.split(separator:"/").contains(".."),
               Set(manifest.permissions).isSubset(of:allowed),
               !manifest.permissions.contains("document.write") || manifest.permissions.contains("document.read"),
-              !manifest.commands.isEmpty,manifest.commands.count <= 100,
+              manifest.commands.count <= 100,
               (manifest.events ?? []).isEmpty || manifest.permissions.contains("document.read"),
               Set(manifest.commands.map(\.id)).count == manifest.commands.count,
               manifest.commands.allSatisfy({ validID($0.id) && !$0.title.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty && $0.title.count <= 200 }) else { throw PluginError.invalidPackage }
@@ -67,16 +70,24 @@ public struct PluginPackage {
                 _ = try PluginKeybinding(keybinding)
             }
         }
-        let executable = directory.appendingPathComponent(manifest.executable).standardizedFileURL.resolvingSymlinksInPath()
-        guard executable.path.hasPrefix(directory.path+"/"),
-              (try? executable.resourceValues(forKeys:[.isRegularFileKey]).isRegularFile) == true,
-              FileManager.default.isExecutableFile(atPath:executable.path) else { throw PluginError.invalidPackage }
+        try PluginContributions.validate(manifest,directory:directory)
+        let executable: URL?
+        if let path = manifest.executable {
+            guard !path.isEmpty,!path.hasPrefix("/"),!path.split(separator:"/").contains("..") else { throw PluginError.invalidPackage }
+            let file = directory.appendingPathComponent(path).standardizedFileURL.resolvingSymlinksInPath()
+            guard file.path.hasPrefix(directory.path+"/"),(try? file.resourceValues(forKeys:[.isRegularFileKey]).isRegularFile) == true,FileManager.default.isExecutableFile(atPath:file.path) else { throw PluginError.invalidPackage }
+            executable = file
+        } else {
+            guard manifest.commands.isEmpty,(manifest.events ?? []).isEmpty else { throw PluginError.invalidPackage }; executable = nil
+        }
+        guard !manifest.commands.isEmpty || !(manifest.views ?? []).isEmpty || !(manifest.settings ?? []).isEmpty || !(manifest.themes ?? []).isEmpty || !(manifest.icons ?? []).isEmpty || !(manifest.snippets ?? []).isEmpty else { throw PluginError.invalidPackage }
         self.directory = directory; self.executableURL = executable; self.manifest = manifest
     }
 }
 
 /// Owns a lazily started process. Commands and acknowledged events share a serial queue.
 public final class PluginSession {
+    public let sessionID = UUID()
     public let package: PluginPackage
     public let persistence: PluginPersistence
     private let lock = NSLock()
@@ -84,10 +95,12 @@ public final class PluginSession {
     private var rpc: LanguageRPC?
     private var stopped = false, draining = false, commandPending = false
     private var events: [(PluginDocumentEvent,PluginWorkspace?)] = []
+    public var uiUpdated: (([PluginViewUpdate]) -> Void)?
+    public var isStopped: Bool { lock.lock(); defer { lock.unlock() }; return stopped }
     public var eventFailure: ((Error) -> Void)?
     public init(package: PluginPackage,persistence: PluginPersistence = PluginPersistence()) { self.package = package; self.persistence = persistence }
     deinit { stop() }
-    public func execute(command: String, document: PluginDocument? = nil, workspace: PluginWorkspace? = nil, timeout: TimeInterval = 10) throws -> PluginCommandResult {
+    public func execute(command: String, document: PluginDocument? = nil, workspace: PluginWorkspace? = nil, uiEvent: PluginUIEvent? = nil, timeout: TimeInterval = 10) throws -> PluginCommandResult {
         lock.lock()
         guard !stopped,!commandPending else { lock.unlock(); throw PluginError.unavailable }
         commandPending = true; lock.unlock()
@@ -99,7 +112,7 @@ public final class PluginSession {
             let allowedDocument = package.manifest.permissions.contains("document.read") ? document : nil
             guard (allowedDocument?.text.utf8.count ?? 0) <= 2*1024*1024 else { throw PluginError.invalidPackage }
             let environment = try persistence.environment(package:package,workspace:workspace)
-            let context = PluginCommandContext(command:command,document:allowedDocument,environment:environment)
+            let context = PluginCommandContext(command:command,document:allowedDocument,environment:environment,uiEvent:uiEvent)
             let raw = try request("commands/execute",params:context,timeout:timeout)
             do {
                 let result = try JSONDecoder().decode(PluginCommandResult.self,from:JSONSerialization.data(withJSONObject:raw))
@@ -111,8 +124,10 @@ public final class PluginSession {
                     _ = try PluginEdits.apply(edits,to:document.text)
                 }
                 guard (result.replacementText?.utf8.count ?? 0) <= 2*1024*1024,(result.message?.count ?? 0) <= 2000 else { throw PluginError.invalidPackage }
+                try PluginContributions.validate(result.viewUpdates ?? [],manifest:package.manifest)
                 try persist(result.stateUpdates ?? [],workspace:workspace)
                 try checkRunning()
+                uiUpdated?(result.viewUpdates ?? [])
                 return result
             } catch { stop(); throw error }
         }
@@ -144,7 +159,9 @@ public final class PluginSession {
             let raw = try request("documents/event",params:value,timeout:10)
             let result = try JSONDecoder().decode(PluginCommandResult.self,from:JSONSerialization.data(withJSONObject:raw))
             guard result.edits == nil,result.replacementText == nil else { throw PluginError.permissionDenied }
+            try PluginContributions.validate(result.viewUpdates ?? [],manifest:package.manifest)
             try persist(result.stateUpdates ?? [],workspace:workspace)
+            try checkRunning(); uiUpdated?(result.viewUpdates ?? [])
         } catch { stop(); throw error }
     }
     private func request<T: Encodable>(_ method: String,params: T,timeout: TimeInterval) throws -> Any {
@@ -155,7 +172,8 @@ public final class PluginSession {
             if stopped { lock.unlock(); throw PluginError.unavailable }
             if let existing = rpc { channel = existing; lock.unlock() }
             else {
-                do { channel = try LanguageRPC(executable:package.executableURL,arguments:[],directory:package.directory) }
+                guard let executable = package.executableURL else { lock.unlock(); throw PluginError.unavailable }
+                do { channel = try LanguageRPC(executable:executable,arguments:[],directory:package.directory) }
                 catch { lock.unlock(); throw error }
                 rpc = channel; lock.unlock()
                 let raw = try channel.request("initialize",params:["protocolVersion":1],timeout:timeout)

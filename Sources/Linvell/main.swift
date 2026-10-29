@@ -128,10 +128,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     @objc func route(_ item: NSMenuItem) {
         guard let action = item.representedObject as? String else { return }
+        if NSApp.keyWindow?.windowController is PluginOwnedWindow,action == NSStringFromSelector(#selector(WorkspaceController.closeCurrent)) {
+            NSApp.keyWindow?.performClose(nil); return
+        }
+        if let settings = NSApp.keyWindow?.windowController as? PluginSettingsWindow,action == NSStringFromSelector(#selector(WorkspaceController.save)) { settings.saveSettings(); return }
         if NSApp.keyWindow?.windowController is PreferencesController,action == NSStringFromSelector(#selector(WorkspaceController.closeCurrent)) {
             NSApp.keyWindow?.performClose(nil); return
         }
-        let controller = (NSApp.keyWindow?.windowController as? WorkspaceController) ?? workspaces.last ?? newWorkspace()
+        let controller = (NSApp.keyWindow?.windowController as? WorkspaceController) ?? (NSApp.keyWindow?.windowController as? PluginOwnedWindow)?.workspaceOwner ?? workspaces.last ?? newWorkspace()
         controller.perform(NSSelectorFromString(action))
     }
     @objc func website() { NSWorkspace.shared.open(URL(string:"https://linvell.fuluwa.top")!) }
