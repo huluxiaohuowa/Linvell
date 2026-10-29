@@ -163,7 +163,7 @@ final class NativeEditingTests: XCTestCase {
         }
         for width: CGFloat in [480,1000] {
             window.setContentSize(NSSize(width:width,height:650)); window.contentView?.layoutSubtreeIfNeeded()
-            let actions = buttons(welcome)
+            let actions = buttons(welcome).filter { [#selector(WorkspaceController.openFolder),#selector(WorkspaceController.newFile),#selector(WorkspaceController.openFile)].contains($0.action) }
             XCTAssertEqual(actions.count,3)
             actions.forEach { XCTAssertGreaterThanOrEqual($0.bounds.width,320) }
         }

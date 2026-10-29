@@ -72,31 +72,34 @@ final class CodeCompletionPanel: NSPanel, NSTableViewDataSource, NSTableViewDele
 
 final class CodeHoverContent: NSViewController {
     let text: String
+    let highlight: NSRange?
     let navigate: () -> Void
-    init(text: String,navigate: @escaping () -> Void) { self.text = text; self.navigate = navigate; super.init(nibName:nil,bundle:nil) }
+    init(text: String,highlight: NSRange? = nil,navigate: @escaping () -> Void) { self.text = text; self.highlight = highlight; self.navigate = navigate; super.init(nibName:nil,bundle:nil) }
     required init?(coder: NSCoder) { fatalError() }
     override func loadView() {
         view = Surface(Theme.panel)
         let editor = NSTextView(); editor.isEditable = false; editor.isSelectable = true
-        editor.frame = NSRect(x:0,y:0,width:500,height:120); editor.isVerticallyResizable = true
+        editor.frame = NSRect(x:0,y:0,width:412,height:100); editor.isVerticallyResizable = true
         editor.textContainer?.widthTracksTextView = true
-        editor.textContainer?.containerSize = NSSize(width:500,height:CGFloat.greatestFiniteMagnitude)
-        editor.string = text; editor.font = Theme.editorFont; editor.textColor = Theme.foreground; editor.backgroundColor = Theme.panel
+        editor.textContainer?.containerSize = NSSize(width:412,height:CGFloat.greatestFiniteMagnitude)
+        editor.string = text; editor.font = .monospacedSystemFont(ofSize:12,weight:.regular); editor.textColor = Theme.foreground; editor.backgroundColor = Theme.panel
+        if let highlight,highlight.location >= 0,NSMaxRange(highlight) <= (text as NSString).length { editor.textStorage?.addAttributes([.font:NSFont.monospacedSystemFont(ofSize:12,weight:.bold),.foregroundColor:Theme.accent],range:highlight) }
         editor.textContainerInset = NSSize(width:12,height:10); editor.isHorizontallyResizable = false; editor.autoresizingMask = [.width]
         let scroll = ResponsiveScrollView(); scroll.documentView = editor; scroll.hasVerticalScroller = true; scroll.drawsBackground = false
-        let go = Theme.actionButton("Go to Definition",target:self,action:#selector(goToDefinition))
-        Theme.pin(Theme.stack([scroll,go],orientation:.vertical,spacing:8),in:view,inset:10)
-        preferredContentSize = NSSize(width:540,height:min(320,max(110,CGFloat(text.components(separatedBy:"\n").count)*20+70)))
+        Theme.pin(scroll,in:view,inset:4)
+        let measured = (text as NSString).boundingRect(with:NSSize(width:388,height:1000),options:[.usesLineFragmentOrigin,.usesFontLeading],attributes:[.font:NSFont.monospacedSystemFont(ofSize:12,weight:.regular)])
+        preferredContentSize = NSSize(width:420,height:min(240,max(54,ceil(measured.height)+28)))
         view.setFrameSize(preferredContentSize)
     }
     @objc func goToDefinition() { navigate() }
 }
 
 extension EditorTextView {
-    static func codeWord(in text: String,at offset: Int) -> NSRange {
+    static func codeWord(in text: String,at offset: Int,maximumLength: Int = Int.max) -> NSRange {
         let ns = text as NSString; var lower = min(max(0,offset),ns.length),upper = lower
         func part(_ at: Int) -> Bool { guard at >= 0,at < ns.length,let scalar = UnicodeScalar(ns.character(at:at)) else { return false }; return CharacterSet.alphanumerics.contains(scalar) || scalar == "_" || scalar == "$" }
-        while lower > 0,part(lower-1) { lower -= 1 }; while upper < ns.length,part(upper) { upper += 1 }
+        while lower > 0,part(lower-1) { lower -= 1; if upper-lower > maximumLength { return NSRange(location:offset,length:0) } }
+        while upper < ns.length,part(upper) { upper += 1; if upper-lower > maximumLength { return NSRange(location:offset,length:0) } }
         return NSRange(location:lower,length:upper-lower)
     }
 }

@@ -45,7 +45,7 @@ extension WorkspaceController {
             if terminal != nil {
                 guard mayCloseTerminal() else { return }; terminateTerminal(); terminalHost?.removeFromSuperview(); terminalHost = nil; terminal = nil
             }
-            resetLanguageServices()
+            latestOpenRequest = nil; resetLanguageServices()
             remoteConnection = connection; remoteDirectory = "~"; root = nil; fileIndex = []
             projectTitle.stringValue = "SSH · "+host; window?.title = "SSH · "+host
             sidebarKind = "files"; sidebar.subviews.forEach { $0.removeFromSuperview() }
@@ -79,6 +79,7 @@ extension WorkspaceController {
     }
     func openRemote(_ path: String,connection: SSHRemote,completion: (() -> Void)? = nil) {
         if let existing = documents.first(where:{ $0.remote?.connection.host == connection.host && $0.remote?.path == path }) { activate(existing); completion?(); return }
+        let request = UUID(); latestOpenRequest = request
         status.stringValue = L.text("Opening remote file…")
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
             let result = Result { () throws -> (OpenDocument,RemoteDocument) in
@@ -93,12 +94,16 @@ extension WorkspaceController {
                 guard let self else { return }
                 switch result {
                 case .success(let (document,_)):
-                    if let existing = self.documents.first(where:{ $0.remote?.connection.host == connection.host && $0.remote?.path == document.remote?.path }) { self.activate(existing) }
-                    else { self.activate(document) }
-                    completion?()
-                case .failure(let error): self.show(error)
+                    self.finishRemoteOpen(document,request:request,completion:completion)
+                case .failure(let error): if self.latestOpenRequest == request { self.show(error) }
                 }
             }
         }
     }
+    func finishRemoteOpen(_ document: OpenDocument,request: UUID,completion: (() -> Void)?) {
+        let existing = documents.first { $0.remote?.connection.host == document.remote?.connection.host && $0.remote?.path == document.remote?.path }
+        if latestOpenRequest == request { activate(existing ?? document); completion?() }
+        else if existing == nil { documents.append(document); renderTabs() }
+    }
+
 }

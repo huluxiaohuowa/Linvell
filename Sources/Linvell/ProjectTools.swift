@@ -2,7 +2,12 @@ import AppKit
 import LinvellCore
 
 final class ProjectTools: NSView {
-    private let project: URL
+    let project: URL
+    let workingDirectory: String
+    let remote: SSHRemote?
+    private weak var workspaceOwner: WorkspaceController?
+    typealias Reports = [(String,String)]
+    var reportLoader: ((Int) throws -> Reports)?
     private let tabs: NSSegmentedControl
     private let content = NSStackView()
     private let spinner = NSProgressIndicator()
@@ -10,16 +15,16 @@ final class ProjectTools: NSView {
     private let sampler = SystemSampler()
     private var timer: Timer?
     private var refreshing = false
-    init(project: URL) {
-        self.project = project
+    init(project: URL,remote: SSHRemote? = nil,directory: String? = nil,owner: WorkspaceController? = nil,reportLoader: ((Int) throws -> Reports)? = nil) {
+        self.project = project; self.workingDirectory = directory ?? project.path; self.remote = remote; self.workspaceOwner = owner; self.reportLoader = reportLoader
         tabs = NSSegmentedControl(labels:["Overview","Runtime & Packages","Git Details","System"].map(L.text),trackingMode:.selectOne,target:nil,action:nil)
         super.init(frame:.zero)
         tabs.selectedSegment = 0; tabs.target = self; tabs.action = #selector(refresh)
         let title = Theme.label("Project Tools",size:28,weight:.semibold)
-        let name = Theme.label(project.lastPathComponent,size:14,color:Theme.secondary)
+        let name = Theme.label(project.lastPathComponent+(remote.map { " · SSH · "+$0.host } ?? ""),size:14,color:Theme.secondary)
         let refreshButton = Theme.actionButton("Refresh",target:self,action:#selector(refresh))
         spinner.style = .spinning; spinner.controlSize = .small; spinner.isDisplayedWhenStopped = false
-        let header = Theme.stack([Theme.stack([title,name],orientation:.vertical,spacing:5),NSView(),spinner,refreshButton])
+        let header = Theme.stack([Theme.stack([title,name],orientation:.vertical,spacing:5),NSView(),spinner,Theme.actionButton("Project Settings",target:self,action:#selector(openProjectSettings)),refreshButton])
         content.orientation = .vertical; content.alignment = .leading; content.spacing = 16
         let scroll = ResponsiveScrollView(); scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = false
         let page = ToolsPage(); page.translatesAutoresizingMaskIntoConstraints = false; scroll.documentView = page
@@ -29,24 +34,30 @@ final class ProjectTools: NSView {
         refresh()
         NotificationCenter.default.addObserver(self,selector:#selector(languageApplied),name:L.changed,object:nil)
         timer = Timer.scheduledTimer(withTimeInterval:2,repeats:true) { [weak self] _ in
-            guard let self,self.tabs.selectedSegment == 3,self.window?.isVisible == true,!self.refreshing else { return }; self.refresh()
+            guard let self,self.remote == nil,self.tabs.selectedSegment == 3,self.window?.isVisible == true,!self.refreshing else { return }; self.refresh()
         }
     }
     required init?(coder: NSCoder) { fatalError() }
     deinit { timer?.invalidate(); NotificationCenter.default.removeObserver(self) }
+    @objc func openProjectSettings() { workspaceOwner?.showProjectSettings() }
     @objc private func languageApplied() { L.apply(to:self); refresh() }
     @objc private func refresh() {
         refreshing = true
         let token = UUID(); generation = token; spinner.startAnimation(nil)
-        let section = tabs.selectedSegment,project = self.project,sampler = self.sampler
+        let section = tabs.selectedSegment,project = self.project,sampler = self.sampler,remote = self.remote,loader = self.reportLoader,directory = self.workingDirectory
         DispatchQueue.global(qos:.utility).async { [weak self] in
-            let snapshot: Result<SystemSnapshot,Error>? = section == 3 ? Result { try sampler.sample() } : nil
-            let reports = Self.reports(section:section,project:project,snapshot:snapshot)
+            let snapshot: Result<SystemSnapshot,Error>? = section == 3 && remote == nil ? Result { try sampler.sample() } : nil
+            let reports: Reports
+            do {
+                if let loader { reports = try loader(section) }
+                else if let remote { reports = try remote.request("project-tools",path:directory,content:Data(String(section).utf8)).reports?.compactMap { $0.count == 2 ? ($0[0],$0[1]) : nil } ?? [] }
+                else { reports = Self.reports(section:section,project:project,snapshot:snapshot) }
+            } catch { reports = [("Project Tools",error.localizedDescription)] }
             DispatchQueue.main.async { [weak self] in
                 guard let self,self.generation == token else { return }
                 self.refreshing = false; self.spinner.stopAnimation(nil)
                 self.content.arrangedSubviews.forEach { $0.removeFromSuperview() }
-                if section == 3,case .success(let sample) = snapshot {
+                if section == 3,remote == nil,case .success(let sample) = snapshot {
                     let map = CoreHeatmap(loads:sample.cpuLoads)
                     self.content.addArrangedSubview(map)
                     map.widthAnchor.constraint(equalTo:self.content.widthAnchor).isActive = true

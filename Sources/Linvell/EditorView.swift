@@ -52,6 +52,9 @@ final class EditorTextView: NSTextView {
     var codeDismiss: (() -> Void)?
     var codeAction: ((String,Int?) -> Void)?
     var completionKey: ((NSEvent) -> Bool)?
+    var codeHoverDismiss: (() -> Void)?
+    var hoverGeneration = UUID()
+    var hoverAnchor = NSPoint.zero
     var hoverOffset: Int?
     var hoverWork: DispatchWorkItem?
     var codeTracking: NSTrackingArea?
@@ -149,15 +152,29 @@ final class EditorTextView: NSTextView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow(); window?.acceptsMouseMovedEvents = true
     }
-    override func mouseMoved(with event: NSEvent) {
-        let offset = characterIndexForInsertion(at:convert(event.locationInWindow,from:nil)),word = Self.codeWord(in:string,at:offset)
-        let at = word.location
-        guard hoverOffset != at else { return }; hoverWork?.cancel(); hoverOffset = at
-        guard word.length > 0 else { return }
-        let work = DispatchWorkItem { [weak self] in guard let self,self.hoverOffset == at else { return }; self.codeAction?("hover",at) }
-        hoverWork = work; DispatchQueue.main.asyncAfter(deadline:.now()+0.5,execute:work)
+    func cancelCodeHover() {
+        hoverWork?.cancel(); hoverWork = nil; hoverOffset = -1; hoverGeneration = UUID()
+        (codeHoverDismiss ?? codeDismiss)?()
     }
-    override func mouseExited(with event: NSEvent) { hoverWork?.cancel(); hoverOffset = -1 }
+    func updateCodeHover(at point: NSPoint) {
+        guard (textStorage?.length ?? 0) <= 2*1024*1024 else { cancelCodeHover(); return }
+        let offset = characterIndexForInsertion(at:point),word = Self.codeWord(in:string,at:offset,maximumLength:512)
+        guard word.length > 0,let manager = layoutManager,let container = textContainer else { cancelCodeHover(); return }
+        let glyphs = manager.glyphRange(forCharacterRange:word,actualCharacterRange:nil)
+        let bounds = manager.boundingRect(forGlyphRange:glyphs,in:container).offsetBy(dx:textContainerOrigin.x,dy:textContainerOrigin.y)
+        guard bounds.contains(point) else { cancelCodeHover(); return }
+        hoverAnchor = point
+        guard hoverOffset != word.location else { return }
+        cancelCodeHover(); hoverOffset = word.location
+        let generation = hoverGeneration
+        let work = DispatchWorkItem { [weak self] in
+            guard let self,self.hoverGeneration == generation,self.hoverOffset == word.location else { return }
+            self.codeAction?("hover",word.location)
+        }
+        hoverWork = work; DispatchQueue.main.asyncAfter(deadline:.now()+0.65,execute:work)
+    }
+    override func mouseMoved(with event: NSEvent) { updateCodeHover(at:convert(event.locationInWindow,from:nil)) }
+    override func mouseExited(with event: NSEvent) { cancelCodeHover() }
     override func menu(for event: NSEvent) -> NSMenu? {
         let menu = super.menu(for:event) ?? NSMenu()
         menu.addItem(.separator())
@@ -289,7 +306,8 @@ final class EditorTextView: NSTextView {
         } else { super.insertTab(sender) }
     }
     override func keyDown(with event: NSEvent) {
-        hoverWork?.cancel(); hoverOffset = nil
+        cancelCodeHover()
+        if event.modifierFlags.intersection([.command,.control,.option,.shift]) == .option,[123,124].contains(event.keyCode),!hasMarkedText() { codeAction?(event.keyCode == 123 ? "back" : "forward",nil); return }
         if completionKey?(event) == true { return }
         if event.modifierFlags.intersection([.command,.control,.option,.shift]) == .control,event.keyCode == 49 { codeAction?("completion",nil); return }
         if handleColumnKey(event) { return }
@@ -394,7 +412,7 @@ final class EditorPane: NSView, NSTextViewDelegate {
     }
     required init?(coder: NSCoder) { fatalError() }
     deinit { NotificationCenter.default.removeObserver(self) }
-    @objc private func scrolled() { gutter.needsDisplay = true; paintSyntax(); if !followingPreviewScroll { onScroll?(scrollAnchor) } }
+    @objc private func scrolled() { textView.cancelCodeHover(); gutter.needsDisplay = true; paintSyntax(); if !followingPreviewScroll { onScroll?(scrollAnchor) } }
     var scrollAnchor: DocumentScrollAnchor {
         guard let manager = textView.layoutManager,let container = textView.textContainer,manager.numberOfGlyphs > 0 else { return DocumentScrollAnchor(line:1,progress:0) }
         let y = scroll.contentView.bounds.minY,origin = textView.textContainerOrigin

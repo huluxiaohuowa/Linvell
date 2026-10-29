@@ -67,7 +67,7 @@ final class AutoSaveAndCodeTests: XCTestCase {
         let hover = CodeHoverContent(text:"func greeting(_ name: String) -> String\nReturns a greeting.",navigate:{})
         hover.loadView()
         hover.view.layoutSubtreeIfNeeded()
-        let scroll = try XCTUnwrap(hover.view.subviews.flatMap { $0.subviews }.compactMap { $0 as? ResponsiveScrollView }.first)
+        let scroll = try XCTUnwrap(hover.view.subviews.compactMap { $0 as? ResponsiveScrollView }.first)
         XCTAssertGreaterThan(scroll.documentView?.frame.width ?? 0,0)
         LanguageTools.invalidate(remote:nil,root:folder.path)
     }

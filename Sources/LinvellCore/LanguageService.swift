@@ -26,6 +26,11 @@ public struct CodePosition: Codable, Equatable {
 public struct CodeRange: Codable, Equatable {
     public let start: CodePosition
     public let end: CodePosition
+    public init(start: CodePosition,end: CodePosition) { self.start = start; self.end = end }
+    public static func parse(_ value: Any) throws -> CodeRange {
+        guard let raw = value as? [String:Any],let start = raw["start"] as? [String:Any],let end = raw["end"] as? [String:Any],let sl = start["line"] as? Int,let sc = start["character"] as? Int,let el = end["line"] as? Int,let ec = end["character"] as? Int,sl >= 0,sc >= 0,el >= 0,ec >= 0 else { throw DocumentError.invalidRange }
+        return CodeRange(start:CodePosition(line:sl,character:sc),end:CodePosition(line:el,character:ec))
+    }
     public func range(in text: String,index: LineIndex? = nil) throws -> NSRange {
         let index = index ?? LineIndex(text)
         let lower = try start.offset(in:text,index:index),upper = try end.offset(in:text,index:index)
@@ -53,14 +58,17 @@ public struct CodeDiagnostic: Decodable {
 public struct CodeLocation: Decodable {
     public let uri: String
     public let range: CodeRange
+    public init(uri: String,range: CodeRange) { self.uri = uri; self.range = range }
     public static func locations(_ value: Any) throws -> [CodeLocation] {
         guard !(value is NSNull) else { return [] }
         let values = (value as? [[String:Any]]) ?? (value as? [String:Any]).map { [$0] } ?? []
         return try values.map { raw in
             if let uri = raw["targetUri"],let range = raw["targetSelectionRange"] ?? raw["targetRange"] {
-                return try JSONDecoder().decode(Self.self,from:JSONSerialization.data(withJSONObject:["uri":uri,"range":range]))
+                guard let uri = uri as? String else { throw DocumentError.invalidRange }
+                return try CodeLocation(uri:uri,range:CodeRange.parse(range))
             }
-            return try JSONDecoder().decode(Self.self,from:JSONSerialization.data(withJSONObject:raw))
+            guard let uri = raw["uri"] as? String,let range = raw["range"] else { throw DocumentError.invalidRange }
+            return try CodeLocation(uri:uri,range:CodeRange.parse(range))
         }
     }
 }
@@ -72,12 +80,14 @@ public struct LanguageToolchain: Codable, Equatable {
     public var enabled = true
     public var storage: LanguageToolStorage = .project
     public var addGitIgnore = true
+    public var configurationJSON = "{}"
     public init() {}
-    private enum CodingKeys: String,CodingKey { case runtime,server,arguments,enabled,storage,addGitIgnore }
+    private enum CodingKeys: String,CodingKey { case runtime,server,arguments,enabled,storage,addGitIgnore,configurationJSON }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy:CodingKeys.self)
         runtime = try c.decodeIfPresent(String.self,forKey:.runtime) ?? ""; server = try c.decodeIfPresent(String.self,forKey:.server) ?? ""
         arguments = try c.decodeIfPresent([String].self,forKey:.arguments) ?? []; enabled = try c.decodeIfPresent(Bool.self,forKey:.enabled) ?? true
+        configurationJSON = try c.decodeIfPresent(String.self,forKey:.configurationJSON) ?? "{}"
         storage = try c.decodeIfPresent(LanguageToolStorage.self,forKey:.storage) ?? .project; addGitIgnore = try c.decodeIfPresent(Bool.self,forKey:.addGitIgnore) ?? true
     }
 }
@@ -165,6 +175,7 @@ public final class LanguageRPC {
     private var stopped = false,frames = LSPFrames()
     private var onNotification: ((String,[String:Any]) -> Void)?
     private var settings: [String:Any] = [:]
+    public var workspaceFolders: [[String:String]] = []
     public var notification: ((String,[String:Any]) -> Void)? {
         get { lock.lock(); defer { lock.unlock() }; return onNotification }
         set { lock.lock(); onNotification = newValue; lock.unlock() }
@@ -190,6 +201,7 @@ public final class LanguageRPC {
         do { try process.run() } catch { output.fileHandleForReading.readabilityHandler = nil; throw error }
     }
     deinit { stop() }
+    var hasExited: Bool { !process.isRunning }
     public var isRunning: Bool { lock.lock(); defer { lock.unlock() }; return !stopped && process.isRunning }
     private func send(_ object: [String:Any]) {
         writer.async { [weak self] in
@@ -198,7 +210,8 @@ public final class LanguageRPC {
         }
     }
     public func notify(_ method: String,params: [String:Any]) { send(["jsonrpc":"2.0","method":method,"params":params]) }
-    public func request(_ method: String,params: [String:Any],timeout: TimeInterval = 12) throws -> Any {
+    public func request(_ method: String,params: [String:Any],timeout: TimeInterval = 12,cancellation: LanguageRequestCancellation? = nil) throws -> Any {
+        if cancellation?.isCancelled == true { throw CancellationError() }
         let signal = DispatchSemaphore(value:0),resultLock = NSLock()
         var outcome: Result<Any,Error>?
         lock.lock()
@@ -206,6 +219,12 @@ public final class LanguageRPC {
         nextID += 1; let id = nextID
         pending[id] = { result in resultLock.lock(); outcome = result; resultLock.unlock(); signal.signal() }
         lock.unlock(); send(["jsonrpc":"2.0","id":id,"method":method,"params":params])
+        let subscription = cancellation?.register { [weak self] in
+            guard let self else { return }
+            self.lock.lock(); let callback = self.pending.removeValue(forKey:id); self.lock.unlock()
+            self.notify("$/cancelRequest",params:["id":id]); callback?(.failure(CancellationError()))
+        }
+        defer { if let subscription { cancellation?.unregister(subscription) } }
         if signal.wait(timeout:.now()+timeout) == .timedOut {
             lock.lock(); pending.removeValue(forKey:id); lock.unlock()
             notify("$/cancelRequest",params:["id":id]); throw LanguageServiceError.timeout
@@ -223,6 +242,8 @@ public final class LanguageRPC {
                     guard let section = item["section"] as? String else { return configuration }
                     return section.split(separator:".").reduce(configuration as Any) { ($0 as? [String:Any])?[String($1)] ?? NSNull() }
                 }
+                case "workspace/diagnostic/refresh": notification?(method,params); result = NSNull()
+                case "workspace/workspaceFolders": result = workspaceFolders
                 case "workspace/applyEdit": result = ["applied":false,"failureReason":"Use an explicit editor refactor command."]
                 case "client/registerCapability","window/workDoneProgress/create": result = NSNull()
                 default: result = NSNull()
@@ -242,13 +263,21 @@ public final class LanguageRPC {
         output.fileHandleForReading.readabilityHandler = nil
         callbacks.forEach { $0(.failure(LanguageServiceError.stopped)) }
     }
+    public func shutdown() {
+        DispatchQueue.global(qos:.utility).async { [self] in
+            _ = try? request("shutdown",params:[:],timeout:2)
+            notify("exit",params:[:])
+            DispatchQueue.global(qos:.utility).asyncAfter(deadline:.now()+0.2) { [self] in stop() }
+        }
+    }
     public func stop() {
         finish()
         let handle = input.fileHandleForWriting,process = process
-        writer.async {
-            if let exit = try? LSPFrames.encode(["jsonrpc":"2.0","method":"exit","params":[:]]) { try? handle.write(contentsOf:exit) }
-            try? handle.close()
-            if process.isRunning { process.terminate() }
+        // Termination cannot wait behind a pipe write to a server that stopped reading.
+        if process.isRunning { process.terminate() }
+        writer.async { try? handle.close() }
+        DispatchQueue.global(qos:.utility).asyncAfter(deadline:.now()+1) {
+            if process.isRunning { kill(process.processIdentifier,SIGKILL) }
         }
     }
 }
@@ -257,27 +286,59 @@ public final class LanguageSession {
     public let rpc: LanguageRPC
     public private(set) var capabilities: [String:Any] = [:]
     private var versions: [String:Int] = [:]
-    public var openDocumentCount: Int { versions.count }
-    public init(rpc: LanguageRPC,root: String,runtime: String) throws {
+    private var texts: [String:String] = [:]
+    private var diagnosticResults: [String:String] = [:]
+    private let documentLock = NSLock()
+    public var openDocumentCount: Int { documentLock.lock(); defer { documentLock.unlock() }; return versions.count }
+    public func synchronizedVersion(uri: String) -> Int? { documentLock.lock(); defer { documentLock.unlock() }; return versions[uri] }
+    public init(rpc: LanguageRPC,root: String,runtime: String,configuration: [String:Any] = [:]) throws {
         self.rpc = rpc
         rpc.configuration = ["python":["pythonPath":runtime,"analysis":["autoSearchPaths":true,"useLibraryCodeForTypes":true]],"pylsp":["plugins":["jedi":["environment":runtime.isEmpty ? NSNull() : runtime as Any]]]]
-        let result = try rpc.request("initialize",params:["processId":NSNull(),"rootUri":URL(fileURLWithPath:root).absoluteString,"workspaceFolders":[["uri":URL(fileURLWithPath:root).absoluteString,"name":URL(fileURLWithPath:root).lastPathComponent]],"clientInfo":["name":"Linvell"],"capabilities":["general":["positionEncodings":["utf-16"]],"workspace":["configuration":true,"workspaceFolders":true,"workspaceEdit":["documentChanges":true,"resourceOperations":[]]],"textDocument":["hover":["contentFormat":["plaintext","markdown"]],"completion":["completionItem":["snippetSupport":false]],"rename":["prepareSupport":true],"publishDiagnostics":["versionSupport":true]]],"initializationOptions":["pythonPath":runtime]],timeout:30) as? [String:Any] ?? [:]
+        rpc.workspaceFolders = [["uri":URL(fileURLWithPath:root).absoluteString,"name":URL(fileURLWithPath:root).lastPathComponent]]
+        rpc.configuration = LanguageConfiguration.merge(rpc.configuration,configuration)
+        let result = try rpc.request("initialize",params:["processId":NSNull(),"rootUri":URL(fileURLWithPath:root).absoluteString,"workspaceFolders":[["uri":URL(fileURLWithPath:root).absoluteString,"name":URL(fileURLWithPath:root).lastPathComponent]],"clientInfo":["name":"Linvell"],"capabilities":["window":["workDoneProgress":true],"general":["positionEncodings":["utf-16"]],"workspace":["configuration":true,"workspaceFolders":true,"workspaceEdit":["documentChanges":true,"resourceOperations":[]]],"textDocument":["definition":["linkSupport":true],"typeDefinition":["linkSupport":true],"declaration":["linkSupport":true],"implementation":["linkSupport":true],"diagnostic":["relatedDocumentSupport":true],"synchronization":["didSave":true],"documentSymbol":["hierarchicalDocumentSymbolSupport":true],"signatureHelp":["signatureInformation":["parameterInformation":["labelOffsetSupport":true]]],"hover":["contentFormat":["plaintext","markdown"]],"completion":["completionItem":["snippetSupport":false]],"rename":["prepareSupport":true],"publishDiagnostics":["versionSupport":true]]],"initializationOptions":["pythonPath":runtime]],timeout:30) as? [String:Any] ?? [:]
         capabilities = result["capabilities"] as? [String:Any] ?? [:]
         if let encoding = capabilities["positionEncoding"] as? String,encoding != "utf-16" { rpc.stop(); throw LanguageServiceError.message("The language server must support UTF-16 positions.") }
         rpc.notify("initialized",params:[:]); rpc.notify("workspace/didChangeConfiguration",params:["settings":rpc.configuration])
     }
     public func synchronize(uri: String,language: String,text: String,version: Int) {
+        documentLock.lock(); defer { documentLock.unlock() }
         guard versions[uri] != version else { return }
-        if versions[uri] == nil { rpc.notify("textDocument/didOpen",params:["textDocument":["uri":uri,"languageId":language,"version":version,"text":text]]) }
-        else { rpc.notify("textDocument/didChange",params:["textDocument":["uri":uri,"version":version],"contentChanges":[["text":text]]]) }
-        versions[uri] = version
+        if versions[uri] == nil {
+            if (capabilities["textDocumentSync"] as? [String:Any])?["openClose"] as? Bool != false { rpc.notify("textDocument/didOpen",params:["textDocument":["uri":uri,"languageId":language,"version":version,"text":text]]) }
+        }
+        else {
+            let sync = capabilities["textDocumentSync"]
+            let kind = (sync as? Int) ?? (sync as? [String:Any])?["change"] as? Int ?? 1
+            if kind != 0 {
+                let change = kind == 2 ? LanguageDocumentChange.between(texts[uri] ?? "",text) : ["text":text]
+                if let change { rpc.notify("textDocument/didChange",params:["textDocument":["uri":uri,"version":version],"contentChanges":[change]]) }
+            }
+        }
+        versions[uri] = version; texts[uri] = text
     }
     public func close(uri: String) {
-        if versions.removeValue(forKey:uri) != nil { rpc.notify("textDocument/didClose",params:["textDocument":["uri":uri]]) }
+        documentLock.lock(); defer { documentLock.unlock() }; diagnosticResults.removeValue(forKey:uri)
+        texts.removeValue(forKey:uri)
+        if versions.removeValue(forKey:uri) != nil,(capabilities["textDocumentSync"] as? [String:Any])?["openClose"] as? Bool != false { rpc.notify("textDocument/didClose",params:["textDocument":["uri":uri]]) }
     }
     public func saved(uri: String,text: String) {
+        documentLock.lock(); defer { documentLock.unlock() }
         guard versions[uri] != nil else { return }
-        rpc.notify("textDocument/didSave",params:["textDocument":["uri":uri],"text":text])
+        let options = capabilities["textDocumentSync"] as? [String:Any]
+        if let options,options["save"] == nil || options["save"] as? Bool == false { return }
+        var params: [String:Any] = ["textDocument":["uri":uri]]
+        if options == nil || (options?["save"] as? [String:Any])?["includeText"] as? Bool == true { params["text"] = text }
+        rpc.notify("textDocument/didSave",params:params)
+    }
+    public func pullDiagnostics(uri: String,cancellation: LanguageRequestCancellation? = nil) throws -> [String:Any]? {
+        guard capabilities["diagnosticProvider"] != nil else { return nil }
+        var params: [String:Any] = ["textDocument":["uri":uri]]
+        documentLock.lock(); let previous = diagnosticResults[uri]; documentLock.unlock()
+        if let previous { params["previousResultId"] = previous }
+        let report = try rpc.request("textDocument/diagnostic",params:params,timeout:8,cancellation:cancellation) as? [String:Any]
+        if let result = report?["resultId"] as? String { documentLock.lock(); diagnosticResults[uri] = result; documentLock.unlock() }
+        return report
     }
     public func request(_ method: String,uri: String,position: CodePosition,extra: [String:Any] = [:]) throws -> Any {
         var params: [String:Any] = ["textDocument":["uri":uri],"position":position.json]

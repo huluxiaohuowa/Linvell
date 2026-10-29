@@ -21,7 +21,11 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     var languageQueries: [String:LanguageQueryTicket] = [:]
     var navigationBack: [CodeNavigationPoint] = [],navigationForward: [CodeNavigationPoint] = []
     var completionPanel: CodeCompletionPanel?
-    var hoverPopover: NSPopover?
+    var hoverPopover: CodeHoverPanel?
+    var languageCompletionTriggers: [String:Set<String>] = [:]
+    var languageSignatureTriggers: [String:Set<String>] = [:]
+    var workspaceDiagnosticCount = 0
+    var workspaceDiagnostics: [String:WorkspaceDiagnosticReport] = [:]
     var autoSaveWork: [UUID:DispatchWorkItem] = [:]
     var autoSaving: Set<UUID> = []
     let saveQueue = DispatchQueue(label:"top.fuluwa.linvell.autosave",qos:.utility)
@@ -41,6 +45,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     let tabScroll = ResponsiveScrollView()
     let editorHost = NSView()
     let status = Theme.label("Ready",size:12,color:Theme.secondary)
+    let languageStatus = Theme.label("",size:11,color:Theme.secondary)
     let modeLabel = Theme.label("TEXT",size:11,color:Theme.accent,weight:.semibold)
     let breadcrumb = Theme.label("Your next idea starts here",size:12,color:Theme.secondary)
     let previewButton = NSButton()
@@ -83,6 +88,9 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         window.minSize = NSSize(width:800,height:540); window.delegate = self
         window.setFrameAutosaveName("Linvell.Workspace"); window.center()
         buildUI(); showWelcome()
+        languageServices.didCreateSession = { [weak self] session,language,root,remote in
+            self?.observeDiagnostics(session,snapshot:EditorCodeSnapshot(id:UUID(),uri:"",path:"",text:"",version:0,language:language,root:root,remote:remote))
+        }
         NotificationCenter.default.addObserver(self,selector:#selector(languageToolsChanged(_:)),name:LanguageTools.changed,object:nil)
         recoveryTimer = Timer.scheduledTimer(withTimeInterval:2,repeats:true) { [weak self] _ in self?.persistRecovery() }
     }
@@ -125,7 +133,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         shell.addArrangedSubview(area)
         area.widthAnchor.constraint(equalTo:shell.widthAnchor).isActive = true
         area.heightAnchor.constraint(equalTo:rootView.heightAnchor,constant:-84).isActive = true
-        let footer = Theme.stack([modeLabel,NSView(),status]); footer.edgeInsets = NSEdgeInsets(top:0,left:16,bottom:0,right:20)
+        let footer = Theme.stack([modeLabel,languageStatus,NSView(),status]); footer.edgeInsets = NSEdgeInsets(top:0,left:16,bottom:0,right:20)
         footer.heightAnchor.constraint(equalToConstant:30).isActive = true; shell.addArrangedSubview(footer)
         footer.widthAnchor.constraint(equalTo:shell.widthAnchor).isActive = true
         setupActivity()
@@ -211,6 +219,10 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         view.setSelectedRange(NSRange(location:offset,length:0)); view.scrollRangeToVisible(view.selectedRange()); window?.makeFirstResponder(view)
     }
     private func showSymbols() {
+        if let current,codeSnapshot(current) != nil { indexedDocumentSymbols(); return }
+        showTextSymbols()
+    }
+    private func showTextSymbols() {
         guard let current else { return }
         let lines = current.buffer.text.components(separatedBy:"\n")
         let expression = try? NSRegularExpression(pattern:#"^\s*(?:(?:public|private|fileprivate|internal|open|final|static|export|async)\s+)*(?:struct|class|enum|protocol|func|function|def|interface|type)\s+([^\s({:]+)"#)
@@ -225,12 +237,13 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         if preferences == nil { preferences = PreferencesController(owner:self) }
         preferences?.showWindow(nil); preferences?.window?.makeKeyAndOrderFront(nil)
     }
+    var projectToolsReportLoader: ((Int) throws -> ProjectTools.Reports)?
     @objc func projectTools() {
-        guard let project = root?.url else { openFolder(); return }
+        guard let project = remoteConnection != nil ? URL(fileURLWithPath:remoteDirectory) : root?.url else { openFolder(); return }
         preserveEditorPosition()
         current = nil; activePane = nil; panes = []; markdownView = nil
         editors.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        editors.addArrangedSubview(ProjectTools(project:project))
+        editors.addArrangedSubview(ProjectTools(project:project,remote:remoteConnection,directory:remoteConnection == nil ? nil : remoteDirectory,owner:self,reportLoader:projectToolsReportLoader))
         renderTabs(); previewButton.isHidden = true; breadcrumb.stringValue = L.text("Project Tools")
         status.stringValue = L.text("Project-scoped tools"); modeLabel.stringValue = L.text("TOOLS")
         selectActivity(4)
@@ -331,6 +344,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
             guard mayCloseTerminal() else { return }; terminateTerminal()
             terminalHost?.removeFromSuperview(); terminalHost = nil; terminal = nil
         }
+        latestOpenRequest = nil
         remoteConnection = nil; remoteBrowser = nil
         root = FileNode(url.resolvingSymlinksInPath()); projectTitle.stringValue = url.lastPathComponent
         outline.reloadData(); UserDefaults.standard.set(url.path,forKey:"lastProject")
@@ -366,6 +380,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         }
     }
     func activate(_ document: OpenDocument) {
+        latestOpenRequest = nil
         preserveEditorPosition()
         if !documents.contains(where: { $0 === document }) { documents.append(document) }
         current = document
@@ -503,6 +518,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         terminal.terminate()
     }
     func windowWillClose(_ notification: Notification) {
+        picker?.dismiss(); picker = nil
         window?.undoManager?.removeAllActions(withTarget:self)
         completionPanel?.dismiss(); hoverPopover?.close(); languageServices.stop()
         languageQueries.values.forEach { $0.cancel() }; languageSyncs.values.forEach { $0.cancel() }; languageEdits.values.forEach { $0.cancel() }; autoSaveWork.values.forEach { $0.cancel() }

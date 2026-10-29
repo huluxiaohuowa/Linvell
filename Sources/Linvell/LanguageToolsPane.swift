@@ -98,7 +98,7 @@ final class LanguageToolsPane: NSView {
     }
     @objc func applyToolchain() {
         do {
-            var profile = LanguageToolchain()
+            var profile = LanguageTools.cached(language,remote:remote,root:root)
             profile.runtime = runtime.stringValue.trimmingCharacters(in:.whitespacesAndNewlines); profile.server = server.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)
             profile.arguments = try JSONDecoder().decode([String].self,from:Data(arguments.stringValue.utf8)); profile.enabled = enabled.state == .on
             profile.storage = selectedStorage; profile.addGitIgnore = autoIgnore.state == .on

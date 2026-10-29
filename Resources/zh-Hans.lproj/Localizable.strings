@@ -716,3 +716,57 @@
 "Installing in the selected location…" = "正在安装到所选位置…";
 
 "Uploading and installing in this project…" = "正在上传并安装语言服务…";
+
+"Recent Projects" = "最近项目";
+
+"This project folder is no longer available." = "此项目文件夹已不可用。";
+
+"Workspace Symbols" = "工作区符号";
+
+"Workspace Symbols…" = "工作区符号…";
+
+"Go to Declaration" = "转到声明";
+
+"Go to Type Definition" = "转到类型定义";
+
+"Go to Implementation" = "转到实现";
+
+"Parameter Hints" = "参数提示";
+
+"Format Document" = "格式化文档";
+
+"Type Definitions" = "类型定义";
+
+"Implementations" = "实现";
+
+"Declarations" = "声明";
+
+"Connected" = "已连接";
+
+"Service unavailable" = "语言服务不可用";
+
+"Analyzing…" = "正在分析…";
+
+"This symbol cannot be renamed." = "无法重命名此符号。";
+
+"Project → Project Settings" = "项目 → 项目设置";
+
+"Review this project’s executable paths in Project → Project Settings and apply them before running its language tools." = "请先在“项目 → 项目设置”中检查并应用可执行文件路径，再运行项目语言工具。";
+
+"Problems" = "问题";
+
+"Restart Language Services" = "重启语言服务";
+
+"Error" = "错误";
+
+"Warning" = "警告";
+
+"Information" = "信息";
+
+"Hint" = "提示";
+
+"Diagnostic" = "诊断";
+
+"Language intelligence is disabled for this language." = "此语言的代码智能功能已禁用。";
+
+"The language service does not support this action." = "此语言服务不支持这项操作。";

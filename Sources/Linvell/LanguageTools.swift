@@ -26,6 +26,15 @@ enum LanguageTools {
         }
         return CodeLanguage.forPath(path)
     }
+    static func refreshConfigurationIfChanged(remote: SSHRemote?,root: String) throws -> Bool {
+        let snapshot = try ProjectLanguageSettings.read(root:root,remote:remote)
+        let key = scope(remote:remote,root:root)
+        lock.lock(); let previous = records[key]; lock.unlock()
+        guard previous?.snapshot.data != snapshot.data else { return false }
+        try remember(snapshot)
+        lock.lock(); let current = records[key]; lock.unlock()
+        return previous?.profiles.mapValues({ fingerprint($0)+"|"+$0.configurationJSON }) != current?.profiles.mapValues({ fingerprint($0)+"|"+$0.configurationJSON }) || previous?.associations != current?.associations
+    }
     static func invalidate(remote: SSHRemote?,root: String) { lock.lock(); records.removeValue(forKey:scope(remote:remote,root:root)); lock.unlock() }
     private static func remember(_ snapshot: ProjectLanguageSettings) throws {
         let settings = try JSONCSettings(snapshot.data)
@@ -56,6 +65,7 @@ enum LanguageTools {
     static func save(_ profile: LanguageToolchain,language: CodeLanguage,remote: SSHRemote?,root: String) throws {
         writeLock.lock(); defer { writeLock.unlock() }
         var portable = profile
+        if let object = try JSONSerialization.jsonObject(with:Data(profile.configurationJSON.utf8)) as? [String:Any] { portable.configurationJSON = String(decoding:try JSONSerialization.data(withJSONObject:object,options:.sortedKeys),as:UTF8.self) }
         if portable.runtime.hasPrefix(root+"/") { portable.runtime = "${workspaceFolder}/"+portable.runtime.dropFirst(root.count+1) }
         if portable.server.hasPrefix(root+"/") { portable.server = "${workspaceFolder}/"+portable.server.dropFirst(root.count+1) }
         let original = try ProjectLanguageSettings.read(root:root,remote:remote)
@@ -86,6 +96,15 @@ enum LanguageTools {
             var result = input.replacingOccurrences(of:"${workspaceFolder}",with:root).replacingOccurrences(of:"${userHome}",with:home)
             if result.hasPrefix("~/") { result = home+String(result.dropFirst()) }
             return result
+        }
+        if let raw = try? JSONSerialization.jsonObject(with:Data(value.configurationJSON.utf8)) {
+            func expandValue(_ raw: Any) -> Any {
+                if let text = raw as? String { return expand(text) }
+                if let array = raw as? [Any] { return array.map(expandValue) }
+                if let object = raw as? [String:Any] { return object.mapValues(expandValue) }
+                return raw
+            }
+            if let data = try? JSONSerialization.data(withJSONObject:expandValue(raw),options:.sortedKeys) { value.configurationJSON = String(decoding:data,as:UTF8.self) }
         }
         value.runtime = expand(value.runtime); value.server = expand(value.server); value.arguments = value.arguments.map(expand)
         if let found = tools[value.runtime] { value.runtime = found }
@@ -126,13 +145,19 @@ enum LanguageTools {
             if language.id == "csharp",let runtimeDirectory { environment["DOTNET_ROOT"] = runtimeDirectory }
             rpc = try LanguageRPC(executable:URL(fileURLWithPath:executable),arguments:arguments,directory:URL(fileURLWithPath:root),environment:environment)
         }
-        do { return try LanguageSession(rpc:rpc,root:root,runtime:profile.runtime) } catch { rpc.stop(); throw error }
+        do { return try LanguageSession(rpc:rpc,root:root,runtime:profile.runtime,configuration:(try? JSONSerialization.jsonObject(with:Data(profile.configurationJSON.utf8))) as? [String:Any] ?? [:]) } catch { rpc.stop(); throw error }
     }
 }
 
 final class WorkspaceLanguageServices {
     let queue = DispatchQueue(label:"top.fuluwa.linvell.language-services",qos:.userInitiated)
+    var didCreateSession: ((LanguageSession,CodeLanguage,String,SSHRemote?) -> Void)?
     private var sessions: [String:LanguageSession] = [:]
+    private var backendIdentities: [String:String] = [:]
+    var activeBackendCount: Int { Set(sessions.values.map(ObjectIdentifier.init)).count }
+    var activeWatchCount: Int { fileWatches.count+remoteWatches.count }
+    private var remoteWatches: [String:RemoteLanguageWorkspaceWatch] = [:]
+    private var fileWatches: [String:LanguageWorkspaceWatch] = [:]
     private var tools: [String:[String:String]] = [:]
     private var failures: [String:(Date,Error)] = [:]
     func session(language: CodeLanguage,root: String,remote: SSHRemote?) throws -> LanguageSession {
@@ -143,27 +168,89 @@ final class WorkspaceLanguageServices {
     }
     private func makeSession(language: CodeLanguage,root: String,remote: SSHRemote?) throws -> LanguageSession {
         let key = (remote?.host ?? "local")+"|"+root+"|"+language.id
-        if let session = sessions[key],session.rpc.isRunning { return session }
+        if let session = sessions[key] {
+            if session.rpc.isRunning { return session }
+            for alias in Array(sessions.keys) where sessions[alias] === session { sessions.removeValue(forKey:alias); backendIdentities.removeValue(forKey:alias) }
+        }
         let scope = (remote?.host ?? "local")+"|"+root
         let available: [String:String]
         if let existing = tools[scope] { available = existing }
         else { available = try LanguageTools.discover(remote:remote,root:root); tools[scope] = available }
         let stored = try LanguageTools.load(language,remote:remote,root:root,force:true)
-        guard LanguageTools.approved(stored,language:language,remote:remote,root:root) else { throw LanguageServiceError.message("Review this project’s executable paths in Settings → Language Tools and apply them before running its language tools.") }
+        guard LanguageTools.approved(stored,language:language,remote:remote,root:root) else { throw LanguageServiceError.message("Review this project’s executable paths in Project → Project Settings and apply them before running its language tools.") }
         let profile = LanguageTools.resolved(stored,language:language,tools:available,root:root)
+        guard profile.enabled else { throw LanguageServiceError.message("Language intelligence is disabled for this language.") }
+        let identity = String(decoding:try JSONSerialization.data(withJSONObject:["runtime":profile.runtime,"server":profile.server,"arguments":profile.arguments,"configuration":profile.configurationJSON],options:.sortedKeys),as:UTF8.self)
+        if let existing = sessions.first(where:{ $0.key.hasPrefix(scope+"|") && backendIdentities[$0.key] == identity && $0.value.rpc.isRunning })?.value {
+            sessions[key] = existing; backendIdentities[key] = identity; return existing
+        }
         let session = try LanguageTools.launch(profile,language:language,root:root,remote:remote)
-        sessions[key] = session; return session
+        sessions[key] = session; backendIdentities[key] = identity
+        didCreateSession?(session,language,root,remote)
+        if remote == nil,fileWatches[scope] == nil {
+            fileWatches[scope] = LanguageWorkspaceWatch(root:root) { [weak self] paths,types in
+                self?.queue.async { [weak self] in self?.filesChanged(paths,root:root,remote:nil,eventTypes:types) }
+            }
+        }
+        if let remote,remoteWatches[scope] == nil {
+            remoteWatches[scope] = RemoteLanguageWorkspaceWatch(remote:remote,root:root) { [weak self] paths,types in
+                self?.queue.async { [weak self] in self?.filesChanged(paths,root:root,remote:remote,eventTypes:types) }
+            }
+        }
+        return session
+    }
+    func releaseUnusedBackends(root: String,remote: SSHRemote?) {
+        let scope = (remote?.host ?? "local")+"|"+root,prefix = scope+"|"
+        for key in Array(sessions.keys) where key.hasPrefix(prefix) {
+            guard let session = sessions[key],session.openDocumentCount == 0 else { continue }
+            session.rpc.shutdown()
+            for alias in Array(sessions.keys) where sessions[alias] === session { sessions.removeValue(forKey:alias); backendIdentities.removeValue(forKey:alias) }
+        }
+        if !sessions.keys.contains(where:{ $0.hasPrefix(prefix) }) { fileWatches.removeValue(forKey:scope); remoteWatches.removeValue(forKey:scope) }
+    }
+    func workspaceSymbols(query: String,root: String,remote: SSHRemote?,cancellation: LanguageRequestCancellation) throws -> [[String:Any]] {
+        let prefix = (remote?.host ?? "local")+"|"+root+"|"
+        var symbols: [[String:Any]] = []; var visited = Set<ObjectIdentifier>()
+        for (key,session) in sessions.sorted(by:{ $0.key < $1.key }) where key.hasPrefix(prefix) && session.rpc.isRunning {
+            if cancellation.isCancelled { throw CancellationError() }
+            guard visited.insert(ObjectIdentifier(session)).inserted else { continue }
+            guard session.capabilities["workspaceSymbolProvider"] != nil,session.capabilities["workspaceSymbolProvider"] as? Bool != false else { continue }
+            do { symbols += try session.rpc.request("workspace/symbol",params:["query":query],timeout:8,cancellation:cancellation) as? [[String:Any]] ?? [] }
+            catch is CancellationError { throw CancellationError() }
+            catch { continue }
+        }
+        return Array(symbols.prefix(10_000))
+    }
+    func filesChanged(_ paths: [String],root: String,remote: SSHRemote?,eventTypes: [Int]? = nil) {
+        let scope = (remote?.host ?? "local")+"|"+root,prefix = scope+"|"
+        if paths.contains(root+"/.linvell/settings.json"),(try? LanguageTools.refreshConfigurationIfChanged(remote:remote,root:root)) == true {
+            for key in Array(sessions.keys) where key.hasPrefix(prefix) { sessions.removeValue(forKey:key)?.rpc.shutdown(); backendIdentities.removeValue(forKey:key); failures.removeValue(forKey:key) }
+            tools.removeValue(forKey:scope); fileWatches.removeValue(forKey:scope); remoteWatches.removeValue(forKey:scope)
+            DispatchQueue.main.async { NotificationCenter.default.post(name:LanguageTools.changed,object:LanguageTools.scope(remote:remote,root:root)) }; return
+        }
+        let events = paths.enumerated().filter { !$0.element.contains("/.git/") && !$0.element.contains("/.linvell/tools/") && !$0.element.contains("/node_modules/") }.map { index,path -> [String:Any] in
+            let type = eventTypes.flatMap { $0.indices.contains(index) ? $0[index] : nil } ?? (FileManager.default.fileExists(atPath:path) || remote != nil ? 2 : 3)
+            return ["uri":URL(fileURLWithPath:path).absoluteString,"type":type]
+        }
+        guard !events.isEmpty else { return }
+        var visited = Set<ObjectIdentifier>()
+        for (key,session) in sessions where key.hasPrefix(prefix) && visited.insert(ObjectIdentifier(session)).inserted { session.rpc.notify("workspace/didChangeWatchedFiles",params:["changes":events]) }
     }
     func close(_ snapshot: EditorCodeSnapshot) {
         queue.async { [self] in
             let key = (snapshot.remote?.host ?? "local")+"|"+snapshot.root+"|"+snapshot.language.id
             guard let session = sessions[key] else { return }; session.close(uri:snapshot.uri)
-            if session.openDocumentCount == 0 { session.rpc.stop(); sessions.removeValue(forKey:key) }
+            if session.openDocumentCount == 0 {
+                session.rpc.shutdown()
+                for alias in Array(sessions.keys) where sessions[alias] === session { sessions.removeValue(forKey:alias); backendIdentities.removeValue(forKey:alias) }
+                let scope = (snapshot.remote?.host ?? "local")+"|"+snapshot.root
+                if !sessions.keys.contains(where:{ $0.hasPrefix(scope+"|") }) { fileWatches.removeValue(forKey:scope); remoteWatches.removeValue(forKey:scope) }
+            }
         }
     }
     func saved(_ snapshot: EditorCodeSnapshot) {
         queue.async { [self] in sessions[(snapshot.remote?.host ?? "local")+"|"+snapshot.root+"|"+snapshot.language.id]?.saved(uri:snapshot.uri,text:snapshot.text) }
     }
-    func stop() { queue.async { [self] in sessions.values.forEach { $0.rpc.stop() }; sessions.removeAll(); tools.removeAll(); failures.removeAll() } }
+    func stop() { queue.async { [self] in sessions.values.forEach { $0.rpc.stop() }; sessions.removeAll(); backendIdentities.removeAll(); fileWatches.removeAll(); remoteWatches.removeAll(); tools.removeAll(); failures.removeAll() } }
     deinit { sessions.values.forEach { $0.rpc.stop() } }
 }

@@ -3,10 +3,11 @@ import LinvellCore
 
 final class LanguageQueryTicket {
     private let lock = NSLock()
+    let cancellation = LanguageRequestCancellation()
     private var value = false
     private var action: (() -> Void)?
     var cancelled: Bool { lock.lock(); defer { lock.unlock() }; return value }
-    func cancel() { lock.lock(); value = true; action = nil; lock.unlock() }
+    func cancel() { lock.lock(); value = true; action = nil; lock.unlock(); cancellation.cancel() }
     func schedule(_ work: @escaping () -> Void) { lock.lock(); if !value { action = work }; lock.unlock() }
     func run() { lock.lock(); let work = value ? nil : action; action = nil; lock.unlock(); work?() }
 }
@@ -17,10 +18,11 @@ struct CodeNavigationPoint { let path: String,remote: SSHRemote?,offset: Int }
 
 extension WorkspaceController {
     func resetLanguageServices() {
+        picker?.dismiss(); picker = nil
         languageQueries.values.forEach { $0.cancel() }; languageQueries.removeAll()
         languageSyncs.values.forEach { $0.cancel() }; languageSyncs.removeAll()
         languageEdits.values.forEach { $0.cancel() }; languageEdits.removeAll()
-        completionPanel?.dismiss(); hoverPopover?.close(); languageServices.stop()
+        completionPanel?.dismiss(); hoverPopover?.close(); workspaceDiagnostics.removeAll(); languageCompletionTriggers.removeAll(); languageSignatureTriggers.removeAll(); workspaceDiagnosticCount = 0; languageStatus.stringValue = ""; languageServices.stop()
     }
     @objc func languageToolsChanged(_ notification: Notification) {
         if let scope = notification.object as? String,let current,let snapshot = codeSnapshot(current),scope != LanguageTools.scope(remote:snapshot.remote,root:snapshot.root) { return }
@@ -28,11 +30,12 @@ extension WorkspaceController {
         if let current { synchronizeLanguage(current) }
     }
     func codeDocumentSaved(_ document: OpenDocument,savedVersion: Int? = nil) {
+        if let metadata = codeSnapshot(document,forClosing:true) {
+            let directory = metadata.path.hasSuffix("/.linvell/settings.json") ? URL(fileURLWithPath:metadata.path).deletingLastPathComponent().deletingLastPathComponent().path : metadata.root
+            languageServices.queue.async { [services = languageServices] in services.filesChanged([metadata.path],root:directory,remote:metadata.remote) }
+        }
         if let savedVersion,savedVersion != document.buffer.revision { return }
         if let snapshot = codeSnapshot(document) { languageServices.saved(snapshot) }
-        guard let path = document.remote?.path ?? document.fileURL?.path,path.hasSuffix("/.linvell/settings.json") else { return }
-        let root = URL(fileURLWithPath:path).deletingLastPathComponent().deletingLastPathComponent().path
-        LanguageTools.invalidate(remote:document.remote?.connection,root:root); resetLanguageServices()
     }
     func codeSnapshot(_ document: OpenDocument,forClosing: Bool = false) -> EditorCodeSnapshot? {
         guard document.imageURL == nil,let path = document.remote?.path ?? document.fileURL?.path,forClosing || document.storage.length <= 2*1024*1024 else { return nil }
@@ -49,6 +52,8 @@ extension WorkspaceController {
             guard let self,let pane,self.current === pane.document else { return }
             if action != "hover" { self.activePane = pane; self.window?.makeFirstResponder(pane.textView) }
             switch action {
+            case "back": self.goBack()
+            case "forward": self.goForward()
             case "definition": self.goToDefinition(at:offset)
             case "hover": self.showCodeHover(at:offset,editor:pane.textView)
             case "references": self.findReferences()
@@ -57,6 +62,7 @@ extension WorkspaceController {
             default: break
             }
         }
+        pane.textView.codeHoverDismiss = { [weak self] in self?.hoverPopover?.close(); self?.hoverPopover = nil; self?.languageQueries["textDocument/hover"]?.cancel() }
         pane.textView.codeDismiss = { [weak self] in self?.completionPanel?.dismiss(); self?.hoverPopover?.close(); self?.languageQueries["textDocument/hover"]?.cancel(); self?.languageQueries["textDocument/completion"]?.cancel() }
         pane.textView.completionKey = { [weak self] event in
             guard let panel = self?.completionPanel,panel.isVisible else { return false }; return panel.handle(event)
@@ -78,7 +84,9 @@ extension WorkspaceController {
             guard self.current === document,let editor = self.activePane?.textView,!editor.hasMarkedText(),(!editor.vimEnabled || document.vim.mode == .insert) else { return }
             let at = editor.selectedRange().location,word = EditorTextView.codeWord(in:editor.string,at:at)
             let trigger = at > 0 ? (editor.string as NSString).substring(with:NSRange(location:at-1,length:1)) : ""
-            if at-word.location >= 2 || [".",":"].contains(trigger) { self.codeSuggestions(automatic:true) }
+            let key = self.codeSnapshot(document).map { LanguageTools.scope(remote:$0.remote,root:$0.root)+"|"+$0.language.id } ?? ""
+            if at-word.location >= 2 || (self.languageCompletionTriggers[key] ?? [".",":"]).contains(trigger) { self.codeSuggestions(automatic:true) }
+            if (self.languageSignatureTriggers[key] ?? ["(",","]).contains(trigger) { self.signatureHelp() }
         }
         languageEdits[document.buffer.id] = work
         DispatchQueue.main.asyncAfter(deadline:.now()+0.3,execute:work)
@@ -93,20 +101,50 @@ extension WorkspaceController {
                 let session = try services.session(language:snapshot.language,root:snapshot.root,remote:snapshot.remote)
                 guard !ticket.cancelled else { return }
                 self?.observeDiagnostics(session,snapshot:snapshot)
+                DispatchQueue.main.async { [weak self] in
+                    guard self?.current?.buffer.id == snapshot.id else { return }
+                    self?.languageStatus.stringValue = snapshot.language.title+" · "+L.text("Connected")
+                    let key = LanguageTools.scope(remote:snapshot.remote,root:snapshot.root)+"|"+snapshot.language.id
+                    self?.languageCompletionTriggers[key] = Set((session.capabilities["completionProvider"] as? [String:Any])?["triggerCharacters"] as? [String] ?? [])
+                    let signature = session.capabilities["signatureHelpProvider"] as? [String:Any]
+                    self?.languageSignatureTriggers[key] = Set((signature?["triggerCharacters"] as? [String] ?? [])+(signature?["retriggerCharacters"] as? [String] ?? []))
+                }
                 session.synchronize(uri:snapshot.uri,language:snapshot.language.documentID(path:snapshot.path),text:snapshot.text,version:snapshot.version)
-            } catch { /* Unavailable tools never interrupt editing. Explicit commands show the error. */ }
+                if let report = try session.pullDiagnostics(uri:snapshot.uri,cancellation:ticket.cancellation),report["kind"] as? String != "unchanged",let items = report["items"] as? [[String:Any]] {
+                    self?.receiveCodeDiagnostics(uri:snapshot.uri,values:items,version:snapshot.version,snapshot:snapshot)
+                    if let related = report["relatedDocuments"] as? [String:[String:Any]] {
+                        for (uri,report) in related where report["kind"] as? String != "unchanged" {
+                            self?.receiveCodeDiagnostics(uri:uri,values:report["items"] as? [[String:Any]] ?? [],version:report["version"] as? Int,snapshot:snapshot)
+                        }
+                    }
+                }
+            } catch is CancellationError { return }
+            catch {
+                DispatchQueue.main.async { [weak self] in
+                    guard !ticket.cancelled,self?.current?.buffer.id == snapshot.id else { return }
+                    self?.languageStatus.stringValue = snapshot.language.title+" · "+L.text("Service unavailable")
+                    self?.languageStatus.toolTip = L.existing(error.localizedDescription)
+                }
+            }
         }
         services.queue.async { ticket.run() }
     }
-    private func observeDiagnostics(_ session: LanguageSession,snapshot: EditorCodeSnapshot) {
-        session.rpc.notification = { [weak self] method,params in
-            guard method == "textDocument/publishDiagnostics",let uri = params["uri"] as? String,let values = params["diagnostics"] as? [[String:Any]],let data = try? JSONSerialization.data(withJSONObject:Array(values.prefix(500))),let diagnostics = try? JSONDecoder().decode([CodeDiagnostic].self,from:data) else { return }
-            DispatchQueue.main.async {
-                guard let self,let document = self.documents.first(where:{ self.codeSnapshot($0)?.uri == uri && $0.remote?.connection.host == snapshot.remote?.host }) else { return }
-                if let version = params["version"] as? Int,version != document.buffer.revision { return }
-                document.codeDiagnostics = diagnostics
-                for pane in self.panes where pane.document === document { pane.applyCodeDiagnostics() }
+    func observeDiagnostics(_ session: LanguageSession,snapshot: EditorCodeSnapshot) {
+        session.rpc.notification = { [weak self,weak session] method,params in
+            if method == "$/progress",let progress = params["value"] as? [String:Any] {
+                let text = progress["kind"] as? String == "end" ? L.text("Connected") : String((progress["title"] as? String ?? progress["message"] as? String ?? L.text("Analyzing…")).prefix(90))
+                let percentage = (progress["percentage"] as? Int).map { " \(max(0,min(100,$0)))%" } ?? ""
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    let active = self.current.flatMap { self.codeSnapshot($0) },root = self.remoteConnection == nil ? self.root?.url.path : self.remoteDirectory
+                    guard (active?.root == snapshot.root && active?.remote?.host == snapshot.remote?.host) || (root == snapshot.root && self.remoteConnection?.host == snapshot.remote?.host) else { return }
+                    self.languageStatus.stringValue = (active?.language.title ?? snapshot.language.title)+" · "+text+percentage
+                }
+                return
             }
+            if method == "workspace/diagnostic/refresh" { DispatchQueue.main.async { [weak self] in if let current = self?.current { self?.synchronizeLanguage(current) } }; return }
+            guard method == "textDocument/publishDiagnostics",let uri = params["uri"] as? String,let values = params["diagnostics"] as? [[String:Any]] else { return }
+            self?.receiveCodeDiagnostics(uri:uri,values:values,version:params["version"] as? Int ?? session?.synchronizedVersion(uri:uri),snapshot:snapshot)
         }
     }
     func languageRequest(_ method: String,at offset: Int? = nil,extra: [String:Any] = [:],quiet: Bool = false,completion: @escaping (Any,EditorCodeSnapshot) -> Void) {
@@ -115,6 +153,7 @@ extension WorkspaceController {
         }
         guard LanguageTools.cached(snapshot.language,remote:snapshot.remote,root:snapshot.root).enabled else { if !quiet { showLanguageTools() }; return }
         let at = min((snapshot.text as NSString).length,max(0,offset ?? editor.selectedRange().location))
+        let caretAtRequest = editor.selectedRange().location
         let row = document.lines.line(at:at),position = CodePosition(line:row,character:at-document.lines.starts[row])
         let snapshots = documents.compactMap { codeSnapshot($0) }.filter { $0.root == snapshot.root && $0.remote?.host == snapshot.remote?.host && $0.language.id == snapshot.language.id }
         let ticket = LanguageQueryTicket(); languageQueries.removeValue(forKey:method)?.cancel(); languageQueries[method] = ticket
@@ -124,6 +163,8 @@ extension WorkspaceController {
             guard !ticket.cancelled else { return }
             let result = Result { () throws -> Any in
                 let session = try services.session(language:snapshot.language,root:snapshot.root,remote:snapshot.remote)
+                let providerKeys = ["textDocument/hover":"hoverProvider","textDocument/definition":"definitionProvider","textDocument/typeDefinition":"typeDefinitionProvider","textDocument/implementation":"implementationProvider","textDocument/declaration":"declarationProvider","textDocument/references":"referencesProvider","textDocument/rename":"renameProvider","textDocument/documentSymbol":"documentSymbolProvider","textDocument/signatureHelp":"signatureHelpProvider","textDocument/formatting":"documentFormattingProvider","textDocument/completion":"completionProvider"]
+                if let key = providerKeys[method],session.capabilities[key] == nil || session.capabilities[key] as? Bool == false { throw LanguageServiceError.message("The language service does not support this action.") }
                 self?.observeDiagnostics(session,snapshot:snapshot)
                 for file in snapshots { session.synchronize(uri:file.uri,language:file.language.documentID(path:file.path),text:file.text,version:file.version) }
                 if method == "textDocument/rename",snapshot.language.id == "swift" {
@@ -131,13 +172,20 @@ extension WorkspaceController {
                 }
                 let timeout: TimeInterval = method == "textDocument/hover" ? 3 : method == "textDocument/completion" ? 4 : method == "textDocument/rename" ? 30 : 15
                 var params: [String:Any] = ["textDocument":["uri":snapshot.uri],"position":position.json]; extra.forEach { params[$0] = $1 }
-                return try session.rpc.request(method,params:params,timeout:timeout)
+                if method == "workspace/symbol" { return try services.workspaceSymbols(query:extra["query"] as? String ?? "",root:snapshot.root,remote:snapshot.remote,cancellation:ticket.cancellation) }
+                if method == "textDocument/rename",let rename = session.capabilities["renameProvider"] as? [String:Any],rename["prepareProvider"] as? Bool == true {
+                    let preparation = try session.rpc.request("textDocument/prepareRename",params:["textDocument":["uri":snapshot.uri],"position":position.json],timeout:8,cancellation:ticket.cancellation)
+                    guard !(preparation is NSNull) else { throw LanguageServiceError.message("This symbol cannot be renamed.") }
+                }
+                if method.hasPrefix("workspace/") { params = extra }
+                return try session.rpc.request(method,params:params,timeout:timeout,cancellation:ticket.cancellation)
             }
             DispatchQueue.main.async {
                 guard let self,!ticket.cancelled,self.current?.buffer.id == snapshot.id,self.current?.buffer.revision == snapshot.version else { return }
+                if ["textDocument/definition","textDocument/typeDefinition","textDocument/implementation","textDocument/declaration"].contains(method),self.activePane?.textView.selectedRange().location != caretAtRequest { return }
                 switch result {
                 case .success(let value): completion(value,snapshot)
-                case .failure(let error): if !quiet { self.status.stringValue = L.text(error.localizedDescription)+" · "+L.text("Settings → Language Tools") }
+                case .failure(let error): if !quiet { self.status.stringValue = L.text(error.localizedDescription)+" · "+L.text("Project → Project Settings") }
                 }
             }
         }
@@ -148,6 +196,7 @@ extension WorkspaceController {
     }
     @objc func definitionCommand() { goToDefinition() }
     func goToDefinition(at offset: Int? = nil) {
+        if let offset,let editor = activePane?.textView { editor.setSelectedRange(NSRange(location:min(max(0,offset),(editor.string as NSString).length),length:0)); editor.synchronizeNativeSelection() }
         completionPanel?.dismiss(); hoverPopover?.close()
         languageRequest("textDocument/definition",at:offset) { [weak self] value,snapshot in
             guard let self else { return }
@@ -163,7 +212,7 @@ extension WorkspaceController {
             do { self?.showCodeLocations(try CodeLocation.locations(value),remote:snapshot.remote,title:"References") } catch { self?.show(error) }
         }
     }
-    private func showCodeLocations(_ locations: [CodeLocation],remote: SSHRemote?,title: String) {
+    func showCodeLocations(_ locations: [CodeLocation],remote: SSHRemote?,title: String) {
         guard let window else { return }
         guard !locations.isEmpty else { status.stringValue = L.text("No symbol locations found."); return }
         let options = locations.prefix(2000).compactMap { location -> PickerOption? in
@@ -205,8 +254,10 @@ extension WorkspaceController {
     @objc func hoverCommand() { activePane?.textView.hoverOffset = nil; showCodeHover() }
     func showCodeHover(at offset: Int? = nil,editor chosen: EditorTextView? = nil) {
         let editor = chosen ?? activePane?.textView,at = offset ?? editor?.selectedRange().location ?? 0
+        let generation = editor?.hoverGeneration
+        let mouseTriggered = chosen != nil
         languageRequest("textDocument/hover",at:at,quiet:true) { [weak self,weak editor] value,_ in
-            guard let self,let editor,editor.window?.isVisible == true,(editor.hoverOffset == nil || editor.hoverOffset == at),let result = value as? [String:Any] else { return }
+            guard let self,let editor,editor.window?.isVisible == true,editor.hoverGeneration == generation,(!mouseTriggered || editor.hoverOffset == at),let result = value as? [String:Any] else { return }
             func plain(_ value: Any) -> String {
                 if let text = value as? String { return text }
                 if let values = value as? [Any] { return values.map(plain).joined(separator:"\n\n") }
@@ -215,10 +266,10 @@ extension WorkspaceController {
             let text = String(plain(result["contents"] ?? "").prefix(20_000))
             guard !text.isEmpty else { return }
             self.hoverPopover?.close()
-            let popover = NSPopover(); popover.behavior = .semitransient
+            let popover = CodeHoverPanel()
             popover.contentViewController = CodeHoverContent(text:text) { [weak self] in self?.goToDefinition(at:at) }
             let screen = editor.firstRect(forCharacterRange:NSRange(location:at,length:0),actualRange:nil)
-            let rect = editor.convert(editor.window?.convertFromScreen(screen) ?? .zero,from:nil)
+            let rect = mouseTriggered ? NSRect(x:editor.hoverAnchor.x,y:editor.hoverAnchor.y,width:1,height:1) : editor.convert(editor.window?.convertFromScreen(screen) ?? .zero,from:nil)
             self.hoverPopover = popover; popover.show(relativeTo:rect,of:editor,preferredEdge:.maxY)
         }
     }

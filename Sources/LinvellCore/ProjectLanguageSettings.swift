@@ -28,12 +28,23 @@ public struct JSONCSettings {
         profile.enabled = object["linvell.languageServiceEnabled"] as? Bool ?? true
         profile.storage = (object["linvell.languageServiceStorage"] as? String).flatMap(LanguageToolStorage.init(rawValue:)) ?? .project
         profile.addGitIgnore = object["linvell.languageServiceAddGitIgnore"] as? Bool ?? true
+        var configuration: [String:Any] = [:]
+        let aliases = language == "python" ? ["python","pylsp","pyright","basedpyright"] : ["javascript","typescript"].contains(language) ? ["javascript","typescript"] : ["c","cpp","objective-c"].contains(language) ? ["clangd"] : [language]
+        for (key,value) in values.sorted(by:{ $0.key < $1.key }) where aliases.contains(key.components(separatedBy:".").first ?? "") {
+            LanguageConfiguration.insert(value,path:ArraySlice(key.components(separatedBy:".")),into:&configuration)
+        }
+        configuration = LanguageConfiguration.merge(configuration,object["linvell.languageServerSettings"] as? [String:Any] ?? [:])
+        profile.configurationJSON = String(decoding:(try? JSONSerialization.data(withJSONObject:configuration,options:.sortedKeys)) ?? Data("{}".utf8),as:UTF8.self)
         return profile
     }
     public func updating(_ language: String,profile: LanguageToolchain) throws -> Data {
         var result = data
         for (key,value) in [("linvell.interpreterPath",profile.runtime as Any),("linvell.languageServerPath",profile.server as Any),("linvell.languageServerArguments",profile.arguments as Any),("linvell.languageServiceEnabled",profile.enabled as Any),("linvell.languageServiceStorage",profile.storage.rawValue as Any),("linvell.languageServiceAddGitIgnore",profile.addGitIgnore as Any)] {
             result = try Self.set(result,path:["["+language+"]"],key:key,value:value)
+        }
+        if profile.configurationJSON != setting(language).configurationJSON {
+            guard let object = try JSONSerialization.jsonObject(with:Data(profile.configurationJSON.utf8)) as? [String:Any] else { throw ProjectSettingsError.invalidJSONC }
+            result = try Self.set(result,path:["["+language+"]"],key:"linvell.languageServerSettings",value:object)
         }
         return result
     }

@@ -51,6 +51,8 @@ public struct RemoteEntry: Decodable, Equatable {
     public let directory: Bool
 }
 public struct RemoteReply: Decodable {
+    public let fileStates: [String:String]?
+    public let reports: [[String]]?
     public let installTarget: LanguageInstallTarget?
     public let path: String?
     public let entries: [RemoteEntry]?
@@ -168,6 +170,53 @@ try:
                     if os.path.exists(temporary): os.unlink(temporary)
         value,checksum=readsettings()
         reply=dict(path=config,content=base64.b64encode(value).decode(),digest=checksum)
+    elif op=='language-file-states':
+        states={};truncated=False
+        excluded={'.git','node_modules','.venv','venv','__pycache__','build','dist','.build'}
+        extensions={'swift','py','pyi','js','jsx','mjs','cjs','ts','tsx','c','h','cpp','hpp','cc','m','mm','go','rs','java','kt','cs','rb','php','sh','lua','r','dart','html','css','scss','json','toml','yaml','yml','v','sv','vhd','vhdl','csproj','fsproj','vbproj','sln','slnx','props','targets'}
+        for directory,dirs,names in os.walk(path,followlinks=False):
+            dirs[:]=[name for name in dirs if name not in excluded and not os.path.islink(os.path.join(directory,name)) and not (name=='tools' and os.path.basename(directory)=='.linvell')]
+            for name in names:
+                if name.rsplit('.',1)[-1].lower() not in extensions and name not in {'go.mod','go.sum','Cargo.lock','Package.resolved','Makefile','CMakeLists.txt','compile_flags.txt','requirements.txt','Gemfile','Gemfile.lock','composer.lock','yarn.lock'}:continue
+                filename=os.path.join(directory,name)
+                try:
+                    item=os.lstat(filename)
+                    if stat.S_ISREG(item.st_mode):states[filename]=str(item.st_mtime_ns)+':'+str(item.st_size)
+                except OSError:continue
+                if len(states)>=20000:truncated=True;break
+            if truncated:break
+        if truncated:raise ValueError('Remote source watch exceeds 20,000 files; narrow the project folder.')
+        fingerprint=hashlib.sha256(json.dumps(states,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+        reply=dict(path=path,digest=fingerprint)
+        if fingerprint!=req.get('digest'):reply['fileStates']=states
+    elif op=='project-tools':
+        import subprocess,platform,shutil
+        section=int(base64.b64decode(req.get('content','MA==')))
+        def command(args):
+            try:
+                with tempfile.TemporaryFile() as output:
+                    result=subprocess.run(args,cwd=path,stdout=output,stderr=subprocess.STDOUT,timeout=5,env=dict(os.environ,GIT_TERMINAL_PROMPT='0',GIT_OPTIONAL_LOCKS='0',DOTNET_CLI_TELEMETRY_OPTOUT='1'))
+                    output.seek(0);return output.read(128*1024).decode('utf-8',errors='replace').strip()
+            except Exception as error:return str(error)
+        def git(args):return command(['git','--no-optional-locks','-c','core.fsmonitor=false']+args)
+        reports=[]
+        if section==0:
+            versions=[]
+            for label,tool in [('Node','node'),('npm','npm'),('Python','python3'),('Swift','swift'),('.NET','dotnet')]:
+                versions.append(label+'\n'+(command([tool,'--version']) if shutil.which(tool) else 'Not installed'))
+            reports=[['Installed runtimes','\n\n'.join(versions)],['Git status',git(['status','--short','--branch'])]]
+        elif section==1:
+            for name in ['package.json','requirements.txt','.nvmrc','.node-version','.python-version','.tool-versions','global.json','pyproject.toml','Package.swift','Cargo.toml','go.mod']:
+                filename=os.path.join(path,name)
+                if os.path.isfile(filename):
+                    with open(filename,'rb') as source:reports.append([name,source.read(128*1024).decode('utf-8',errors='replace')])
+            if not reports:reports=[['Project manifests','No supported manifest was found at this project root.']]
+        elif section==2:
+            reports=[['Recent commits',git(['log','-n','15','--date=short','--format=%h  %ad  %s'])],['Collaborators',git(['shortlog','-sn','HEAD'])]]
+        else:
+            usage=shutil.disk_usage(path)
+            reports=[['System',platform.platform()+'\n'+str(os.cpu_count())+' logical cores'],['Project volume','Available: '+str(usage.free)+' bytes\nCapacity: '+str(usage.total)+' bytes']]
+        reply=dict(path=os.path.realpath(path),reports=reports)
     elif op=='language-tool-probe':
         import platform,shutil,subprocess
         node=shutil.which('node') or ''

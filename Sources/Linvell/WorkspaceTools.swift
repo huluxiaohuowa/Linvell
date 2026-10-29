@@ -35,6 +35,10 @@ final class QuickPicker: NSWindowController, NSTableViewDataSource, NSTableViewD
     let input = NSSearchField()
     let table = ResponsiveTableView()
     let options: [PickerOption]
+    var onDismiss: (() -> Void)?
+    var onQuery: ((String,@escaping ([PickerOption]) -> Void) -> Void)? { didSet { controlTextDidChange(Notification(name:NSControl.textDidChangeNotification)) } }
+    private var queryWork: DispatchWorkItem?
+    private var queryGeneration = UUID()
     var results: [PickerOption] = []
     weak var parentWindow: NSWindow?
     init(title: String,options: [PickerOption],owner: NSWindow) {
@@ -66,7 +70,19 @@ final class QuickPicker: NSWindowController, NSTableViewDataSource, NSTableViewD
     }
     func controlTextDidChange(_ notification: Notification) {
         let query = input.stringValue
-        results = Array(options.filter { ProjectFiles.matches(query,$0.title+" "+$0.detail) }.prefix(80))
+        queryWork?.cancel(); queryGeneration = UUID()
+        if let onQuery {
+            let generation = queryGeneration
+            let work = DispatchWorkItem { [weak self] in
+                onQuery(query) { [weak self] options in
+                    guard let self,self.queryGeneration == generation,self.window?.sheetParent != nil else { return }
+                    self.results = Array(options.prefix(500)); self.table.reloadData()
+                    if !self.results.isEmpty { self.table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false) }
+                }
+            }
+            queryWork = work; DispatchQueue.main.asyncAfter(deadline:.now()+0.2,execute:work); return
+        }
+        results = Array(options.lazy.filter { ProjectFiles.matches(query,$0.title+" "+$0.detail) }.prefix(80))
         table.reloadData(); if !results.isEmpty { table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false) }
     }
     func control(_ control: NSControl,textView: NSTextView,doCommandBy selector: Selector) -> Bool {
@@ -82,7 +98,7 @@ final class QuickPicker: NSWindowController, NSTableViewDataSource, NSTableViewD
         guard !results.isEmpty else { return }
         let index = min(max(row,0),results.count-1); table.selectRowIndexes(IndexSet(integer:index),byExtendingSelection:false); table.scrollRowToVisible(index)
     }
-    private func dismiss() { if let panel = window { parentWindow?.endSheet(panel); panel.orderOut(nil) } }
+    func dismiss() { queryGeneration = UUID(); queryWork?.cancel(); let callback = onDismiss; onDismiss = nil; callback?(); if let panel = window { if panel.sheetParent != nil { parentWindow?.endSheet(panel) }; panel.orderOut(nil) } }
     @objc private func choose() { guard table.selectedRow >= 0,table.selectedRow < results.count else { return }; let result = results[table.selectedRow]; dismiss(); result.invoke() }
 }
 

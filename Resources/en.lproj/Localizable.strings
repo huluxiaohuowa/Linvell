@@ -716,3 +716,57 @@
 "Installing in the selected location…" = "Installing in the selected location…";
 
 "Uploading and installing in this project…" = "Uploading and installing in this project…";
+
+"Recent Projects" = "Recent Projects";
+
+"This project folder is no longer available." = "This project folder is no longer available.";
+
+"Workspace Symbols" = "Workspace Symbols";
+
+"Workspace Symbols…" = "Workspace Symbols…";
+
+"Go to Declaration" = "Go to Declaration";
+
+"Go to Type Definition" = "Go to Type Definition";
+
+"Go to Implementation" = "Go to Implementation";
+
+"Parameter Hints" = "Parameter Hints";
+
+"Format Document" = "Format Document";
+
+"Type Definitions" = "Type Definitions";
+
+"Implementations" = "Implementations";
+
+"Declarations" = "Declarations";
+
+"Connected" = "Connected";
+
+"Service unavailable" = "Service unavailable";
+
+"Analyzing…" = "Analyzing…";
+
+"This symbol cannot be renamed." = "This symbol cannot be renamed.";
+
+"Project → Project Settings" = "Project → Project Settings";
+
+"Review this project’s executable paths in Project → Project Settings and apply them before running its language tools." = "Review this project’s executable paths in Project → Project Settings and apply them before running its language tools.";
+
+"Problems" = "Problems";
+
+"Restart Language Services" = "Restart Language Services";
+
+"Error" = "Error";
+
+"Warning" = "Warning";
+
+"Information" = "Information";
+
+"Hint" = "Hint";
+
+"Diagnostic" = "Diagnostic";
+
+"Language intelligence is disabled for this language." = "Language intelligence is disabled for this language.";
+
+"The language service does not support this action." = "The language service does not support this action.";
