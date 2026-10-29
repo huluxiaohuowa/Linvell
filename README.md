@@ -16,7 +16,7 @@ Requires macOS 15.6+, Xcode and its command-line tools.
 
 ```sh
 ./script/build_and_run.sh
-swift test
+swift test --scratch-path "$HOME/dev/build/linvell/swiftpm" --cache-path "$HOME/dev/build/linvell/cache" --config-path "$HOME/dev/build/linvell/config" --security-path "$HOME/dev/build/linvell/security"
 ```
 
 The Codex Run action uses the same script. Build outputs are kept outside the repository under `~/dev/build/linvell`. `--demo` opens the public sample workspace, `--build-only` stages the app without launching, and `--debug` starts LLDB.
@@ -34,6 +34,8 @@ iCloud Drive can synchronize the preference allowlist in `Linvell/Preferences.js
 Read the bilingual [usage guide](https://linvell.fuluwa.top/guide.html) for SSH workspaces, local/remote run and web preview, Git Graph, VS Code-style shortcuts and normal/Vim multi-selection editing. Guide source is maintained in [linvell-web](https://github.com/huluxiaohuowa/linvell-web/tree/main/docs).
 
 SSH uses the system configuration and authentication; the remote file protocol needs Python 3. This is a native remote editing and running workflow, without a VS Code extension or debug-adapter host.
+
+Version 0.1.7 adds optional auto-save, semantic navigation/completion/rename, project-local multilingual toolchains, submodule management and extended native Git operation forms/console. See [development status](docs/STATUS.md) for tested behavior and limits. Bilingual draft instructions are maintained in the sibling `linvell-web` repository as `docs/development-next.en.md` and `docs/development-next.zh.md`.
 
 ## Distribution
 

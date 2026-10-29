@@ -25,7 +25,12 @@ public final class DocumentBuffer {
     public private(set) var lineEnding = "\n"
     public private(set) var hasMixedLineEndings = false
     private var diskDigest: Data?
-    public var isModified: Bool { text != savedText || url == nil && !text.isEmpty }
+    private var modificationCheck: (Int,Bool)?
+    public var isModified: Bool {
+        if let (checked,result) = modificationCheck,checked == revision { return result }
+        let result = text != savedText || url == nil && !text.isEmpty
+        modificationCheck = (revision,result); return result
+    }
     public var displayName: String { url?.lastPathComponent ?? "Untitled" }
     public var formatLabel: String {
         let name = encoding == .utf8 ? "UTF-8" : encoding == .utf16LittleEndian ? "UTF-16 LE" : "UTF-16 BE"
@@ -75,19 +80,49 @@ public final class DocumentBuffer {
         text = value; revision += 1
     }
 
-    public func save(to destination: URL? = nil) throws {
-        guard let target = (destination ?? url)?.resolvingSymlinksInPath() else { throw CocoaError(.fileNoSuchFile) }
-        let sameFile = target == url
-        if sameFile, let digest = diskDigest {
-            guard let current = try? Data(contentsOf: target), Self.digest(current) == digest else { throw DocumentError.externalChange }
+    /// Immutable capture for background I/O. Completing an older save never clears newer edits.
+    public struct SaveSnapshot {
+        public let target: URL
+        public let text: String
+        public let revision: Int
+        private let baseline: Data?
+        private let encoding: String.Encoding
+        private let bom: Bool
+        private let ending: String
+        private let mixed: Bool
+        fileprivate init(_ buffer: DocumentBuffer,target: URL) {
+            self.target = target; text = buffer.text; revision = buffer.revision
+            baseline = target == buffer.url ? buffer.diskDigest : nil
+            encoding = buffer.encoding; bom = buffer.hasBOM; ending = buffer.lineEnding; mixed = buffer.hasMixedLineEndings
         }
-        let data = try dataForSaving()
-        let fm = FileManager.default
-        let attributes = try? fm.attributesOfItem(atPath: target.path)
-        try data.write(to: target, options: .atomic)
-        if let mode = attributes?[.posixPermissions] { try fm.setAttributes([.posixPermissions: mode], ofItemAtPath: target.path) }
-        guard try Data(contentsOf: target) == data else { throw CocoaError(.fileWriteUnknown) }
-        url = target; diskDigest = Self.digest(data); savedText = text
+        public func data() throws -> Data {
+            guard !mixed else { throw DocumentError.mixedLineEndings }
+            guard var result = text.replacingOccurrences(of:"\n",with:ending).data(using:encoding,allowLossyConversion:false) else { throw DocumentError.encodingFailure }
+            if bom { result.insert(contentsOf:encoding == .utf8 ? [0xEF,0xBB,0xBF] : encoding == .utf16LittleEndian ? [0xFF,0xFE] : [0xFE,0xFF],at:0) }
+            return result
+        }
+        public func write() throws -> Data {
+            if let baseline {
+                guard let current = try? Data(contentsOf:target),DocumentBuffer.digest(current) == baseline else { throw DocumentError.externalChange }
+            }
+            let bytes = try data(),fm = FileManager.default
+            let attributes = try? fm.attributesOfItem(atPath:target.path)
+            try bytes.write(to:target,options:.atomic)
+            if let mode = attributes?[.posixPermissions] { try fm.setAttributes([.posixPermissions:mode],ofItemAtPath:target.path) }
+            guard try Data(contentsOf:target) == bytes else { throw CocoaError(.fileWriteUnknown) }
+            return DocumentBuffer.digest(bytes)
+        }
+    }
+    public func saveSnapshot(to destination: URL? = nil) throws -> SaveSnapshot {
+        guard let target = (destination ?? url)?.resolvingSymlinksInPath() else { throw CocoaError(.fileNoSuchFile) }
+        return SaveSnapshot(self,target:target)
+    }
+    public func completeSave(_ snapshot: SaveSnapshot,digest: Data) {
+        url = snapshot.target; savedText = snapshot.text; diskDigest = digest; modificationCheck = nil
+    }
+    public func save(to destination: URL? = nil) throws {
+        let snapshot = try saveSnapshot(to:destination)
+        completeSave(snapshot,digest:try snapshot.write())
     }
 
     public func dataForSaving() throws -> Data {

@@ -20,7 +20,17 @@ do {
         if Date() > deadline { throw CocoaError(.userCancelled) }
         Thread.sleep(forTimeInterval:0.2)
     }
+    try job.unpackArchive(jobURL:jobURL)
+    defer {
+        RollbackArchive.unregister(job.replacement)
+        if job.archive != nil { try? FileManager.default.removeItem(at:job.replacement) }
+    }
     let previous = try SignedUpdate.install(current:job.application,candidate:job.replacement)
+    // The extracted candidate is no longer needed after the atomic installation.
+    // Unregister it while it still exists; deletion alone leaves a Finder handler.
+    RollbackArchive.unregister(job.replacement)
+    try? FileManager.default.removeItem(at:job.replacement)
+    try? FileManager.default.removeItem(at:jobURL.deletingLastPathComponent().appendingPathComponent("update.zip"))
     if job.relaunch {
         let launch = Process(); launch.executableURL = URL(fileURLWithPath:"/usr/bin/open"); launch.arguments = ["-n",job.application.path]
         try launch.run(); launch.waitUntilExit()

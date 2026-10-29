@@ -15,6 +15,16 @@ final class FileNode: NSObject {
 
 final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutlineViewDataSource, NSOutlineViewDelegate, NSSearchFieldDelegate {
     var documents: [OpenDocument] = []
+    let languageServices = WorkspaceLanguageServices()
+    var languageEdits: [UUID:DispatchWorkItem] = [:]
+    var languageSyncs: [UUID:LanguageQueryTicket] = [:]
+    var languageQueries: [String:LanguageQueryTicket] = [:]
+    var navigationBack: [CodeNavigationPoint] = [],navigationForward: [CodeNavigationPoint] = []
+    var completionPanel: CodeCompletionPanel?
+    var hoverPopover: NSPopover?
+    var autoSaveWork: [UUID:DispatchWorkItem] = [:]
+    var autoSaving: Set<UUID> = []
+    let saveQueue = DispatchQueue(label:"top.fuluwa.linvell.autosave",qos:.utility)
     var current: OpenDocument?
     var activePane: EditorPane?
     var panes: [EditorPane] = []
@@ -59,6 +69,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     var remoteBrowser: RemoteExplorer?
     var remoteFolderPicker: RemoteFolderPicker?
     var runWorkspaceView: RunWorkspace?
+    var gitWorkspaceView: GitWorkspace?
 
     init() {
         let support = FileManager.default.urls(for:.applicationSupportDirectory,in:.userDomainMask).first!.appendingPathComponent("Linvell/Recovery",isDirectory:true)
@@ -71,10 +82,11 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         window.minSize = NSSize(width:800,height:540); window.delegate = self
         window.setFrameAutosaveName("Linvell.Workspace"); window.center()
         buildUI(); showWelcome()
+        NotificationCenter.default.addObserver(self,selector:#selector(languageToolsChanged(_:)),name:LanguageTools.changed,object:nil)
         recoveryTimer = Timer.scheduledTimer(withTimeInterval:2,repeats:true) { [weak self] _ in self?.persistRecovery() }
     }
     required init?(coder: NSCoder) { fatalError() }
-    deinit { recoveryTimer?.invalidate() }
+    deinit { recoveryTimer?.invalidate(); NotificationCenter.default.removeObserver(self) }
 
     func buildUI() {
         guard let rootView = window?.contentView else { return }
@@ -209,7 +221,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         picker = QuickPicker(title:L.text("Document symbols (text-based)"),options:options,owner:window!)
     }
     @objc func showSettings() {
-        if preferences == nil { preferences = PreferencesController() }
+        if preferences == nil { preferences = PreferencesController(owner:self) }
         preferences?.showWindow(nil); preferences?.window?.makeKeyAndOrderFront(nil)
     }
     @objc func projectTools() {
@@ -227,13 +239,25 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         if let remoteConnection { repository = gitRepositoryFactory(remoteConnection,remoteDirectory) }
         else if let project = root?.url { repository = GitRepository(root:project) }
         else { openFolder(); return }
+        if let previous = gitWorkspaceView,previous.workspaceDirectory != repository.directory || previous.repository.remote?.host != repository.remote?.host {
+            guard !previous.running else { status.stringValue = L.text("Finish the current Git operation first."); return }
+            previous.shutdown(); gitWorkspaceView = nil
+        }
         preserveEditorPosition()
         current = nil; activePane = nil; panes = []; markdownView = nil
         editors.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        let git = GitWorkspace(repository:repository)
+        let git = gitWorkspaceView ?? GitWorkspace(repository:repository); gitWorkspaceView = git
         git.onOpen = { [weak self] url in
             if let remote = repository.remote { self?.openRemote(url.path,connection:remote) }
             else { self?.open(url) }
+        }
+        git.onOpenRepository = { [weak self] repo in
+            guard let self else { return }
+            if let remote = repo.remote {
+                self.connectToSSH(remote.host,folder:repo.directory)
+                guard self.remoteConnection?.host == remote.host,self.remoteDirectory == repo.directory else { return }
+            } else { self.setProject(repo.root); guard self.root?.url == repo.root else { return } }
+            self.gitWorkspace()
         }
         editors.addArrangedSubview(git); editors.adjustSubviews(); renderTabs()
         previewButton.isHidden = true; breadcrumb.stringValue = L.text("Source Control")
@@ -297,13 +321,17 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         p.beginSheetModal(for:window!) { [weak self] result in if result == .OK, let url = p.url { self?.setProject(url) } }
     }
     func setProject(_ url: URL) {
+        if root?.url.path != url.resolvingSymlinksInPath().path,gitWorkspaceView?.running == true {
+            status.stringValue = L.text("Finish the current Git operation first."); return
+        }
+        resetLanguageServices()
         let wasRemote = remoteConnection != nil
         if wasRemote {
             guard mayCloseTerminal() else { return }; terminateTerminal()
             terminalHost?.removeFromSuperview(); terminalHost = nil; terminal = nil
         }
         remoteConnection = nil; remoteBrowser = nil
-        root = FileNode(url); projectTitle.stringValue = url.lastPathComponent
+        root = FileNode(url.resolvingSymlinksInPath()); projectTitle.stringValue = url.lastPathComponent
         outline.reloadData(); UserDefaults.standard.set(url.path,forKey:"lastProject")
         WorkspaceSession.save(.local(path:url.path))
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
@@ -359,6 +387,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         window?.title = "\(document.displayName) — Linvell"
     }
     private func preserveEditorPosition() {
+        completionPanel?.dismiss(); hoverPopover?.close(); languageQueries["textDocument/completion"]?.cancel(); languageQueries["textDocument/hover"]?.cancel()
         if let pane = activePane {
             pane.document.lastScroll = pane.scrollAnchor
             pane.document.lastSelections = pane.textView.editingSelections
@@ -369,17 +398,19 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         pane.translatesAutoresizingMaskIntoConstraints = false
         pane.onFocus = { [weak self,weak pane] in self?.activePane = pane }
         pane.onChange = { [weak self] in self?.updateStatus(); self?.updateTabTitles() }
-        pane.onTextChanged = { [weak self] in self?.markdownView?.render(document.buffer.text) }
+        pane.onTextChanged = { [weak self] in self?.markdownView?.render(document.buffer.text); self?.scheduleAutoSave(document); self?.languageDocumentChanged(document) }
         pane.textView.exCommand = { [weak self] prefix in self?.showEx(prefix) }
+        configureLanguageEditor(pane)
         panes.append(pane); return pane
     }
-    private func renderTabs() {
+    func renderTabs() {
         tabs.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for (index,doc) in documents.enumerated() {
             let b = NSButton(title:doc.displayName,target:self,action:#selector(tabClicked(_:)))
             b.tag = index; b.bezelStyle = .inline; b.isBordered = false; b.font = .systemFont(ofSize:13,weight:doc === current ? .semibold : .regular)
             b.contentTintColor = doc === current ? Theme.foreground : Theme.secondary
-            let close = Theme.button("xmark",help:L.format("Close %@",doc.displayName),target:self,action:#selector(closeTab(_:))); close.tag = index
+            let close = TabCloseButton(); close.target = self; close.action = #selector(closeTab(_:)); close.tag = index
+            close.toolTip = L.format("Close %@",doc.displayName); close.setAccessibilityLabel(close.toolTip)
             let icon = FileIcon.view(for:doc.fileURL)
             let row = Theme.stack([icon,b,close],spacing:10); row.edgeInsets = NSEdgeInsets(top:0,left:16,bottom:0,right:6)
             row.heightAnchor.constraint(equalToConstant:42).isActive = true
@@ -389,10 +420,11 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         }
         updateTabTitles()
     }
-    private func updateTabTitles() {
+    func updateTabTitles() {
         for (i,row) in tabs.arrangedSubviews.enumerated() {
             guard i < documents.count,let b = (row as? NSStackView)?.arrangedSubviews.compactMap({ $0 as? NSButton }).first else { continue }
-            b.title = documents[i].displayName + (documents[i].buffer.isModified ? "  •" : "")
+            b.title = documents[i].displayName
+            ((row as? NSStackView)?.arrangedSubviews.last as? TabCloseButton)?.modified = documents[i].buffer.isModified
         }
         window?.isDocumentEdited = documents.contains { $0.buffer.isModified }
     }
@@ -400,8 +432,11 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     @objc private func closeTab(_ sender: NSButton) { closeDocument(documents[sender.tag]) }
     @objc func closeCurrent() { if let current { closeDocument(current) } }
     private func closeDocument(_ doc: OpenDocument) {
+        autoSaveWork.removeValue(forKey:doc.buffer.id)?.cancel()
         guard mayClose(doc) else { return }
         do { try recovery.remove(doc.buffer.id) } catch { show(error); return }
+        if let snapshot = codeSnapshot(doc) { languageServices.close(snapshot) }
+        languageEdits.removeValue(forKey:doc.buffer.id)?.cancel()
         documents.removeAll { $0 === doc }
         if current === doc {
             if let next = documents.last { activate(next) } else { current = nil; renderTabs(); showWelcome(); updateStatus() }
@@ -412,12 +447,14 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     @objc func saveAs() { if let current { _ = saveDocument(current,asCopy:true) } }
     @discardableResult func saveDocument(_ doc: OpenDocument, asCopy: Bool = false) -> Bool {
         guard doc.imageURL == nil else { return true }
+        autoSaveWork.removeValue(forKey:doc.buffer.id)?.cancel()
+        guard !autoSaving.contains(doc.buffer.id) else { status.stringValue = L.text("Saving changes…"); return false }
         if let remote = doc.remote,!asCopy {
             do {
                 let data = try doc.buffer.dataForSaving()
                 try RemoteProgress.perform("Saving remote file…") { try remote.save(data) }
                 try doc.buffer.save(); try recovery.remove(doc.buffer.id)
-                renderTabs(); updateStatus(); return true
+                codeDocumentSaved(doc); renderTabs(); updateStatus(); return true
             } catch { show(error); return false }
         }
         var destination: URL?
@@ -428,17 +465,23 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         do {
             try doc.buffer.save(to:destination); try recovery.remove(doc.buffer.id)
             if asCopy { doc.remote = nil }
-            renderTabs(); updateStatus(); return true
+            codeDocumentSaved(doc); renderTabs(); updateStatus(); return true
         } catch { show(error); return false }
     }
     func mayClose(_ doc: OpenDocument) -> Bool {
+        guard !autoSaving.contains(doc.buffer.id) else { status.stringValue = L.text("Saving changes…"); return false }
         guard doc.buffer.isModified else { return true }
         let a = NSAlert(); a.messageText = L.format("Save changes to %@?",doc.buffer.displayName); a.informativeText = L.text("Your changes will be lost if you discard them.")
         a.addButton(withTitle:L.text("Save")); a.addButton(withTitle:L.text("Cancel")); a.addButton(withTitle:L.text("Discard"))
         switch a.runModal() { case .alertFirstButtonReturn: return saveDocument(doc); case .alertThirdButtonReturn: return true; default: return false }
     }
-    func windowShouldClose(_ sender: NSWindow) -> Bool { documents.allSatisfy(mayClose) && mayCloseTerminal() }
+    func windowShouldClose(_ sender: NSWindow) -> Bool { autoSaveWork.values.forEach { $0.cancel() }; autoSaveWork.removeAll(); return documents.allSatisfy(mayClose) && mayCloseTerminal() }
     func mayCloseTerminal() -> Bool {
+        if gitWorkspaceView?.running == true {
+            let alert = NSAlert(); alert.messageText = L.text("Finish the current Git operation first.")
+            alert.informativeText = L.text("Close the interactive Git console with Stop Console, or wait for the operation to finish.")
+            alert.runModal(); return false
+        }
         if let runWorkspaceView,!runWorkspaceView.mayClose() { return false }
         guard terminal?.process.running == true else { return true }
         let alert = NSAlert(); alert.messageText = L.text("Close this terminal session?"); alert.informativeText = L.text("The shell and its running processes will be stopped.")
@@ -446,6 +489,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         return alert.runModal() == .alertFirstButtonReturn
     }
     func terminateTerminal() {
+        gitWorkspaceView?.shutdown()
         runWorkspaceView?.shutdown()
         guard let terminal else { return }
         let process = terminal.process!
@@ -458,6 +502,9 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         terminal.terminate()
     }
     func windowWillClose(_ notification: Notification) {
+        window?.undoManager?.removeAllActions(withTarget:self)
+        completionPanel?.dismiss(); hoverPopover?.close(); languageServices.stop()
+        languageQueries.values.forEach { $0.cancel() }; languageSyncs.values.forEach { $0.cancel() }; languageEdits.values.forEach { $0.cancel() }; autoSaveWork.values.forEach { $0.cancel() }
         terminateTerminal(); recoveryTimer?.invalidate()
         for d in documents { try? recovery.remove(d.buffer.id) }
     }
@@ -664,7 +711,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         if node.isDirectory { if outline.isItemExpanded(node) { outline.collapseItem(node) } else { outline.expandItem(node) } }
         else { open(node.url) }
     }
-    func show(_ error: Error) { let alert = NSAlert(error:error); if let window { alert.beginSheetModal(for:window) } }
+    func show(_ error: Error) { let alert = NSAlert(error:error); alert.messageText = L.text(alert.messageText); alert.informativeText = L.text(alert.informativeText); if let window { alert.beginSheetModal(for:window) } }
 
     @objc func quickOpen() {
         if let connection = remoteConnection { quickOpenRemote(connection); return }
@@ -676,7 +723,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     }
     @objc func commandPalette() {
         var options: [PickerOption] = []
-        for (title,selector) in [("New File",#selector(newFile)),("Open Folder…",#selector(openFolder)),("Connect to SSH Host…",#selector(connectSSH)),("Source Control",#selector(gitWorkspace)),("Git Commit Graph",#selector(gitWorkspace)),("Run & Preview",#selector(runWorkspace)),("Find in File",#selector(find)),("Toggle Vim Mode",#selector(toggleVim)),("Split Editor",#selector(toggleSplit)),("Toggle Terminal",#selector(toggleTerminal)),("Increase Font Size",#selector(increaseFont)),("Decrease Font Size",#selector(decreaseFont))] {
+        for (title,selector) in [("New File",#selector(newFile)),("Open Folder…",#selector(openFolder)),("Connect to SSH Host…",#selector(connectSSH)),("Go to Definition",#selector(definitionCommand)),("Find All References",#selector(findReferences)),("Rename Symbol…",#selector(renameSymbol)),("Language Tools…",#selector(showLanguageTools)),("Go Back",#selector(goBack)),("Go Forward",#selector(goForward)),("Source Control",#selector(gitWorkspace)),("Git Commit Graph",#selector(gitWorkspace)),("Run & Preview",#selector(runWorkspace)),("Find in File",#selector(find)),("Toggle Vim Mode",#selector(toggleVim)),("Split Editor",#selector(toggleSplit)),("Toggle Terminal",#selector(toggleTerminal)),("Increase Font Size",#selector(increaseFont)),("Decrease Font Size",#selector(decreaseFont))] {
             options.append(PickerOption(title:title,detail:"Linvell command",invoke:{ [weak self] in self?.perform(selector) }))
         }
         options.append(PickerOption(title:L.text("Preferences: Theme and Font"),detail:"Appearance",invoke:{ [weak self] in self?.showSettings() }))

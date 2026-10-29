@@ -2,6 +2,7 @@
 """Developer ID release on GitHub Actions or an explicit local build; no App Store upload."""
 
 import argparse
+import atexit
 import base64
 import hashlib
 import json
@@ -10,6 +11,7 @@ from pathlib import Path
 import plistlib
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -17,6 +19,16 @@ import time
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def cleanup_staging_app(app):
+    """Only called with our own generated bundle paths, never the installed app."""
+    if app.is_dir():
+        subprocess.run(
+            ["/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister", "-u", str(app)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        shutil.rmtree(app)
 
 
 def signing_failure_reason(output):
@@ -138,8 +150,9 @@ def main():
     print("Running tests and building Universal macOS app on GitHub Actions…" if os.environ.get("GITHUB_ACTIONS") == "true" else "Running tests and building Universal macOS app locally…", flush=True)
     run(["swift", "test", "--scratch-path", build_root / "swiftpm", "--cache-path", build_root / "cache", "--config-path", build_root / "config", "--security-path", build_root / "security"])
     env = dict(os.environ, CONFIGURATION="release", LINVELL_UNIVERSAL="1")
-    run(["bash", "script/build_and_run.sh", "--build-only"], env=env)
     app = build_root / "release/Linvell.app"
+    atexit.register(cleanup_staging_app, app)
+    run(["bash", "script/build_and_run.sh", "--build-only"], env=env)
     architectures = (
         run(["lipo", "-archs", app / "Contents/MacOS/Linvell"]).decode().strip().split()
     )
@@ -297,6 +310,7 @@ def main():
     zip_path = output / f"Linvell-{args.version}-universal.zip"
     run(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", app, zip_path])
     staging = output / "dmg-content"
+    atexit.register(cleanup_staging_app, staging / "Linvell.app")
     staging.mkdir(exist_ok=True)
     run(["ditto", app, staging / "Linvell.app"])
     link = staging / "Applications"

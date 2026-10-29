@@ -57,9 +57,20 @@ public struct RemoteReply: Decodable {
     public let digest: String?
     public let error: String?
     public let tasks: [RunTask]?
+    public let tools: [String:String]?
 }
 public struct SSHRemote {
     public let host: String
+    private static let multiplexOptions: [String] = {
+        let directory = FileManager.default.urls(for:.cachesDirectory,in:.userDomainMask)[0].appendingPathComponent("Linvell/ssh",isDirectory:true)
+        let pattern = directory.appendingPathComponent("%C").path
+        guard pattern.utf8.count+38 < 104 else { return [] }
+        do {
+            try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+            try FileManager.default.setAttributes([.posixPermissions:0o700],ofItemAtPath:directory.path)
+            return ["-o","ControlMaster=auto","-o","ControlPersist=120","-o","ControlPath="+pattern]
+        } catch { return [] }
+    }()
     public init(host: String) throws {
         guard SSHConfig.validAlias(host),!host.contains("*"),!host.contains("?"),!host.contains("!") else { throw GitError.command("Choose a concrete SSH host.") }
         self.host = host
@@ -75,16 +86,19 @@ public struct SSHRemote {
         }
         return result+"'"
     }
+    public func transportArguments(command: String) -> [String] {
+        ["-T","-o","BatchMode=yes","-o","ConnectTimeout=10","-o","ServerAliveInterval=10","-o","ServerAliveCountMax=2"]+Self.multiplexOptions+["--",host,command]
+    }
     public func request(_ operation: String,path: String,content: Data? = nil,digest: String? = nil) throws -> RemoteReply {
         var request: [String:String] = ["operation":operation,"path":path]
         if let content { request["content"] = content.base64EncodedString() }
         if let digest { request["digest"] = digest }
-        let result = try ToolCommand.run(URL(fileURLWithPath:"/usr/bin/ssh"),arguments:["-T","-o","BatchMode=yes","-o","ConnectTimeout=10","-o","ServerAliveInterval=10","-o","ServerAliveCountMax=2","--",host,"python3 -c "+Self.quote(Self.agent)],directory:nil,timeout:45,input:try JSONSerialization.data(withJSONObject:request),maximumOutputBytes:32*1024*1024)
+        let result = try ToolCommand.run(URL(fileURLWithPath:"/usr/bin/ssh"),arguments:transportArguments(command:"python3 -c "+Self.quote(Self.agent)),directory:nil,timeout:45,input:try JSONSerialization.data(withJSONObject:request),maximumOutputBytes:32*1024*1024)
         guard result.succeeded else { throw GitError.command(result.timedOut ? "SSH operation timed out." : result.output) }
         guard let line = result.output.components(separatedBy:.newlines).last(where:{ $0.hasPrefix("LINVELL_JSON:") }) else { throw GitError.command("The remote host needs Python 3 to browse and edit files. Open its SSH terminal to check authentication and Python availability.") }
         let reply = try JSONDecoder().decode(RemoteReply.self,from:Data(line.dropFirst("LINVELL_JSON:".count).utf8))
         if let error = reply.error { throw GitError.command(error) }
-        if operation == "create" { RemoteDirectoryCache.shared.invalidate(host:host) }
+        if operation == "create" || operation == "settings-write" { RemoteDirectoryCache.shared.invalidate(host:host) }
         return reply
     }
     public static func gitCommand(_ arguments: [String],directory: String) -> String {
@@ -93,7 +107,7 @@ public struct SSHRemote {
     }
     public func git(_ arguments: [String],directory: String,input: Data? = nil,timeout: TimeInterval = 30) throws -> String {
         guard (directory.hasPrefix("/") || directory == "~"),!directory.utf8.contains(0) else { throw GitError.invalidPath }
-        let result = try ToolCommand.run(URL(fileURLWithPath:"/usr/bin/ssh"),arguments:["-T","-o","BatchMode=yes","-o","ConnectTimeout=10","-o","ServerAliveInterval=10","-o","ServerAliveCountMax=2","--",host,Self.gitCommand(arguments,directory:directory)],directory:nil,timeout:timeout+10,input:input,trimOutput:false,maximumOutputBytes:16*1024*1024)
+        let result = try ToolCommand.run(URL(fileURLWithPath:"/usr/bin/ssh"),arguments:transportArguments(command:Self.gitCommand(arguments,directory:directory)),directory:nil,timeout:timeout+10,input:input,trimOutput:false,maximumOutputBytes:16*1024*1024)
         guard result.succeeded else { throw GitError.command(result.timedOut ? "SSH Git operation timed out." : result.output) }
         return result.output
     }
@@ -106,6 +120,7 @@ try:
     path=os.path.abspath(os.path.expanduser(req['path'] or '~'))
     op=req['operation']
     if op=='list':
+        path=os.path.realpath(path)
         entries=[]
         with os.scandir(path) as scan:
             for e in scan:
@@ -123,6 +138,48 @@ try:
                 if len(entries)>=20000: break
             if len(entries)>=20000: break
         reply=dict(path=path,entries=entries)
+    elif op in ('settings-read','settings-write'):
+        base=os.path.realpath(path)
+        folder=os.path.join(base,'.linvell')
+        config=os.path.join(folder,'settings.json')
+        if not os.path.isdir(base): raise ValueError('Open a project folder before saving project settings.')
+        if os.path.islink(folder) or os.path.islink(config): raise ValueError('Project settings cannot use a symlink.')
+        def readsettings():
+            if not os.path.exists(config): return b'{}\n','missing'
+            if os.path.getsize(config)>1024*1024: raise ValueError('Project settings exceed 1 MiB.')
+            with open(config,'rb') as source: value=source.read(1024*1024+1)
+            return value,digest(value)
+        if op=='settings-write':
+            import fcntl
+            value=base64.b64decode(req['content'],validate=True)
+            if len(value)>1024*1024: raise ValueError('Project settings exceed 1 MiB.')
+            os.makedirs(folder,mode=0o700,exist_ok=True)
+            lockfd=os.open(os.path.join(folder,'.settings.lock'),os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600)
+            with os.fdopen(lockfd,'wb') as lock:
+                fcntl.flock(lock.fileno(),fcntl.LOCK_EX)
+                previous,expected=readsettings()
+                if expected!=req.get('digest'): raise ValueError('Project settings changed. Reload them before saving.')
+                fd,temporary=tempfile.mkstemp(dir=folder,prefix='.settings-')
+                try:
+                    with os.fdopen(fd,'wb') as target: target.write(value);target.flush();os.fsync(target.fileno())
+                    os.replace(temporary,config)
+                finally:
+                    if os.path.exists(temporary): os.unlink(temporary)
+        value,checksum=readsettings()
+        reply=dict(path=config,content=base64.b64encode(value).decode(),digest=checksum)
+    elif op=='toolchains':
+        import shutil
+        names=['swift','sourcekit-lsp','python3','python','pyright-langserver','basedpyright-langserver','pylsp','node','typescript-language-server','clang','gcc','clangd','go','gopls','rustc','rust-analyzer','java','jdtls','dotnet','csharp-ls','ruby','ruby-lsp','php','phpactor','bash','zsh','bash-language-server','lua','luajit','lua-language-server','R','vscode-html-language-server','vscode-css-language-server','vscode-json-language-server','clang++','g++','iverilog','verilator','verible-verilog-ls','ghdl','vhdl_ls','dart']
+        tools={name:shutil.which(name) for name in names if shutil.which(name)}
+        for relative in ['.venv/bin/python','venv/bin/python']:
+            candidate=os.path.join(path,relative)
+            if os.path.isfile(candidate) and os.access(candidate,os.X_OK): tools[relative]=candidate
+        if 'swift' in tools and 'sourcekit-lsp' not in tools:
+            candidate=os.path.join(os.path.dirname(tools['swift']),'sourcekit-lsp')
+            if os.path.isfile(candidate) and os.access(candidate,os.X_OK): tools['sourcekit-lsp']=candidate
+        tools['__home']=os.path.expanduser('~')
+        tools['__root']=os.path.realpath(path)
+        reply=dict(path=path,tools=tools)
     elif op=='tasks':
         tasks=[]
         manifest=os.path.join(path,'package.json')

@@ -6,9 +6,9 @@ final class RemoteDocument {
     let path: String
     var digest: String
     let cache: URL
-    init(connection: SSHRemote,path: String,digest: String,data: Data) throws {
+    init(connection: SSHRemote,path: String,digest: String,data: Data,cacheRoot: URL = FileManager.default.temporaryDirectory) throws {
         self.connection = connection; self.path = path; self.digest = digest
-        cache = FileManager.default.temporaryDirectory.appendingPathComponent("linvell-remote-"+UUID().uuidString,isDirectory:true)
+        cache = cacheRoot.appendingPathComponent("linvell-remote-"+UUID().uuidString,isDirectory:true)
         try FileManager.default.createDirectory(at:cache,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
         let file = cache.appendingPathComponent(URL(fileURLWithPath:path).lastPathComponent)
         try data.write(to:file,options:.atomic); try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:file.path)
@@ -57,7 +57,7 @@ final class RemoteBrowser: NSView, NSTableViewDelegate, NSTableViewDataSource {
         self.connection = connection; super.init(frame:.zero)
         let heading = Theme.label("SSH · "+connection.host,size:13,weight:.semibold)
         let up = Theme.button("arrow.up",help:"Parent Folder",target:self,action:#selector(parent))
-        let refresh = Theme.button("arrow.clockwise",help:"Refresh Files",target:self,action:#selector(refresh))
+        let refresh = Theme.actionButton("Refresh",target:self,action:#selector(refresh)); refresh.identifier = NSUserInterfaceItemIdentifier("Linvell.Remote.Refresh")
         let terminal = Theme.button("terminal",help:"SSH Terminal",target:self,action:#selector(shell))
         let create = Theme.button("doc.badge.plus",help:"New File",target:self,action:#selector(createFile))
         create.isHidden = directoriesOnly

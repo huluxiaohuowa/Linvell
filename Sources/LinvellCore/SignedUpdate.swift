@@ -7,8 +7,29 @@ public struct InstallJob: Codable {
     public let replacement: URL
     public let parentPID: Int32
     public let relaunch: Bool
-    public init(application: URL,replacement: URL,parentPID: Int32,relaunch: Bool) {
-        self.application = application; self.replacement = replacement; self.parentPID = parentPID; self.relaunch = relaunch
+    public let archive: URL?
+    public init(application: URL,replacement: URL,parentPID: Int32,relaunch: Bool,archive: URL? = nil) {
+        self.application = application; self.replacement = replacement; self.parentPID = parentPID; self.relaunch = relaunch; self.archive = archive
+    }
+    public func unpackArchive(jobURL: URL) throws {
+        guard let archive else { return }
+        let root = jobURL.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL
+        let expected = root.appendingPathComponent("extracted/Linvell.app")
+        guard archive.resolvingSymlinksInPath().path == root.appendingPathComponent("update.zip").path,
+              replacement.standardizedFileURL.path == expected.path,
+              replacement.resolvingSymlinksInPath().path == expected.path,
+              application.resolvingSymlinksInPath().path != expected.path else { throw UpdateFailure.invalidArchive }
+        try UpdateArchive.validate(Data(contentsOf:archive,options:.mappedIfSafe))
+        RollbackArchive.unregister(replacement)
+        try? FileManager.default.removeItem(at:replacement.deletingLastPathComponent())
+        do {
+            let unpack = try ToolCommand.run(URL(fileURLWithPath:"/usr/bin/ditto"),arguments:["-xk",archive.path,replacement.deletingLastPathComponent().path],directory:nil,timeout:120)
+            guard unpack.succeeded else { throw UpdateFailure.invalidArchive }
+        } catch {
+            RollbackArchive.unregister(replacement)
+            try? FileManager.default.removeItem(at:replacement)
+            throw error
+        }
     }
 }
 
@@ -43,6 +64,14 @@ public enum SignedUpdate {
         guard current.pathExtension == "app",!current.path.hasPrefix("/Volumes/"),FileManager.default.isWritableFile(atPath:parent.path) else { throw UpdateFailure.notWritable }
         try validate(current:current,candidate:candidate)
         let stage = parent.appendingPathComponent(".Linvell-previous-\(UUID().uuidString).app")
+        var installed = false
+        defer {
+            RollbackArchive.unregister(candidate)
+            RollbackArchive.unregister(stage)
+            if installed {
+                _ = try? ToolCommand.run(URL(fileURLWithPath:"/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"),arguments:["-f",current.path],directory:nil)
+            }
+        }
         try FileManager.default.copyItem(at:candidate,to:stage)
         do {
             try validate(current:current,candidate:stage)
@@ -51,7 +80,11 @@ public enum SignedUpdate {
             try assessment.run(); assessment.waitUntilExit()
             guard assessment.terminationStatus == 0 else { throw UpdateFailure.untrustedPackage }
             guard renameatx_np(AT_FDCWD,stage.path,AT_FDCWD,current.path,UInt32(RENAME_SWAP)) == 0 else { throw NSError(domain:NSPOSIXErrorDomain,code:Int(errno)) }
+            installed = true
             return stage
-        } catch { try? FileManager.default.removeItem(at:stage); throw error }
+        } catch {
+            RollbackArchive.unregister(stage)
+            try? FileManager.default.removeItem(at:stage); throw error
+        }
     }
 }

@@ -19,7 +19,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let until = self.chordDeadline,Date() < until {
                 self.chordDeadline = nil
                 if command && event.charactersIgnoringModifiers == "d" { workspace.skipOccurrence(); return nil }
+                if command && event.charactersIgnoringModifiers == "i" { workspace.hoverCommand(); return nil }
                 if command && event.charactersIgnoringModifiers == "o" { workspace.openFolder(); return nil }
+                if command && event.charactersIgnoringModifiers == "0" { workspace.foldAllCode(); return nil }
+                if command && event.charactersIgnoringModifiers == "j" { workspace.unfoldAllCode(); return nil }
                 if event.keyCode == 53 { return nil }
             }
             if command && event.charactersIgnoringModifiers == "k",(NSApp.keyWindow?.firstResponder as? NSTextView)?.hasMarkedText() != true {
@@ -74,6 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for workspace in workspaces {
             workspace.vimEnabled = PreferencesSync.value("vimEnabled") == "true"
             workspace.panes.forEach { $0.textView.vimEnabled = workspace.vimEnabled; $0.updatePreferences() }
+            workspace.documents.forEach { workspace.scheduleAutoSave($0) }
             workspace.applyTheme(); workspace.updateStatus()
         }
     }
@@ -169,6 +173,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item(file,"Close File",#selector(WorkspaceController.closeCurrent),"w",route:true)
         item(file,"Save",#selector(WorkspaceController.save),"s",route:true)
         item(file,"Save As…",#selector(WorkspaceController.saveAs),"s",[.command,.shift],route:true)
+        item(file,"Save All",#selector(WorkspaceController.saveAll),"s",[.command,.option],route:true)
         let edit = menu("Edit")
         item(edit,"Undo",Selector(("undo:")),"z"); item(edit,"Redo",Selector(("redo:")),"z",[.command,.shift]); edit.addItem(.separator())
         item(edit,"Cut",#selector(NSText.cut(_:)),"x"); item(edit,"Copy",#selector(NSText.copy(_:)),"c"); item(edit,"Paste",#selector(NSText.paste(_:)),"v"); item(edit,"Select All",#selector(NSText.selectAll(_:)),"a")
@@ -194,6 +199,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item(find,"Add Cursor Above",#selector(WorkspaceController.addCursorAbove),String(UnicodeScalar(NSUpArrowFunctionKey)!),[.command,.option],route:true)
         item(find,"Add Cursor Below",#selector(WorkspaceController.addCursorBelow),String(UnicodeScalar(NSDownArrowFunctionKey)!),[.command,.option],route:true)
         item(find,"Select Line",#selector(WorkspaceController.selectCurrentLine),"l",route:true)
+        item(edit,"Fold Code",#selector(WorkspaceController.foldCode),"[",[.command,.option],route:true)
+        item(edit,"Unfold Code",#selector(WorkspaceController.unfoldCode),"]",[.command,.option],route:true)
+        item(edit,"Fold All",#selector(WorkspaceController.foldAllCode),route:true)
+        item(edit,"Unfold All",#selector(WorkspaceController.unfoldAllCode),route:true)
+        let go = menu("Go")
+        item(go,"Go to Definition",#selector(WorkspaceController.definitionCommand),String(UnicodeScalar(NSF12FunctionKey)!),[],route:true)
+        item(go,"Find All References",#selector(WorkspaceController.findReferences),String(UnicodeScalar(NSF12FunctionKey)!),[.shift],route:true)
+        item(go,"Go Back",#selector(WorkspaceController.goBack),"-",[.control],route:true)
+        item(go,"Go Forward",#selector(WorkspaceController.goForward),"-",[.control,.shift],route:true)
+        item(go,"Show Hover",#selector(WorkspaceController.hoverCommand),route:true)
+        item(go,"Code Suggestions",#selector(WorkspaceController.completionCommand)," ",[.control],route:true)
+        item(edit,"Rename Symbol…",#selector(WorkspaceController.renameSymbol),String(UnicodeScalar(NSF2FunctionKey)!),[],route:true)
+        item(edit,"Language Tools…",#selector(WorkspaceController.showLanguageTools),route:true)
         let view = menu("View")
         item(view,"Command Palette",#selector(WorkspaceController.commandPalette),"p",[.command,.shift],route:true)
         item(view,"Open Quickly…",#selector(WorkspaceController.quickOpen),"p",route:true)

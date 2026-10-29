@@ -1,6 +1,24 @@
 # Development status
 
-2026-10-28 · 0.1.5
+2026-10-29 · 0.1.7 release preparation (CI build/sign/notarization pending)
+
+## Added in 0.1.7
+
+The source is ready for the 0.1.7 CI release. The local installed application is not replaced by this workflow.
+
+- Native lexical highlighting, bracket matching, language-aware indentation, structural folding and relative line numbers, shared by local and remote documents.
+- Optional conflict-checked auto-save for existing local/SSH files; same-size dirty dot and close X, with revision-safe completion and IME composition protection.
+- Native definition/reference navigation, back/forward history, hover, completion and diagnostics through a Swift LSP client and installed host toolchains.
+- Independent per-language interpreter/compiler/server selection in project-root `.linvell/settings.json`, locally or on SSH hosts. JSONC comments and unrelated settings are preserved; custom language associations are supported. Paths do not enter iCloud preferences.
+- Previewed semantic symbol rename across files, stale-edit checks, grouped undo/redo and save-all. Analysis is bounded to 2 MiB per file; rename is bounded to 500 files and 32 MiB of source. File creation/moves/deletion are not part of this rename implementation.
+- Native submodule overview and safe add/update/sync/branch/URL/gitlink/remove workflows. Additional native operation forms cover deinit, merge/rebase updates, summary, recursive commands and absorbing Git directories.
+- Git operation forms for branches, history changes, conflicts, stash, tags, remotes, reflog and worktrees, plus arbitrary Git argv and a persistent native PTY console for interactive commands. A graphical three-way merge editor is not included.
+- Shared SSH transport connections, cached native remote directory views and explicit refresh. No separately downloaded or permanently installed Linvell server is needed.
+- ZIP-only pending updates, explicit unregister-before-delete cleanup, one compressed rollback and removal of obsolete generated production bundles. Duplicate Finder handlers on the development Mac were cleaned without replacing its installed app.
+
+Acceptance includes native AppKit tests, actual clangd and SourceKit-LSP semantic tests, real Git/submodule fixtures, actual SSH language/config/save/conflict tests, signed-release update tests, and visible-row CPU layout measurements. Display-link configuration is verified; a physical cadence probe requires an unoccluded display surface and does not prove every presented frame's rate. Bilingual draft usage instructions are in the sibling `linvell-web/docs/development-next.*.md` files and have not been deployed.
+
+Final development acceptance: 141 tests, 135 passed, 6 skipped, zero failures. The skipped cases require separate remote tree/runner/Git fixtures or an unoccluded physical display; the dedicated SSH language/config/auto-save test ran successfully. Its maximum UI timer gap was about 18 ms. For 20,000 remote-directory rows, visible-row CPU layout measured about 0.22 ms median / 0.27 ms P95. These figures are not presented-frame-rate claims. The isolated signed 0.1.5 → 0.1.6 update retained one compressed rollback and removed temporary application registrations; the installed app remained 0.1.6.
 
 ## Implemented foundation
 
@@ -48,7 +66,7 @@
 The original full-editor goal is **not complete**. In particular:
 
 - Complete Vim editing compatibility: full regex/Ex and remapping, complete block-register semantics, visual/Replace macros and remaining compound operations. Vimscript/Vim9 and VSIX hosting are outside the current implementation.
-- Full multi-cursor/column selection behavior, folding, minimap, robust language-aware syntax parsing, LSP, DAP, advanced Git history editing and comprehensive settings/keybinding management.
+- Full multi-cursor/column selection behavior, folding, minimap, comprehensive language-server coverage, DAP, graphical three-way merging and comprehensive settings/keybinding management.
 - Per-workspace restoration of all files, split sessions and scroll/cursor state. Recovery snapshots currently restore as untitled copies.
 - Encoding selection/conversion UI and mixed-line-ending normalization. Saving mixed endings is intentionally blocked until the format can be chosen explicitly.
 - Project replacement previews, cancellation-aware large-project indexing/search and larger-file performance acceptance. Current scans exclude common generated directories and have explicit caps.

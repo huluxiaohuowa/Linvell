@@ -6,7 +6,9 @@ final class OpenDocument: NSObject, NSTextStorageDelegate {
     let storage = NSTextStorage()
     let vim = VimEngine()
     let lines: LineIndex
+    let syntax = EditorSyntaxState()
     let imageURL: URL?
+    var codeDiagnostics: [CodeDiagnostic] = []
     var markdownPreview = false
     var remote: RemoteDocument?
     var lastScroll: DocumentScrollAnchor?
@@ -44,6 +46,12 @@ final class EditorTextView: NSTextView {
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         FileDrop.urls(sender.draggingPasteboard).isEmpty ? super.performDragOperation(sender) : FileDrop.perform(sender,in:window)
     }
+    var codeDismiss: (() -> Void)?
+    var codeAction: ((String,Int?) -> Void)?
+    var completionKey: ((NSEvent) -> Bool)?
+    var hoverOffset: Int?
+    var hoverWork: DispatchWorkItem?
+    var codeTracking: NSTrackingArea?
     var document: OpenDocument?
     var vimEnabled = false
     var statusChanged: (() -> Void)?
@@ -104,6 +112,11 @@ final class EditorTextView: NSTextView {
         applySelections(ranges); statusChanged?(); return true
     }
     override func mouseDown(with event: NSEvent) {
+        codeDismiss?()
+        hoverWork?.cancel(); hoverOffset = nil
+        if event.modifierFlags.intersection([.command,.option,.shift]) == .command {
+            codeAction?("definition",characterIndexForInsertion(at:convert(event.locationInWindow,from:nil))); return
+        }
         if vimEnabled { document?.vim.cancelPendingCommand() }
         if event.modifierFlags.intersection([.command,.option,.shift]) == [.option,.shift] {
             let anchor = characterIndexForInsertion(at:convert(event.locationInWindow,from:nil))
@@ -124,6 +137,35 @@ final class EditorTextView: NSTextView {
         }
         clearExtraSelections(); super.mouseDown(with:event); synchronizeNativeSelection()
     }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let codeTracking { removeTrackingArea(codeTracking) }
+        let area = NSTrackingArea(rect:.zero,options:[.mouseMoved,.mouseEnteredAndExited,.activeInKeyWindow,.inVisibleRect],owner:self,userInfo:nil)
+        addTrackingArea(area); codeTracking = area
+    }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow(); window?.acceptsMouseMovedEvents = true
+    }
+    override func mouseMoved(with event: NSEvent) {
+        let offset = characterIndexForInsertion(at:convert(event.locationInWindow,from:nil)),word = Self.codeWord(in:string,at:offset)
+        let at = word.location
+        guard hoverOffset != at else { return }; hoverWork?.cancel(); hoverOffset = at
+        guard word.length > 0 else { return }
+        let work = DispatchWorkItem { [weak self] in guard let self,self.hoverOffset == at else { return }; self.codeAction?("hover",at) }
+        hoverWork = work; DispatchQueue.main.asyncAfter(deadline:.now()+0.5,execute:work)
+    }
+    override func mouseExited(with event: NSEvent) { hoverWork?.cancel(); hoverOffset = -1 }
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = super.menu(for:event) ?? NSMenu()
+        menu.addItem(.separator())
+        for (title,selector) in [("Go to Definition",#selector(codeDefinition)),("Find All References",#selector(codeReferences)),("Rename Symbol…",#selector(codeRename))] {
+            let item = NSMenuItem(title:L.text(title),action:selector,keyEquivalent:""); item.target = self; menu.addItem(item)
+        }
+        return menu
+    }
+    @objc private func codeDefinition() { codeAction?("definition",nil) }
+    @objc private func codeReferences() { codeAction?("references",nil) }
+    @objc private func codeRename() { codeAction?("rename",nil) }
     override func selectAll(_ sender: Any?) { clearExtraSelections(); super.selectAll(sender) }
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
@@ -167,6 +209,15 @@ final class EditorTextView: NSTextView {
     }
     override func insertText(_ insertString: Any,replacementRange: NSRange) {
         let value = (insertString as? NSAttributedString)?.string ?? (insertString as? String) ?? ""
+        if value.count == 1,"}])".contains(value),editingSelections.count == 1,!hasMarkedText() {
+            let selection = replacementRange.location == NSNotFound ? selectedRange() : replacementRange
+            let start = document?.lines.starts[document!.lines.line(at:selection.location)] ?? 0
+            let prefix = (string as NSString).substring(with:NSRange(location:start,length:selection.location-start))
+            let unit = PreferencesSync.value("useSpaces") == "true" ? String(repeating:" ",count:max(1,Int(PreferencesSync.value("tabWidth")) ?? 4)) : "\t"
+            if selection.length == 0,prefix.hasSuffix(unit),prefix.allSatisfy({ $0 == " " || $0 == "\t" }) {
+                super.insertText(String(prefix.dropLast(unit.count))+value,replacementRange:NSRange(location:start,length:selection.location-start)); return
+            }
+        }
         if vimEnabled,document?.vim.mode == .replace,editingSelections.count == 1,!hasMarkedText() {
             let ns = string as NSString,start = replacementRange.location == NSNotFound ? selectedRange() : replacementRange
             var end = NSMaxRange(start)
@@ -199,10 +250,8 @@ final class EditorTextView: NSTextView {
         let ns = string as NSString
         performMultiEdit(editingSelections.map { r in r.length > 0 || r.location == ns.length ? r : ns.rangeOfComposedCharacterSequence(at:r.location) },replacement:"")
     }
-    override func insertNewline(_ sender: Any?) {
-        if editingSelections.count > 1,!hasMarkedText() { performMultiEdit(editingSelections,replacement:"\n") }
-        else { super.insertNewline(sender) }
-    }
+    override func insertNewline(_ sender: Any?) { insertIndentedNewline(sender) }
+
     func performMultiEdit(_ ranges: [NSRange],replacement: String) {
         do {
             let result = try MultiEdit.apply(ranges,replacement:replacement,to:string)
@@ -237,6 +286,9 @@ final class EditorTextView: NSTextView {
         } else { super.insertTab(sender) }
     }
     override func keyDown(with event: NSEvent) {
+        hoverWork?.cancel(); hoverOffset = nil
+        if completionKey?(event) == true { return }
+        if event.modifierFlags.intersection([.command,.control,.option,.shift]) == .control,event.keyCode == 49 { codeAction?("completion",nil); return }
         if handleColumnKey(event) { return }
         if vimEnabled,handleVisualKey(event) { return }
         if event.keyCode == 53,editingSelections.count > 1 {
@@ -303,13 +355,15 @@ final class EditorPane: NSView, NSTextViewDelegate {
 
     init(document: OpenDocument, vim: Bool) {
         self.document = document
-        let manager = NSLayoutManager(), container = NSTextContainer(size:NSSize(width:0,height:CGFloat.greatestFiniteMagnitude))
+        let manager = FoldingLayoutManager(), container = NSTextContainer(size:NSSize(width:0,height:CGFloat.greatestFiniteMagnitude))
         container.widthTracksTextView = true; manager.allowsNonContiguousLayout = true; manager.addTextContainer(container); document.storage.addLayoutManager(manager)
         textView = EditorTextView(frame:NSRect(x:0,y:0,width:800,height:600),textContainer:container)
         super.init(frame:.zero)
         wantsLayer = true; clipsToBounds = true; layer?.masksToBounds = true
         textView.clipsToBounds = true; scroll.clipsToBounds = true
         textView.document = document; textView.vimEnabled = vim
+        gutter.pane = self
+        NotificationCenter.default.addObserver(self,selector:#selector(sourceAnalysisChanged(_:)),name:EditorSyntaxState.changed,object:document)
         textView.registerForDraggedTypes(textView.registeredDraggedTypes+[.fileURL])
         textView.delegate = self; textView.isRichText = false; textView.allowsUndo = true
         textView.isAutomaticQuoteSubstitutionEnabled = false; textView.isAutomaticDashSubstitutionEnabled = false
@@ -337,7 +391,7 @@ final class EditorPane: NSView, NSTextViewDelegate {
     }
     required init?(coder: NSCoder) { fatalError() }
     deinit { NotificationCenter.default.removeObserver(self) }
-    @objc private func scrolled() { gutter.needsDisplay = true; if !followingPreviewScroll { onScroll?(scrollAnchor) } }
+    @objc private func scrolled() { gutter.needsDisplay = true; paintSyntax(); if !followingPreviewScroll { onScroll?(scrollAnchor) } }
     var scrollAnchor: DocumentScrollAnchor {
         guard let manager = textView.layoutManager,let container = textView.textContainer,manager.numberOfGlyphs > 0 else { return DocumentScrollAnchor(line:1,progress:0) }
         let y = scroll.contentView.bounds.minY,origin = textView.textContainerOrigin
@@ -364,6 +418,7 @@ final class EditorPane: NSView, NSTextViewDelegate {
         DispatchQueue.main.async { [weak self] in self?.followingPreviewScroll = false }
     }
     func textView(_ textView: NSTextView,shouldChangeTextIn affectedCharRange: NSRange,replacementString: String?) -> Bool {
+        for manager in document.storage.layoutManagers.compactMap({ $0 as? FoldingLayoutManager }) where !manager.hidden.isEmpty { manager.hidden = [] }
         if self.textView.vimEnabled,!self.textView.applyingVim,(document.vim.mode == .insert || document.vim.mode == .replace),let replacementString {
             document.vim.recordNativeEdit(range:affectedCharRange,replacement:replacementString,cursor:textView.selectedRange().location)
         }
@@ -374,13 +429,14 @@ final class EditorPane: NSView, NSTextViewDelegate {
         let before = document.buffer.text
         if !textView.applyingVim { document.vim.recordInsertion(before:before,cursor:textView.selectedRange().location); document.vim.sync(text:document.storage.string,cursor:textView.selectedRange().location) }
         document.buffer.update(document.storage.string)
+        document.syntax.request(document)
         onTextChanged?()
         gutter.needsDisplay = true; onChange?()
         highlightWork?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.highlight() }
         highlightWork = work; DispatchQueue.main.asyncAfter(deadline:.now()+0.15,execute:work)
     }
-    func textViewDidChangeSelection(_ notification: Notification) { textView.synchronizeNativeSelection(); onFocus?(); onChange?() }
+    func textViewDidChangeSelection(_ notification: Notification) { revealSelection(); textView.synchronizeNativeSelection(); highlightBrackets(); gutter.needsDisplay = true; onFocus?(); onChange?() }
     func textDidBeginEditing(_ notification: Notification) { onFocus?() }
     func updateFont() {
         textView.font = Theme.editorFont
@@ -410,40 +466,43 @@ final class EditorPane: NSView, NSTextViewDelegate {
         textView.selectedTextAttributes = [.backgroundColor:Theme.selection]; scroll.backgroundColor = Theme.canvas
         gutter.needsDisplay = true; highlight()
     }
-    private func highlight() {
-        // Attribute-only highlighting leaves content, marked text and undo untouched.
-        guard !textView.hasMarkedText(), document.storage.length < 1_000_000 else { return }
-        highlighting = true; defer { highlighting = false }
-        let storage = document.storage, whole = NSRange(location:0,length:document.storage.length)
-        storage.beginEditing(); storage.addAttribute(.foregroundColor,value:Theme.foreground,range:whole)
-        let ext = document.buffer.url?.pathExtension.lowercased() ?? ""
-        if ["swift","js","ts","tsx","jsx","py","json","sh","css","rs","go","c","h","cpp"].contains(ext) {
-            let rules: [(String,NSColor)] = [
-                (#"\b(import|func|let|var|class|struct|enum|if|else|return|public|private|final|const|function|export|from|def|for|in|while|true|false|nil|null|self|async|await|throws|try)\b"#,Theme.keyword),
-                (#"\b[0-9]+(?:\.[0-9]+)?\b"#,Theme.number),
-                (#""(?:[^"\\]|\\.)*""#,Theme.accent),
-                (#"//[^\n]*|(?m)^\s*#[^\n]*"#,Theme.secondary)
-            ]
-            for (pattern,color) in rules {
-                if let regex = try? NSRegularExpression(pattern:pattern) {
-                    regex.enumerateMatches(in:storage.string,range:whole) { result,_,_ in
-                        if let result { storage.addAttribute(.foregroundColor,value:color,range:result.range) }
-                    }
-                }
-            }
+    func refreshCodePresentation() { gutter.needsDisplay = true; highlight(); applyCodeDiagnostics(); onChange?() }
+    func applyCodeDiagnostics() {
+        let whole = NSRange(location:0,length:(document.storage.string as NSString).length)
+        textView.layoutManager?.removeTemporaryAttribute(.underlineStyle,forCharacterRange:whole)
+        for diagnostic in document.codeDiagnostics.prefix(500) {
+            guard let range = try? diagnostic.range.range(in:document.buffer.text,index:document.lines),NSMaxRange(range) <= whole.length else { continue }
+            textView.layoutManager?.addTemporaryAttributes([.underlineStyle:NSUnderlineStyle.single.rawValue,.underlineColor:(diagnostic.severity == 1 ? NSColor.systemRed : NSColor.systemOrange)],forCharacterRange:range)
         }
-        storage.endEditing()
     }
+    private func highlight() {
+        document.syntax.request(document); paintSyntax(); highlightBrackets()
+    }
+
 }
 
 final class LineNumbers: NSRulerView {
     weak var editor: NSTextView?
-    init() { super.init(scrollView:nil,orientation:.verticalRuler); ruleThickness = 48; clipsToBounds = true; wantsLayer = true }
+    weak var pane: EditorPane?
+    var foldHits: [(CGRect,Int)] = []
+    func numberLabel(row: Int,current: Int) -> String {
+        String(PreferencesSync.value("relativeLineNumbers") == "true" && row != current ? abs(row-current) : row+1)
+    }
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow,from:nil)
+        if let hit = foldHits.first(where:{ $0.0.contains(point) }) { pane?.toggleFold(line:hit.1) }
+        else { super.mouseDown(with:event) }
+    }
+    init() { super.init(scrollView:nil,orientation:.verticalRuler); ruleThickness = 72; clipsToBounds = true; wantsLayer = true }
     required init(coder: NSCoder) { fatalError() }
     override func drawHashMarksAndLabels(in rect: NSRect) {
         NSGraphicsContext.saveGraphicsState(); bounds.clip(); defer { NSGraphicsContext.restoreGraphicsState() }
         Theme.canvas.setFill(); bounds.fill()
         guard let editor, let lm = editor.layoutManager, let tc = editor.textContainer else { return }
+        let digits = String((editor as? EditorTextView)?.document?.lines.starts.count ?? 1).count
+        let desired = max(72,CGFloat(digits)*8+30)
+        if ruleThickness != desired { ruleThickness = desired }
+        foldHits.removeAll()
         let visible = editor.visibleRect
         let glyphRange = lm.glyphRange(forBoundingRect:visible.offsetBy(dx:0,dy:-editor.textContainerInset.height),in:tc)
         guard lm.numberOfGlyphs > 0 else { return }
@@ -458,12 +517,19 @@ final class LineNumbers: NSRulerView {
             let idx = lm.characterIndexForGlyph(at:glyph)
             if idx == 0 || ns.character(at:idx-1) == 10 {
                 let y = lineRect.minY + editor.textContainerInset.height-visible.minY+max(0,(lineRect.height-15)/2)
-                let label = String(line) as NSString
+                let row = (editor as? EditorTextView)?.document?.lines.line(at:idx) ?? line-1
+                let current = (editor as? EditorTextView)?.document?.lines.line(at:editor.selectedRange().location) ?? 0
+                let label = numberLabel(row:row,current:current) as NSString
+                if let pane,let fold = pane.document.syntax.analysis.fold(atLine:row) {
+                    let hit = CGRect(x:0,y:y,width:15,height:18); foldHits.append((hit,row))
+                    let mark = (pane.folding.hides(fold.range.location) ? "▸" : "▾") as NSString
+                    mark.draw(at:NSPoint(x:2,y:y),withAttributes:[.font:NSFont.systemFont(ofSize:12),.foregroundColor:Theme.accent])
+                }
                 let attrs: [NSAttributedString.Key:Any] = [.font:NSFont.monospacedDigitSystemFont(ofSize:12,weight:.regular),.foregroundColor:Theme.secondary]
                 label.draw(at:NSPoint(x:ruleThickness-14-label.size(withAttributes:attrs).width,y:y),withAttributes:attrs)
                 line += 1
             }
-            glyph = NSMaxRange(range)
+            glyph = max(glyph+1,NSMaxRange(range))
         }
     }
 }

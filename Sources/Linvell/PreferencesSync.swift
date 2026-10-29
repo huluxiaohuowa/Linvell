@@ -7,7 +7,7 @@ final class PreferencesSync {
     static let didApply = Notification.Name("Linvell.PreferencesApplied")
     struct Record: Codable { var value: String; var modified: TimeInterval }
     struct Snapshot: Codable { var version = 1; var settings: [String:Record] = [:] }
-    static let defaults: [String:String] = ["theme":"Linvell Dark","editorFontSize":"15","editorFontFamily":"SF Mono","vimEnabled":"false","lineNumbers":"true","wordWrap":"true","tabWidth":"4","useSpaces":"true"]
+    static let defaults: [String:String] = ["theme":"Linvell Dark","editorFontSize":"15","editorFontFamily":"SF Mono","vimEnabled":"false","lineNumbers":"true","relativeLineNumbers":"false","wordWrap":"true","tabWidth":"4","useSpaces":"true","autoSave":"false"]
     private var statusKey = "Local preferences"
     var status: String { L.text(statusKey) }
     private var records = Snapshot()
@@ -31,7 +31,7 @@ final class PreferencesSync {
     static func value(_ key: String) -> String {
         guard let object = UserDefaults.standard.object(forKey:key) else { return defaults[key] ?? "" }
         if let value = object as? String { return value }
-        if ["vimEnabled","lineNumbers","wordWrap","useSpaces"].contains(key) { return UserDefaults.standard.bool(forKey:key) ? "true" : "false" }
+        if ["vimEnabled","lineNumbers","wordWrap","useSpaces","autoSave","relativeLineNumbers"].contains(key) { return UserDefaults.standard.bool(forKey:key) ? "true" : "false" }
         return String(describing:object)
     }
     func changed() {
@@ -101,7 +101,7 @@ final class PreferencesSync {
         case "editorFontSize": return Double(value).map { (11...30).contains($0) } ?? false
         case "editorFontFamily": return !value.isEmpty && value.utf8.count <= 128 && !value.unicodeScalars.contains(where:{ CharacterSet.controlCharacters.contains($0) })
         case "tabWidth": return ["2","4","8"].contains(value)
-        case "vimEnabled","lineNumbers","wordWrap","useSpaces": return value == "true" || value == "false"
+        case "vimEnabled","lineNumbers","wordWrap","useSpaces","autoSave": return value == "true" || value == "false"
         default: return false
         }
     }

@@ -339,3 +339,316 @@
 "Git Commit Graph" = "Git Commit Graph";
 
 "Open “%@”" = "Open “%@”";
+
+"Automatically save changes" = "Automatically save changes";
+
+"SAVING" = "SAVING";
+
+"Save existing local and remote files after a short pause. New untitled files still need Save As. External-change conflicts stop automatic saving." = "Save existing local and remote files after a short pause. New untitled files still need Save As. External-change conflicts stop automatic saving.";
+
+"Saving changes…" = "Saving changes…";
+
+"Automatic save stopped: " = "Automatic save stopped: ";
+
+"Language Tools" = "Language Tools";
+
+"Language Tools…" = "Language Tools…";
+
+"Code intelligence, using your tools." = "Code intelligence, using your tools.";
+
+"Enable language intelligence" = "Enable language intelligence";
+
+"Interpreter or compiler path" = "Interpreter or compiler path";
+
+"Language server executable" = "Language server executable";
+
+"Detect Tools" = "Detect Tools";
+
+"Apply Toolchain" = "Apply Toolchain";
+
+"This Mac" = "This Mac";
+
+"Interpreter / compiler" = "Interpreter / compiler";
+
+"Language server" = "Language server";
+
+"Arguments (JSON array)" = "Arguments (JSON array)";
+
+"Browse…" = "Browse…";
+
+"No language server found. Install one on this host or choose its executable." = "No language server found. Install one on this host or choose its executable.";
+
+"Tools detected. Apply to use this toolchain." = "Tools detected. Apply to use this toolchain.";
+
+"Detecting tools…" = "Detecting tools…";
+
+"Choose an absolute executable path." = "Choose an absolute executable path.";
+
+"Open a project folder before configuring its language tools." = "Open a project folder before configuring its language tools.";
+
+"Saving project language settings…" = "Saving project language settings…";
+
+"Saved to .linvell/settings.json. Language services will restart." = "Saved to .linvell/settings.json. Language services will restart.";
+
+"Project settings: %@" = "Project settings: %@";
+
+"Choose tools installed on this host. Definitions, references, diagnostics, completion and rename use the language server. Tool paths are saved in this project’s .linvell/settings.json; nothing is installed automatically." = "Choose tools installed on this host. Definitions, references, diagnostics, completion and rename use the language server. Tool paths are saved in this project’s .linvell/settings.json; nothing is installed automatically.";
+
+"Choose Remote Executable" = "Choose Remote Executable";
+
+"Choose" = "Choose";
+
+"Go" = "Go";
+
+"Go to Definition" = "Go to Definition";
+
+"Find All References" = "Find All References";
+
+"Go Back" = "Go Back";
+
+"Go Forward" = "Go Forward";
+
+"Show Hover" = "Show Hover";
+
+"Code Suggestions" = "Code Suggestions";
+
+"Code suggestions" = "Code suggestions";
+
+"Rename Symbol…" = "Rename Symbol…";
+
+"Rename Symbol" = "Rename Symbol";
+
+"The language service updates this symbol's definition and references across the workspace." = "The language service updates this symbol's definition and references across the workspace.";
+
+"Preview Rename" = "Preview Rename";
+
+"Rename to “%@”" = "Rename to “%@”";
+
+"%d changes in %d files. Changes remain unsaved and can be undone together." = "%d changes in %d files. Changes remain unsaved and can be undone together.";
+
+"Apply Rename" = "Apply Rename";
+
+"No rename changes returned." = "No rename changes returned.";
+
+"Renamed in %d files. Save changes to write them to disk." = "Renamed in %d files. Save changes to write them to disk.";
+
+"The project changed after the preview. Run Rename again." = "The project changed after the preview. Run Rename again.";
+
+"Definitions" = "Definitions";
+
+"References" = "References";
+
+"No symbol locations found." = "No symbol locations found.";
+
+"No code suggestions." = "No code suggestions.";
+
+"Choose a supported source file. Language services pause for files larger than 2 MiB." = "Choose a supported source file. Language services pause for files larger than 2 MiB.";
+
+"Querying language service…" = "Querying language service…";
+
+"Settings → Language Tools" = "Settings → Language Tools";
+
+"Choose an installed language server in Language Tools." = "Choose an installed language server in Language Tools.";
+
+"The language service did not respond in time." = "The language service did not respond in time.";
+
+"The language service stopped. Check the selected toolchain." = "The language service stopped. Check the selected toolchain.";
+
+"The language service sent an invalid response." = "The language service sent an invalid response.";
+
+"Invalid .linvell/settings.json. Fix its JSON syntax before applying language tools." = "Invalid .linvell/settings.json. Fix its JSON syntax before applying language tools.";
+
+"The language settings section must be an object. No configuration was replaced." = "The language settings section must be an object. No configuration was replaced.";
+
+"Submodules" = "Submodules";
+
+"Git submodules" = "Git submodules";
+
+"Include nested submodules" = "Include nested submodules";
+
+"Filter submodules" = "Filter submodules";
+
+"Initialize / Update" = "Initialize / Update";
+
+"Open Repository" = "Open Repository";
+
+"Add Submodule…" = "Add Submodule…";
+
+"Initialize / Update All" = "Initialize / Update All";
+
+"Sync URLs" = "Sync URLs";
+
+"Stage Reference" = "Stage Reference";
+
+"Tracking Branch…" = "Tracking Branch…";
+
+"Change URL…" = "Change URL…";
+
+"Update to Branch Tip…" = "Update to Branch Tip…";
+
+"Remove…" = "Remove…";
+
+"Update checks out the commit recorded by the parent repository. Stage Reference records a changed submodule commit; commit it in the parent repository. Local changes are never force-discarded." = "Update checks out the commit recorded by the parent repository. Stage Reference records a changed submodule commit; commit it in the parent repository. Local changes are never force-discarded.";
+
+"Conflicted" = "Conflicted";
+
+"Not initialized" = "Not initialized";
+
+"Local changes" = "Local changes";
+
+"New commit" = "New commit";
+
+"Up to date" = "Up to date";
+
+"Detached HEAD" = "Detached HEAD";
+
+"Select a submodule to manage it." = "Select a submodule to manage it.";
+
+"Recorded commit" = "Recorded commit";
+
+"Current commit" = "Current commit";
+
+"Reading submodules…" = "Reading submodules…";
+
+"No submodules yet. Add a repository to get started." = "No submodules yet. Add a repository to get started.";
+
+"%d submodules" = "%d submodules";
+
+"Updating submodules…" = "Updating submodules…";
+
+"Tracking Branch" = "Tracking Branch";
+
+"Submodule URL" = "Submodule URL";
+
+"Update to Branch Tip" = "Update to Branch Tip";
+
+"This fetches the configured branch and changes the submodule commit. Review and stage the new reference in the parent repository." = "This fetches the configured branch and changes the submodule commit. Review and stage the new reference in the parent repository.";
+
+"Remove Submodule" = "Remove Submodule";
+
+"The clean checkout will be removed and the removal staged in the parent repository. Git object history is retained. Modified, conflicted or unrecorded commits block removal." = "The clean checkout will be removed and the removal staged in the parent repository. Git object history is retained. Modified, conflicted or unrecorded commits block removal.";
+
+"Add Submodule" = "Add Submodule";
+
+"Default branch" = "Default branch";
+
+"Repository URL" = "Repository URL";
+
+"Folder inside this repository" = "Folder inside this repository";
+
+"Branch (optional)" = "Branch (optional)";
+
+"Add" = "Add";
+
+"Apply" = "Apply";
+
+"Continue" = "Continue";
+
+"Commit or stash submodule changes and record its commit before removing it." = "Commit or stash submodule changes and record its commit before removing it.";
+
+"Save All" = "Save All";
+
+/* Workspace language and Git operations */
+"Git Operations" = "Git Operations";
+"Custom Git Arguments" = "Custom Git Arguments";
+"Git argument array" = "Git argument array";
+"Execute" = "Execute";
+"Interactive Git Console" = "Interactive Git Console";
+"Stop Console" = "Stop Console";
+"Running Git…" = "Running Git…";
+"Git operation completed." = "Git operation completed.";
+"Git operation failed. Review the output." = "Git operation failed. Review the output.";
+"Finish the current Git operation first." = "Finish the current Git operation first.";
+"Close the interactive Git console with Stop Console, or wait for the operation to finish." = "Close the interactive Git console with Stop Console, or wait for the operation to finish.";
+"Execute Git operation?" = "Execute Git operation?";
+"This can change files, repository history or remotes. Review the exact arguments before continuing." = "This can change files, repository history or remotes. Review the exact arguments before continuing.";
+"Choose an operation and fill its fields. Advanced arguments are a JSON array, without shell expansion. Interactive rebase, patch selection and every other Git command are available in the console on this repository’s host." = "Choose an operation and fill its fields. Advanced arguments are a JSON array, without shell expansion. Interactive rebase, patch selection and every other Git command are available in the console on this repository’s host.";
+"Status" = "Status";
+"Stage All" = "Stage All";
+"Amend Commit" = "Amend Commit";
+"Create Branch" = "Create Branch";
+"Switch Branch" = "Switch Branch";
+"Rename Branch" = "Rename Branch";
+"Delete Merged Branch" = "Delete Merged Branch";
+"Merge" = "Merge";
+"Abort Merge" = "Abort Merge";
+"Continue Merge" = "Continue Merge";
+"Rebase" = "Rebase";
+"Continue Rebase" = "Continue Rebase";
+"Skip Rebase Commit" = "Skip Rebase Commit";
+"Abort Rebase" = "Abort Rebase";
+"Cherry Pick" = "Cherry Pick";
+"Continue Cherry Pick" = "Continue Cherry Pick";
+"Abort Cherry Pick" = "Abort Cherry Pick";
+"Revert Commit" = "Revert Commit";
+"Continue Revert" = "Continue Revert";
+"Abort Revert" = "Abort Revert";
+"Reset — Keep Files Staged" = "Reset — Keep Files Staged";
+"Reset — Keep Working Files" = "Reset — Keep Working Files";
+"Reset — Discard Working Changes" = "Reset — Discard Working Changes";
+"Restore File" = "Restore File";
+"Use Current Side" = "Use Current Side";
+"Use Incoming Side" = "Use Incoming Side";
+"Mark Conflict Resolved" = "Mark Conflict Resolved";
+"Preview Untracked Cleanup" = "Preview Untracked Cleanup";
+"Remove Untracked Files" = "Remove Untracked Files";
+"Stash Changes" = "Stash Changes";
+"List Stashes" = "List Stashes";
+"Show Stash" = "Show Stash";
+"Apply Stash" = "Apply Stash";
+"Pop Stash" = "Pop Stash";
+"Drop Stash" = "Drop Stash";
+"List Tags" = "List Tags";
+"Create Tag" = "Create Tag";
+"Delete Tag" = "Delete Tag";
+"List Remotes" = "List Remotes";
+"Add Remote" = "Add Remote";
+"Change Remote URL" = "Change Remote URL";
+"Rename Remote" = "Rename Remote";
+"Remove Remote" = "Remove Remote";
+"Fetch All Remotes" = "Fetch All Remotes";
+"Pull — Fast Forward" = "Pull — Fast Forward";
+"Pull — Rebase" = "Pull — Rebase";
+"Push With Upstream" = "Push With Upstream";
+"Push Tags" = "Push Tags";
+"Reflog" = "Reflog";
+"List Worktrees" = "List Worktrees";
+"Add Worktree" = "Add Worktree";
+"Move Worktree" = "Move Worktree";
+"Remove Clean Worktree" = "Remove Clean Worktree";
+"Lock Worktree" = "Lock Worktree";
+"Unlock Worktree" = "Unlock Worktree";
+"Prune Worktrees" = "Prune Worktrees";
+"Submodule — Status" = "Submodule — Status";
+"Submodule — Initialize" = "Submodule — Initialize";
+"Submodule — Deinitialize" = "Submodule — Deinitialize";
+"Submodule — Update Recorded Commit" = "Submodule — Update Recorded Commit";
+"Submodule — Update With Merge" = "Submodule — Update With Merge";
+"Submodule — Update With Rebase" = "Submodule — Update With Rebase";
+"Submodule — Sync All URLs" = "Submodule — Sync All URLs";
+"Submodule — Summary" = "Submodule — Summary";
+"Submodule — Absorb Git Directories" = "Submodule — Absorb Git Directories";
+"Submodule — Run In Each Repository" = "Submodule — Run In Each Repository";
+"Message" = "Message";
+"Name" = "Name";
+"Revision" = "Revision";
+"Branch" = "Branch";
+"Path" = "Path";
+"Stash" = "Stash";
+"URL" = "URL";
+"New Name" = "New Name";
+"Remote" = "Remote";
+"Destination" = "Destination";
+"Command" = "Command";
+"The refactor exceeds the safe analysis size. No changes were applied." = "The refactor exceeds the safe analysis size. No changes were applied.";
+"Complete every operation field." = "Complete every operation field.";
+
+"Relative line numbers" = "Relative line numbers";
+
+"Fold Code" = "Fold Code";
+
+"Unfold Code" = "Unfold Code";
+
+"Fold All" = "Fold All";
+
+"Unfold All" = "Unfold All";

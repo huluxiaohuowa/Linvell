@@ -35,7 +35,9 @@ final class RenderingTests: XCTestCase {
         // Non-key, almost transparent test surface; never opens an editor or steals focus.
         let window = NSWindow(contentRect:NSRect(x:0,y:0,width:8,height:8),styleMask:.borderless,backing:.buffered,defer:false)
         window.alphaValue = 0.01; window.ignoresMouseEvents = true; window.isReleasedWhenClosed = false
-        window.setFrameOrigin(NSPoint(x:(NSScreen.main?.visibleFrame.minX ?? 0)+2,y:(NSScreen.main?.visibleFrame.minY ?? 0)+2)); window.orderBack(nil)
+        window.setFrameOrigin(NSPoint(x:(NSScreen.main?.visibleFrame.minX ?? 0)+2,y:(NSScreen.main?.visibleFrame.minY ?? 0)+2)); window.orderFrontRegardless()
+        RunLoop.current.run(until:Date().addingTimeInterval(0.1))
+        guard window.occlusionState.contains(.visible) else { window.orderOut(nil); throw XCTSkip("Display cadence needs an unoccluded display surface.") }
         let scheduler = WindowFrameScheduler(window:window)
         defer { scheduler.stop(); window.orderOut(nil) }
         var times: [Double] = []; scheduler.onFrame = { times.append($0) }; scheduler.pulse(duration:1.5)

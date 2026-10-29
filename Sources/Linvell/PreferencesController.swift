@@ -1,13 +1,15 @@
 import AppKit
 
 final class PreferencesController: NSWindowController {
+    weak var workspaceOwner: WorkspaceController?
     let detail = Surface(Theme.canvas)
     let navigation = Surface(Theme.panel)
     var category = 0
     var buttons: [NSButton] = []
     var statusLabel: NSTextField?
     var statusTimer: Timer?
-    init() {
+    init(owner: WorkspaceController? = nil) {
+        self.workspaceOwner = owner
         let window = NSWindow(contentRect:NSRect(x:0,y:0,width:900,height:650),styleMask:[.titled,.closable,.resizable,.miniaturizable],backing:.buffered,defer:false)
         window.title = L.text("Linvell Settings"); window.minSize = NSSize(width:780,height:610); window.center(); window.isReleasedWhenClosed = false
         window.appearance = NSAppearance(named:Theme.profile.isDark ? .darkAqua : .aqua); window.backgroundColor = Theme.canvas
@@ -18,7 +20,7 @@ final class PreferencesController: NSWindowController {
         navigation.heightAnchor.constraint(equalTo:stack.heightAnchor).isActive = true; detail.heightAnchor.constraint(equalTo:stack.heightAnchor).isActive = true
         let heading = Theme.label("SETTINGS",size:11,color:Theme.secondary,weight:.semibold)
         var rows: [NSView] = [heading]
-        for (index,entry) in [("paintpalette","Appearance"),("textformat","Editor"),("keyboard","Vim"),("icloud","Sync"),("arrow.triangle.2.circlepath","Updates")].enumerated() {
+        for (index,entry) in [("paintpalette","Appearance"),("textformat","Editor"),("keyboard","Vim"),("icloud","Sync"),("arrow.triangle.2.circlepath","Updates"),("chevron.left.forwardslash.chevron.right","Language Tools")].enumerated() {
             let b = NSButton(title:L.text(entry.1),image:NSImage(systemSymbolName:entry.0,accessibilityDescription:nil)!,target:self,action:#selector(selectCategory(_:)))
             b.tag = index; b.isBordered = false; b.imagePosition = .imageLeading; b.alignment = .left; b.font = .systemFont(ofSize:14)
             b.heightAnchor.constraint(equalToConstant:40).isActive = true; buttons.append(b); rows.append(b)
@@ -36,11 +38,12 @@ final class PreferencesController: NSWindowController {
     required init?(coder: NSCoder) { fatalError() }
     deinit { NotificationCenter.default.removeObserver(self); statusTimer?.invalidate() }
     @objc private func selectCategory(_ sender: NSButton) { category = sender.tag; render() }
+    func showLanguageTools() { category = 5; render(); showWindow(nil); window?.makeKeyAndOrderFront(nil) }
     func showUpdates() { category = 4; render(); showWindow(nil); window?.makeKeyAndOrderFront(nil) }
     @objc private func updateStatusChanged() { if category == 4 { render() } }
     @objc private func languageApplied() {
         window?.title = L.text("Linvell Settings"); L.apply(to:navigation)
-        for (index,title) in ["Appearance","Editor","Vim","Sync","Updates"].enumerated() { buttons[index].title = L.text(title) }
+        for (index,title) in ["Appearance","Editor","Vim","Sync","Updates","Language Tools"].enumerated() { buttons[index].title = L.text(title) }
         render()
     }
     @objc private func preferencesUpdated() {
@@ -50,8 +53,8 @@ final class PreferencesController: NSWindowController {
     private func render() {
         detail.subviews.forEach { $0.removeFromSuperview() }; statusLabel = nil
         buttons.forEach { $0.contentTintColor = $0.tag == category ? Theme.accent : Theme.secondary }
-        let title = ["Appearance","Editor","Vim","iCloud Sync","Updates"][category]
-        let subtitle = ["A workspace that feels like your own.","Comfortable text, deliberate defaults.","A native engine, built one behavior at a time.","Your preferences, across your Macs.","Stay current, on your terms."][category]
+        let title = ["Appearance","Editor","Vim","iCloud Sync","Updates","Language Tools"][category]
+        let subtitle = ["A workspace that feels like your own.","Comfortable text, deliberate defaults.","A native engine, built one behavior at a time.","Your preferences, across your Macs.","Stay current, on your terms.","Code intelligence, using your tools."][category]
         var rows: [NSView] = [Theme.label(title,size:30,weight:.semibold),Theme.label(subtitle,size:14,color:Theme.secondary)]
         switch category {
         case 0:
@@ -81,6 +84,9 @@ final class PreferencesController: NSWindowController {
             }
             rows.append(Theme.label("Themes update the editor, sidebar and terminal together.",size:12,color:Theme.secondary))
         case 1:
+            rows.append(section("SAVING"))
+            rows.append(check("Automatically save changes",key:"autoSave"))
+            rows.append(text("Save existing local and remote files after a short pause. New untitled files still need Save As. External-change conflicts stop automatic saving."))
             rows.append(section("TYPOGRAPHY"))
             let selected = PreferencesSync.value("editorFontFamily"),options = EditorFonts.installedMonospace(selected:selected)
             let font = Theme.choiceButton()
@@ -95,7 +101,7 @@ final class PreferencesController: NSWindowController {
             size.selectItem(withTitle:String(Int(Theme.fontSize))); size.identifier = NSUserInterfaceItemIdentifier("editorFontSize"); size.target = self; size.action = #selector(popupChanged(_:))
             rows.append(settingRow("Font size",size))
             rows.append(section("LAYOUT & INDENTATION"))
-            rows.append(check("Show line numbers",key:"lineNumbers")); rows.append(check("Wrap long lines",key:"wordWrap"))
+            rows.append(check("Show line numbers",key:"lineNumbers")); rows.append(check("Relative line numbers",key:"relativeLineNumbers")); rows.append(check("Wrap long lines",key:"wordWrap"))
             rows.append(check("Indent with spaces",key:"useSpaces"))
             let tabs = Theme.choiceButton(); tabs.addItems(withTitles:["2","4","8"]); tabs.selectItem(withTitle:PreferencesSync.value("tabWidth")); tabs.identifier = NSUserInterfaceItemIdentifier("tabWidth"); tabs.target = self; tabs.action = #selector(popupChanged(_:))
             rows.append(settingRow("Tab width",tabs))
@@ -116,6 +122,8 @@ final class PreferencesController: NSWindowController {
             rows.append(text("Color theme, font family and size, line numbers, wrapping, indentation and Vim mode. Changes to different settings are merged independently."))
             rows.append(section("STAYS ON THIS MAC"))
             rows.append(text("Documents, recovery snapshots, project paths, terminal environment and credentials. iCloud Drive must be enabled in macOS System Settings."))
+        case 5:
+            rows.append(LanguageToolsPane(owner:workspaceOwner))
         default:
             let updates = UpdateManager.shared
             rows.append(section("GITHUB RELEASES")); rows.append(Theme.label(L.format("Installed: %@",UpdateManager.currentVersion),size:14))

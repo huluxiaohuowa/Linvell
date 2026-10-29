@@ -42,9 +42,18 @@ final class UpdateManager {
     private var directory: URL { FileManager.default.urls(for:.applicationSupportDirectory,in:.userDomainMask)[0].appendingPathComponent("Linvell/Updates",isDirectory:true) }
     func start() {
         if let data = UserDefaults.standard.data(forKey:"preparedUpdate"),let value = try? JSONDecoder().decode(Prepared.self,from:data),
-           let next = ReleaseVersion(value.tag),let current = ReleaseVersion(Self.currentVersion),next > current,FileManager.default.fileExists(atPath:value.replacement.path) {
+           UpdateStaging.owns(candidate:value.replacement,in:directory),
+           let next = ReleaseVersion(value.tag),let current = ReleaseVersion(Self.currentVersion),next > current,FileManager.default.fileExists(atPath:value.replacement.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("update.zip").path) {
             prepared = value; setStatus("%@ is ready to install.",value.tag)
         } else { UserDefaults.standard.removeObject(forKey:"preparedUpdate") }
+        let updateDirectory = directory, candidate = prepared?.replacement
+        DispatchQueue.global(qos:.utility).async {
+            if let candidate {
+                RollbackArchive.unregister(candidate)
+                try? FileManager.default.removeItem(at:candidate)
+            }
+            UpdateStaging.prune(in:updateDirectory,keeping:candidate)
+        }
         timer = Timer.scheduledTimer(withTimeInterval:6*60*60,repeats:true) { [weak self] _ in self?.checkAutomatically() }
         DispatchQueue.main.asyncAfter(deadline:.now()+30) { [weak self] in self?.checkAutomatically() }
     }
@@ -60,12 +69,7 @@ final class UpdateManager {
         let previews = includePreviews
         Task { @MainActor in
             do {
-                var request = URLRequest(url:URL(string:"https://api.github.com/repos/huluxiaohuowa/Linvell/releases?per_page=100")!)
-                request.setValue("application/vnd.github+json",forHTTPHeaderField:"Accept")
-                request.setValue("Linvell/\(Self.currentVersion)",forHTTPHeaderField:"User-Agent")
-                let (data,response) = try await session.data(for:request)
-                guard (response as? HTTPURLResponse)?.statusCode == 200,data.count < 4*1024*1024 else { throw UpdateFailure.invalidResponse }
-                let releases = try JSONDecoder().decode([GitHubRelease].self,from:data)
+                let releases = try await UpdateTransport.firstValid(URL(string:"https://api.github.com/repos/huluxiaohuowa/Linvell/releases?per_page=100")!,load:{ try await self.metadata($0,limit:4*1024*1024) },validate:{ try JSONDecoder().decode([GitHubRelease].self,from:$0) })
                 offer = UpdateOffer.select(releases,installed:Self.currentVersion,previews:previews)
                 UserDefaults.standard.set(Date().timeIntervalSince1970,forKey:"updateLastChecked")
                 busy = false
@@ -79,15 +83,30 @@ final class UpdateManager {
     func download() {
         guard !busy,let offer else { return }; busy = true; setStatus("Downloading %@…",offer.tag)
         Task { @MainActor in
+            var downloadRoot: URL?
             do {
-                let (checksumData,response) = try await session.data(from:offer.checksum.browser_download_url)
-                guard (response as? HTTPURLResponse)?.statusCode == 200,checksumData.count < 64*1024,
-                      let text = String(data:checksumData,encoding:.utf8),let expected = UpdateOffer.checksum(text,filename:offer.archive.name) else { throw UpdateFailure.invalidResponse }
-                let root = directory.appendingPathComponent(UUID().uuidString,isDirectory:true)
+                let expected = try await UpdateTransport.firstValid(offer.checksum.browser_download_url,load:{ try await self.metadata($0,limit:64*1024) },validate:{ data -> String in
+                    guard let text = String(data:data,encoding:.utf8),let digest = UpdateOffer.checksum(text,filename:offer.archive.name) else { throw UpdateFailure.invalidResponse }; return digest
+                })
+                let root = directory.appendingPathComponent(UUID().uuidString+".noindex",isDirectory:true)
+                downloadRoot = root
                 try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
                 let zip = root.appendingPathComponent("update.zip")
-                let receiver = BoundedDownload(destination:zip,limit:offer.archive.size)
-                try await receiver.fetch(offer.archive.browser_download_url)
+                var downloaded = false,lastError: Error = UpdateFailure.invalidResponse
+                for endpoint in UpdateTransport.candidates(offer.archive.browser_download_url) {
+                    do {
+                        try? FileManager.default.removeItem(at:zip)
+                        let receiver = BoundedDownload(destination:zip,limit:offer.archive.size)
+                        try await receiver.fetch(endpoint)
+                        let valid = try await Task.detached(priority:.utility) {
+                            let bytes = try Data(contentsOf:zip,options:.mappedIfSafe)
+                            return Data(SHA256.hash(data:bytes)).map { String(format:"%02x",$0) }.joined() == expected
+                        }.value
+                        guard valid else { throw UpdateFailure.untrustedPackage }
+                        downloaded = true; break
+                    } catch { lastError = error }
+                }
+                guard downloaded else { throw lastError }
                 setStatus("Verifying %@…",offer.tag)
                 let current = Bundle.main.bundleURL
                 let replacement: URL = try await Task.detached(priority:.utility) {
@@ -101,6 +120,10 @@ final class UpdateManager {
                     try unzip.run(); unzip.waitUntilExit()
                     guard unzip.terminationStatus == 0 else { throw UpdateFailure.invalidArchive }
                     let candidate = extracted.appendingPathComponent("Linvell.app")
+                    defer {
+                        RollbackArchive.unregister(candidate)
+                        try? FileManager.default.removeItem(at:candidate)
+                    }
                     try SignedUpdate.validate(current:current,candidate:candidate)
                     let info = try PropertyListSerialization.propertyList(from:Data(contentsOf:candidate.appendingPathComponent("Contents/Info.plist")),format:nil) as? [String:Any]
                     guard (info?["LinvellReleaseVersion"] as? String) == String(offer.tag.dropFirst(offer.tag.hasPrefix("v") ? 1 : 0)) else { throw UpdateFailure.untrustedPackage }
@@ -109,7 +132,13 @@ final class UpdateManager {
                 prepared = Prepared(tag:offer.tag,replacement:replacement)
                 UserDefaults.standard.set(try JSONEncoder().encode(prepared),forKey:"preparedUpdate")
                 busy = false; setStatus("%@ verified. %@",offer.tag,automaticInstall ? "It will install when Linvell quits." : "Ready to install and restart.")
-            } catch { busy = false; setStatus("Update download was not accepted. %@",error.localizedDescription) }
+            } catch {
+                if let downloadRoot {
+                    let updateDirectory = directory
+                    await Task.detached(priority:.utility) { UpdateStaging.remove(downloadRoot,in:updateDirectory) }.value
+                }
+                busy = false; setStatus("Update download was not accepted. %@",error.localizedDescription)
+            }
         }
     }
     func requestInstall() {
@@ -118,14 +147,23 @@ final class UpdateManager {
         // NSApplication may cancel termination when the user cancels a save/session dialog.
         installRequested = false
     }
+    private func metadata(_ url: URL,limit: Int64) async throws -> Data {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("linvell-update-metadata-"+UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at:file) }
+        let receiver = BoundedDownload(destination:file,limit:limit,exact:false)
+        try await receiver.fetch(url)
+        return try Data(contentsOf:file)
+    }
     func scheduleInstallation() throws {
         guard let prepared else { return }
+        guard UpdateStaging.owns(candidate:prepared.replacement,in:directory) else { throw UpdateFailure.invalidArchive }
         let current = Bundle.main.bundleURL.resolvingSymlinksInPath()
         guard !current.path.hasPrefix("/Volumes/"),FileManager.default.isWritableFile(atPath:current.deletingLastPathComponent().path) else { throw UpdateFailure.notWritable }
-        try SignedUpdate.validate(current:current,candidate:prepared.replacement)
+        let archive = prepared.replacement.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("update.zip")
+        guard FileManager.default.fileExists(atPath:archive.path) else { throw UpdateFailure.invalidArchive }
         let helper = current.appendingPathComponent("Contents/Helpers/LinvellUpdater")
         guard FileManager.default.isExecutableFile(atPath:helper.path) else { throw UpdateFailure.untrustedPackage }
-        let job = InstallJob(application:current,replacement:prepared.replacement,parentPID:getpid(),relaunch:installRequested)
+        let job = InstallJob(application:current,replacement:prepared.replacement,parentPID:getpid(),relaunch:installRequested,archive:archive)
         let jobURL = prepared.replacement.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("install-job.json")
         try JSONEncoder().encode(job).write(to:jobURL,options:.atomic)
         try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:jobURL.path)
@@ -137,14 +175,15 @@ final class UpdateManager {
 private final class BoundedDownload: NSObject, URLSessionDownloadDelegate {
     let destination: URL
     let limit: Int64
+    let exact: Bool
     private var continuation: CheckedContinuation<Void,Error>?
     private var downloadError: Error?
     private var session: URLSession?
-    init(destination: URL,limit: Int64) { self.destination = destination; self.limit = limit }
+    init(destination: URL,limit: Int64,exact: Bool = true) { self.destination = destination; self.limit = limit; self.exact = exact }
     func fetch(_ url: URL) async throws {
         try await withCheckedThrowingContinuation { continuation in
             self.continuation = continuation
-            let config = URLSessionConfiguration.ephemeral; config.timeoutIntervalForResource = 600; config.httpCookieStorage = nil
+            let config = URLSessionConfiguration.ephemeral; config.timeoutIntervalForRequest = 12; config.timeoutIntervalForResource = exact ? 600 : 20; config.httpCookieStorage = nil
             let session = URLSession(configuration:config,delegate:self,delegateQueue:nil); self.session = session
             session.downloadTask(with:url).resume()
         }
@@ -154,7 +193,8 @@ private final class BoundedDownload: NSObject, URLSessionDownloadDelegate {
     }
     func urlSession(_ session: URLSession,downloadTask: URLSessionDownloadTask,didFinishDownloadingTo location: URL) {
         do {
-            guard (downloadTask.response as? HTTPURLResponse)?.statusCode == 200,(try location.resourceValues(forKeys:[.fileSizeKey]).fileSize ?? 0) == limit else { throw UpdateFailure.invalidResponse }
+            let size = try location.resourceValues(forKeys:[.fileSizeKey]).fileSize ?? 0
+            guard (downloadTask.response as? HTTPURLResponse)?.statusCode == 200,size > 0,size <= limit,!exact || size == limit else { throw UpdateFailure.invalidResponse }
             try FileManager.default.moveItem(at:location,to:destination)
         } catch { downloadError = error }
     }

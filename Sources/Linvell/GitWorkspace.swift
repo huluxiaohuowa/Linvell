@@ -3,13 +3,21 @@ import LinvellCore
 
 final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private(set) var repository: GitRepository
+    let workspaceDirectory: String
     let table = ResponsiveTableView(),diff = NSTextView()
-    let mode = NSSegmentedControl(labels:[L.text("Changes"),L.text("Commit Graph")],trackingMode:.selectOne,target:nil,action:nil)
+    let mode = NSSegmentedControl(labels:[L.text("Changes"),L.text("Commit Graph"),L.text("Submodules"),L.text("Git Operations")],trackingMode:.selectOne,target:nil,action:nil)
     let side = NSSegmentedControl(labels:[L.text("Working Tree"),L.text("Staged")],trackingMode:.selectOne,target:nil,action:nil)
     let message = NSTextField(),caption = Theme.label("",size:12,color:Theme.secondary)
     var changes: [GitChange] = [],commits: [GitCommit] = []
     var graph: [GitGraphRow] = []
     var onOpen: ((URL) -> Void)?
+    var onOpenRepository: ((GitRepository) -> Void)?
+    let pages = NSView()
+    var mainPage: NSView?
+    var submodulePage: GitSubmoduleView?
+    var actionsPage: GitActionsView?
+    var running: Bool { actionsPage?.running == true }
+    func shutdown() { actionsPage?.terminate() }
     let branchesTable = ResponsiveTableView()
     private var branchNames: [String] = []
     private var changesControls: NSStackView!
@@ -24,7 +32,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private var actions: [NSControl] = []
     convenience init(project: URL) { self.init(repository:GitRepository(root:project)) }
     init(repository: GitRepository) {
-        self.repository = repository
+        self.repository = repository; workspaceDirectory = repository.directory
         let project = repository.root
         super.init(frame:.zero)
         wantsLayer = true; layer?.backgroundColor = Theme.canvas.cgColor
@@ -37,7 +45,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate {
         message.heightAnchor.constraint(equalToConstant:62).isActive = true
         let refresh = button("Refresh",#selector(reload)),stage = button("Stage",#selector(stageSelected)),unstage = button("Unstage",#selector(unstageSelected)),commit = button("Commit",#selector(commitStaged)),open = button("Open File",#selector(openSelected))
         let branches = button("Branches…",#selector(branches)),fetch = button("Fetch",#selector(fetch)),pull = button("Pull",#selector(pull)),push = button("Push",#selector(push))
-        let bar = Theme.stack([Theme.label("Source Control",size:20,weight:.semibold),mode,NSView(),refresh],spacing:12)
+        let bar = Theme.stack([Theme.label("Source Control",size:20,weight:.semibold),NSView(),refresh],spacing:12)
         let operations = Theme.stack([side,stage,unstage,open,NSView()],spacing:8)
         let network = Theme.stack([caption,NSView(),fetch,pull,push],spacing:8)
         let commitBar = Theme.stack([message,commit],spacing:12)
@@ -63,14 +71,15 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate {
         split.position = 400; split.addArrangedSubview(list); split.addArrangedSubview(diffPage)
         let navigation = Surface(Theme.panel)
         let repoName = Theme.label(project.lastPathComponent,size:14,weight:.semibold); repoName.lineBreakMode = .byTruncatingMiddle
-        let pending = button("Working Changes",#selector(showChanges)),graph = button("Commit Graph",#selector(showGraph))
+        let pending = button("Working Changes",#selector(showChanges)),graph = button("Commit Graph",#selector(showGraph)),modules = button("Submodules",#selector(showSubmodules))
         let branchColumn = NSTableColumn(identifier:NSUserInterfaceItemIdentifier("branches")); branchColumn.width = 180; branchColumn.resizingMask = .autoresizingMask
         branchesTable.addTableColumn(branchColumn); branchesTable.headerView = nil; branchesTable.rowHeight = 30; branchesTable.dataSource = self; branchesTable.delegate = self
         branchesTable.backgroundColor = Theme.panel; branchesTable.autoresizingMask = [.width]
         branchesTable.target = self; branchesTable.doubleAction = #selector(checkoutSelectedBranch)
         let branchScroll = ResponsiveScrollView(); branchScroll.documentView = branchesTable; branchScroll.hasVerticalScroller = true; branchScroll.drawsBackground = false
-        Theme.pin(Theme.stack([repoName,pending,graph,Theme.label("BRANCHES",size:10,color:Theme.secondary,weight:.semibold),branchScroll,branches],orientation:.vertical,spacing:12),in:navigation,inset:14)
-        let details = Theme.stack([bar,network,operations,hunkControls,commitBar,split],orientation:.vertical,spacing:14)
+        Theme.pin(Theme.stack([repoName,pending,graph,modules,Theme.label("BRANCHES",size:10,color:Theme.secondary,weight:.semibold),branchScroll,branches],orientation:.vertical,spacing:12),in:navigation,inset:14)
+        mainPage = split; Theme.pin(split,in:pages)
+        let details = Theme.stack([bar,mode,network,operations,hunkControls,commitBar,pages],orientation:.vertical,spacing:14)
         let root = ResizablePanes(); root.firstMinimum = 150; root.secondMinimum = 540; root.position = 190
         root.addArrangedSubview(navigation); root.addArrangedSubview(details)
         Theme.pin(root,in:self,inset:16)
@@ -92,11 +101,12 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate {
         layer?.backgroundColor = Theme.canvas.cgColor; appearance = NSAppearance(named:Theme.profile.isDark ? .darkAqua : .aqua)
         table.backgroundColor = Theme.panel; diff.backgroundColor = Theme.canvas
         table.reloadData(); selectionChanged()
+        actionsPage?.refreshTheme()
     }
     private func button(_ title: String,_ action: Selector) -> NSButton {
         let button = Theme.actionButton(title,target:self,action:action); actions.append(button); return button
     }
-    func numberOfRows(in tableView: NSTableView) -> Int { tableView === branchesTable ? branchNames.count : mode.selectedSegment == 0 ? changes.count : commits.count }
+    func numberOfRows(in tableView: NSTableView) -> Int { tableView === branchesTable ? branchNames.count : mode.selectedSegment == 0 ? changes.count : mode.selectedSegment == 1 ? commits.count : 0 }
     func tableView(_ tableView: NSTableView,viewFor tableColumn: NSTableColumn?,row: Int) -> NSView? {
         if tableView === branchesTable {
             guard branchNames.indices.contains(row) else { return nil }
@@ -117,9 +127,41 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate {
         if notification.object as? NSTableView === table { selectionChanged() }
     }
     @objc private func showChanges() { mode.selectedSegment = 0; modeChanged() }
+    @objc func showSubmodules() { mode.selectedSegment = 2; modeChanged() }
+    @objc func showOperations() { mode.selectedSegment = 3; modeChanged() }
     @objc private func showGraph() { mode.selectedSegment = 1; modeChanged() }
     @objc private func modeChanged() { updateMode(); table.reloadData(); if numberOfRows(in:table) > 0 { table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false); selectionChanged() } else { diff.string = "" } }
-    private func updateMode() { changesControls.isHidden = mode.selectedSegment != 0; commitControls.isHidden = mode.selectedSegment != 0; hunkControls.isHidden = true }
+    private func updateMode() {
+        changesControls.isHidden = mode.selectedSegment != 0; commitControls.isHidden = mode.selectedSegment != 0; hunkControls.isHidden = true
+        pages.subviews.forEach { $0.removeFromSuperview() }
+        if mode.selectedSegment == 3 {
+            if let actionsPage,actionsPage.repository.directory != repository.directory,!actionsPage.running { self.actionsPage = nil }
+            if actionsPage == nil {
+                let page = GitActionsView(repository:repository); page.onChange = { [weak self] in self?.reload() }
+                page.onBusyChange = { [weak self] value in
+                    guard let self else { return }; self.busy = value
+                    self.actions.forEach { $0.isEnabled = !value }; self.mode.isEnabled = !value; self.branchesTable.isEnabled = !value
+                }
+                actionsPage = page
+            }
+            Theme.pin(actionsPage!,in:pages)
+        } else if mode.selectedSegment == 2 {
+            if submodulePage == nil || submodulePage?.repository.directory != repository.directory {
+                let page = GitSubmoduleView(repository:repository)
+                page.onOpenRepository = { [weak self] in self?.onOpenRepository?($0) }
+                page.onChange = { [weak self] in self?.reload() }
+                page.onMore = { [weak self] path in
+                    self?.showOperations(); self?.actionsPage?.selectOperation("Submodule — Initialize",path:path)
+                }
+                page.onBusyChange = { [weak self] value in
+                    guard let self else { return }; self.busy = value
+                    self.actions.forEach { $0.isEnabled = !value }; self.mode.isEnabled = !value; self.branchesTable.isEnabled = !value
+                }
+                submodulePage = page
+            }
+            Theme.pin(submodulePage!,in:pages)
+        } else if let mainPage { Theme.pin(mainPage,in:pages) }
+    }
     @objc private func checkoutSelectedBranch() {
         guard branchNames.indices.contains(branchesTable.selectedRow) else { return }
         let name = branchNames[branchesTable.selectedRow],repo = repository
@@ -160,6 +202,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate {
                     self.branchNames = branches; self.branchesTable.reloadData()
                     self.caption.stringValue = branch+" · "+L.format("%d changed files",changes.count)
                     self.table.reloadData(); self.diff.string = ""
+                    if self.mode.selectedSegment >= 2 { self.updateMode() }
                     if self.numberOfRows(in:self.table) > 0 { self.table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false); self.selectionChanged() }
                 case .failure(let error): self.caption.stringValue = error.localizedDescription; self.changes = []; self.commits = []; self.table.reloadData()
                 }
@@ -167,6 +210,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate {
         }
     }
     @objc func selectionChanged() {
+        guard mode.selectedSegment < 2 else { return }
         let row = table.selectedRow,history = mode.selectedSegment == 1
         guard row >= 0,row < (history ? commits.count : changes.count) else { return }
         let request = UUID(); generation = request; let repo = repository,staged = side.selectedSegment == 1

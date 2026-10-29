@@ -6,6 +6,10 @@ MODE="${1:-run}"
 CONFIG="${CONFIGURATION:-debug}"
 BUILD_DIR="${LINVELL_BUILD_DIR:-$HOME/dev/build/linvell}"
 APP="$BUILD_DIR/$CONFIG/Linvell.app"
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+# Build-only bundles must never become additional Finder document handlers.
+unregister_build() { "$LSREGISTER" -u "$APP" >/dev/null 2>&1 || true; }
+if [[ "$MODE" == "--build-only" ]]; then trap unregister_build EXIT; fi
 mkdir -p "$BUILD_DIR/tmp" "$BUILD_DIR/cache" "$BUILD_DIR/config" "$BUILD_DIR/security"
 export TMPDIR="$BUILD_DIR/tmp"
 export CLANG_MODULE_CACHE_PATH="$BUILD_DIR/cache/clang"
@@ -15,7 +19,7 @@ if [[ "${LINVELL_UNIVERSAL:-0}" == "1" ]]; then BUILD_ARGS+=(--arch arm64 --arch
 swift build "${BUILD_ARGS[@]}"
 BIN_DIR="$(swift build "${BUILD_ARGS[@]}" --show-bin-path)"
 # This is a generated bundle; start clean so removed dependencies cannot leave stale resources.
-if [[ -d "$APP" ]]; then rm -rf "$APP"; fi
+if [[ -d "$APP" ]]; then unregister_build; rm -rf "$APP"; fi
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 mkdir -p "$APP/Contents/Helpers"
 cp "$BIN_DIR/Linvell" "$APP/Contents/MacOS/Linvell"

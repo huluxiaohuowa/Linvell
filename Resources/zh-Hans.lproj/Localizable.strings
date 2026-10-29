@@ -339,3 +339,316 @@
 "Git Commit Graph" = "Git 提交图谱";
 
 "Open “%@”" = "打开“%@”";
+
+"Automatically save changes" = "自动保存文件改动";
+
+"SAVING" = "保存";
+
+"Save existing local and remote files after a short pause. New untitled files still need Save As. External-change conflicts stop automatic saving." = "停止输入片刻后自动保存已有的本地或远程文件。未命名文件仍需另存为；检测到外部修改时会停止自动保存。";
+
+"Saving changes…" = "正在保存改动…";
+
+"Automatic save stopped: " = "自动保存已停止：";
+
+"Language Tools" = "语言工具";
+
+"Language Tools…" = "语言工具…";
+
+"Code intelligence, using your tools." = "使用你选择的工具链分析代码。";
+
+"Enable language intelligence" = "启用代码智能功能";
+
+"Interpreter or compiler path" = "解释器或编译器路径";
+
+"Language server executable" = "语言服务程序路径";
+
+"Detect Tools" = "检测工具";
+
+"Apply Toolchain" = "应用工具链";
+
+"This Mac" = "本机";
+
+"Interpreter / compiler" = "解释器／编译器";
+
+"Language server" = "语言服务";
+
+"Arguments (JSON array)" = "启动参数（JSON 数组）";
+
+"Browse…" = "浏览…";
+
+"No language server found. Install one on this host or choose its executable." = "未检测到语言服务。请在当前主机安装对应的语言服务，或选择已有程序。";
+
+"Tools detected. Apply to use this toolchain." = "已检测到工具。点击“应用工具链”即可使用。";
+
+"Detecting tools…" = "正在检测工具…";
+
+"Choose an absolute executable path." = "请选择程序的绝对路径。";
+
+"Open a project folder before configuring its language tools." = "请先打开项目文件夹，再配置此项目的语言工具。";
+
+"Saving project language settings…" = "正在保存项目语言配置…";
+
+"Saved to .linvell/settings.json. Language services will restart." = "已保存到 .linvell/settings.json，语言服务将重新启动。";
+
+"Project settings: %@" = "项目配置：%@";
+
+"Choose tools installed on this host. Definitions, references, diagnostics, completion and rename use the language server. Tool paths are saved in this project’s .linvell/settings.json; nothing is installed automatically." = "选择当前主机上已安装的工具，用于定义跳转、引用、诊断、补全和重命名。工具路径保存于项目的 .linvell/settings.json，不会自动安装程序。";
+
+"Choose Remote Executable" = "选择远程程序";
+
+"Choose" = "选择";
+
+"Go" = "跳转";
+
+"Go to Definition" = "转到定义";
+
+"Find All References" = "查找所有引用";
+
+"Go Back" = "返回上一位置";
+
+"Go Forward" = "前进到下一位置";
+
+"Show Hover" = "显示悬停信息";
+
+"Code Suggestions" = "代码补全";
+
+"Code suggestions" = "代码补全";
+
+"Rename Symbol…" = "重命名符号…";
+
+"Rename Symbol" = "重命名符号";
+
+"The language service updates this symbol's definition and references across the workspace." = "语言服务会更新此符号在整个工作区中的定义与引用。";
+
+"Preview Rename" = "预览重命名";
+
+"Rename to “%@”" = "重命名为“%@”";
+
+"%d changes in %d files. Changes remain unsaved and can be undone together." = "将在 %2$d 个文件中修改 %1$d 处。改动保持未保存状态，可整体撤销。";
+
+"Apply Rename" = "应用重命名";
+
+"No rename changes returned." = "语言服务未返回需要重命名的位置。";
+
+"Renamed in %d files. Save changes to write them to disk." = "已重命名 %d 个文件中的符号，请保存改动以写入磁盘。";
+
+"The project changed after the preview. Run Rename again." = "预览后项目发生了变化，请重新执行重命名。";
+
+"Definitions" = "定义";
+
+"References" = "引用";
+
+"No symbol locations found." = "未找到此符号的位置。";
+
+"No code suggestions." = "没有可用的代码补全。";
+
+"Choose a supported source file. Language services pause for files larger than 2 MiB." = "请选择支持的源文件。超过 2 MiB 的文件会暂停代码分析，以保持编辑流畅。";
+
+"Querying language service…" = "正在查询语言服务…";
+
+"Settings → Language Tools" = "设置 → 语言工具";
+
+"Choose an installed language server in Language Tools." = "请在“语言工具”中选择已安装的语言服务。";
+
+"The language service did not respond in time." = "语言服务响应超时。";
+
+"The language service stopped. Check the selected toolchain." = "语言服务已停止，请检查所选工具链。";
+
+"The language service sent an invalid response." = "语言服务返回了无效响应。";
+
+"Invalid .linvell/settings.json. Fix its JSON syntax before applying language tools." = ".linvell/settings.json 格式无效。请修复 JSON 语法后再应用语言工具。";
+
+"The language settings section must be an object. No configuration was replaced." = "语言配置节必须是一个对象，原配置未被替换。";
+
+"Submodules" = "子模块";
+
+"Git submodules" = "Git 子模块";
+
+"Include nested submodules" = "包含嵌套子模块";
+
+"Filter submodules" = "筛选子模块";
+
+"Initialize / Update" = "初始化／更新";
+
+"Open Repository" = "打开仓库";
+
+"Add Submodule…" = "添加子模块…";
+
+"Initialize / Update All" = "全部初始化／更新";
+
+"Sync URLs" = "同步地址";
+
+"Stage Reference" = "暂存提交引用";
+
+"Tracking Branch…" = "跟踪分支…";
+
+"Change URL…" = "修改地址…";
+
+"Update to Branch Tip…" = "更新至分支最新提交…";
+
+"Remove…" = "移除…";
+
+"Update checks out the commit recorded by the parent repository. Stage Reference records a changed submodule commit; commit it in the parent repository. Local changes are never force-discarded." = "“更新”检出父仓库记录的提交。“暂存提交引用”记录子模块的新提交，之后需在父仓库提交。不会强制丢弃本地改动。";
+
+"Conflicted" = "存在冲突";
+
+"Not initialized" = "尚未初始化";
+
+"Local changes" = "存在本地改动";
+
+"New commit" = "提交引用已变化";
+
+"Up to date" = "已是最新记录";
+
+"Detached HEAD" = "游离 HEAD";
+
+"Select a submodule to manage it." = "选择一个子模块以进行管理。";
+
+"Recorded commit" = "父仓库记录";
+
+"Current commit" = "当前提交";
+
+"Reading submodules…" = "正在读取子模块…";
+
+"No submodules yet. Add a repository to get started." = "当前没有子模块，可先添加一个仓库。";
+
+"%d submodules" = "%d 个子模块";
+
+"Updating submodules…" = "正在更新子模块…";
+
+"Tracking Branch" = "跟踪分支";
+
+"Submodule URL" = "子模块地址";
+
+"Update to Branch Tip" = "更新至分支最新提交";
+
+"This fetches the configured branch and changes the submodule commit. Review and stage the new reference in the parent repository." = "此操作会获取所配置分支的最新提交并更新子模块。完成后请检查改动，并在父仓库暂存新的提交引用。";
+
+"Remove Submodule" = "移除子模块";
+
+"The clean checkout will be removed and the removal staged in the parent repository. Git object history is retained. Modified, conflicted or unrecorded commits block removal." = "将移除干净的工作副本，并在父仓库暂存移除记录；Git 历史对象会保留。存在本地改动、冲突或未记录的新提交时会阻止移除。";
+
+"Add Submodule" = "添加子模块";
+
+"Default branch" = "默认分支";
+
+"Repository URL" = "仓库地址";
+
+"Folder inside this repository" = "当前仓库内的存放路径";
+
+"Branch (optional)" = "分支（可选）";
+
+"Add" = "添加";
+
+"Apply" = "应用";
+
+"Continue" = "继续";
+
+"Commit or stash submodule changes and record its commit before removing it." = "移除前请提交或暂存子模块中的改动，并记录其提交引用。";
+
+"Save All" = "全部保存";
+
+/* Workspace language and Git operations */
+"Git Operations" = "Git 操作";
+"Custom Git Arguments" = "自定义 Git 参数";
+"Git argument array" = "Git 参数数组";
+"Execute" = "执行";
+"Interactive Git Console" = "交互式 Git 控制台";
+"Stop Console" = "停止控制台";
+"Running Git…" = "正在执行 Git…";
+"Git operation completed." = "Git 操作已完成。";
+"Git operation failed. Review the output." = "Git 操作失败，请查看输出。";
+"Finish the current Git operation first." = "请先结束当前 Git 操作。";
+"Close the interactive Git console with Stop Console, or wait for the operation to finish." = "请点击“停止控制台”关闭交互会话，或等待当前操作完成。";
+"Execute Git operation?" = "执行此 Git 操作？";
+"This can change files, repository history or remotes. Review the exact arguments before continuing." = "此操作可能修改文件、仓库历史或远程仓库。请核对参数后继续。";
+"Choose an operation and fill its fields. Advanced arguments are a JSON array, without shell expansion. Interactive rebase, patch selection and every other Git command are available in the console on this repository’s host." = "选择操作并填写参数。高级参数使用 JSON 数组，不执行 Shell 展开。交互式变基、交互式补丁选择等 Git 命令可在当前仓库所属主机的控制台中执行。";
+"Status" = "状态";
+"Stage All" = "暂存全部";
+"Amend Commit" = "修改上次提交";
+"Create Branch" = "创建分支";
+"Switch Branch" = "切换分支";
+"Rename Branch" = "重命名分支";
+"Delete Merged Branch" = "删除已合并分支";
+"Merge" = "合并";
+"Abort Merge" = "中止合并";
+"Continue Merge" = "继续合并";
+"Rebase" = "变基";
+"Continue Rebase" = "继续变基";
+"Skip Rebase Commit" = "跳过变基提交";
+"Abort Rebase" = "中止变基";
+"Cherry Pick" = "拣选提交";
+"Continue Cherry Pick" = "继续拣选";
+"Abort Cherry Pick" = "中止拣选";
+"Revert Commit" = "反做提交";
+"Continue Revert" = "继续反做";
+"Abort Revert" = "中止反做";
+"Reset — Keep Files Staged" = "重置：保留暂存改动";
+"Reset — Keep Working Files" = "重置：保留工作区改动";
+"Reset — Discard Working Changes" = "重置：丢弃工作区改动";
+"Restore File" = "恢复文件";
+"Use Current Side" = "采用当前一侧";
+"Use Incoming Side" = "采用传入一侧";
+"Mark Conflict Resolved" = "标记冲突已解决";
+"Preview Untracked Cleanup" = "预览未跟踪文件清理";
+"Remove Untracked Files" = "清理未跟踪文件";
+"Stash Changes" = "储藏改动";
+"List Stashes" = "列出储藏";
+"Show Stash" = "查看储藏";
+"Apply Stash" = "应用储藏";
+"Pop Stash" = "应用并移除储藏";
+"Drop Stash" = "删除储藏";
+"List Tags" = "列出标签";
+"Create Tag" = "创建标签";
+"Delete Tag" = "删除标签";
+"List Remotes" = "列出远程仓库";
+"Add Remote" = "添加远程仓库";
+"Change Remote URL" = "修改远程仓库地址";
+"Rename Remote" = "重命名远程仓库";
+"Remove Remote" = "移除远程仓库";
+"Fetch All Remotes" = "获取所有远程仓库";
+"Pull — Fast Forward" = "拉取：仅快进";
+"Pull — Rebase" = "拉取并变基";
+"Push With Upstream" = "推送并设置上游";
+"Push Tags" = "推送标签";
+"Reflog" = "引用变动日志";
+"List Worktrees" = "列出工作树";
+"Add Worktree" = "添加工作树";
+"Move Worktree" = "移动工作树";
+"Remove Clean Worktree" = "移除干净工作树";
+"Lock Worktree" = "锁定工作树";
+"Unlock Worktree" = "解锁工作树";
+"Prune Worktrees" = "清理工作树记录";
+"Submodule — Status" = "子模块：递归状态";
+"Submodule — Initialize" = "子模块：初始化";
+"Submodule — Deinitialize" = "子模块：取消初始化";
+"Submodule — Update Recorded Commit" = "子模块：更新至记录的提交";
+"Submodule — Update With Merge" = "子模块：合并更新";
+"Submodule — Update With Rebase" = "子模块：变基更新";
+"Submodule — Sync All URLs" = "子模块：同步所有地址";
+"Submodule — Summary" = "子模块：提交摘要";
+"Submodule — Absorb Git Directories" = "子模块：吸收 Git 目录";
+"Submodule — Run In Each Repository" = "子模块：在各仓库中执行";
+"Message" = "说明";
+"Name" = "名称";
+"Revision" = "提交或引用";
+"Branch" = "分支";
+"Path" = "路径";
+"Stash" = "储藏引用";
+"URL" = "地址";
+"New Name" = "新名称";
+"Remote" = "远程仓库";
+"Destination" = "目标路径";
+"Command" = "命令";
+"The refactor exceeds the safe analysis size. No changes were applied." = "重构超出安全分析大小限制，未应用任何改动。";
+"Complete every operation field." = "请填写此操作的所有参数。";
+
+"Relative line numbers" = "相对行号";
+
+"Fold Code" = "折叠代码";
+
+"Unfold Code" = "展开代码";
+
+"Fold All" = "全部折叠";
+
+"Unfold All" = "全部展开";

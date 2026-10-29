@@ -20,7 +20,12 @@ public enum RollbackArchive {
         try fm.createDirectory(at:directory,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
         let work = directory.appendingPathComponent(UUID().uuidString+".noindex",isDirectory:true)
         try fm.createDirectory(at:work,withIntermediateDirectories:false,attributes:[.posixPermissions:0o700])
-        defer { try? fm.removeItem(at:work) }
+        defer {
+            // Even a trust assessment of a temporary bundle can register it with Finder.
+            unregister(work.appendingPathComponent("Linvell.app"))
+            unregister(work.appendingPathComponent("verify/Linvell.app"))
+            try? fm.removeItem(at:work)
+        }
         let app = work.appendingPathComponent("Linvell.app"),pending = work.appendingPathComponent("PreviousVersion.zip")
         try fm.copyItem(at:previous,to:app)
         let result = try ToolCommand.run(URL(fileURLWithPath:"/usr/bin/ditto"),arguments:["-c","-k","--sequesterRsrc","--keepParent",app.path,pending.path],directory:nil,timeout:120)

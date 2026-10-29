@@ -58,6 +58,11 @@ public struct GitRepository {
         executor = { try remote.git($1,directory:$0,input:$2,timeout:$3) }
     }
     init(directory: String,remote: SSHRemote?,executor: @escaping Executor) { self.directory = directory; self.remote = remote; self.executor = executor }
+    public func childRepository(_ path: String) throws -> GitRepository {
+        let path = try checked(path)
+        guard path != ".",!path.split(separator:"/").contains(".git") else { throw GitError.invalidPath }
+        var child = self; child.directory = (directory as NSString).appendingPathComponent(path); return child
+    }
     public func resolvedWorkingTree() throws -> GitRepository {
         var path = try run(["rev-parse","--show-toplevel"])
         if path.hasSuffix("\n") { path.removeLast() }
