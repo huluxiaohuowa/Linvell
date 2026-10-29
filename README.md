@@ -56,4 +56,3 @@ gh workflow run release.yml --field bump=patch
 The workflow uses the repository Actions Secret `APPLE_RELEASE_CONFIG`, containing only the shared Developer ID Application certificate and App Store Connect notarization key. It materializes these outside the checkout, uses a temporary protected keychain, removes the credentials after the run, and uploads only signed distribution artifacts. Pull requests never receive these secrets.
 
 `python3 script/update_version.py` still defaults to a patch increment for manual version preparation; `minor` and `major` remain explicit. Pushing a matching stable `vX.Y.Z` tag also builds the already-committed version. See [CI release details](docs/CI_RELEASE.md). Local debug builds remain available through the Run script.
-
