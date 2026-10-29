@@ -38,7 +38,7 @@ final class RemoteExplorer: NSView, NSOutlineViewDataSource, NSOutlineViewDelega
         table.setAccessibilityLabel(L.text("Remote project files"))
         let scroll = ResponsiveScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true; scroll.drawsBackground = false
         Theme.pin(Theme.stack([title,Theme.stack([open,create,shell,NSView(),refresh],spacing:4),note,scroll],orientation:.vertical,spacing:10),in:self,inset:12)
-        reload()
+        rootNode.wantsExpanded = true; load(rootNode)
     }
     required init?(coder: NSCoder) { fatalError() }
     func outlineView(_ outlineView: NSOutlineView,numberOfChildrenOfItem item: Any?) -> Int { item == nil ? 1 : (item as? RemoteTreeNode)?.children?.count ?? 0 }
@@ -63,23 +63,39 @@ final class RemoteExplorer: NSView, NSOutlineViewDataSource, NSOutlineViewDelega
     }
     @objc private func chooseFolder() { onChooseFolder?() }
     @objc private func terminal() { onTerminal?() }
-    @objc func reload() { rootNode.children = nil; rootNode.wantsExpanded = true; table.reloadData(); load(rootNode) }
-    private func load(_ node: RemoteTreeNode) {
+    @objc func reload() { rootNode.wantsExpanded = true; load(rootNode,force:true) }
+    private func apply(_ reply: RemoteReply,to node: RemoteTreeNode) {
+        if node === rootNode,let path = reply.path { node.path = path; node.name = URL(fileURLWithPath:path).lastPathComponent }
+        let entries = reply.entries ?? []
+        let existing = node.children ?? []
+        let unchanged = node.children != nil && existing.count == entries.count && zip(existing,entries).allSatisfy { $0.name == $1.name && $0.path == $1.path && $0.isDirectory == $1.directory }
+        guard !unchanged else { return }
+        let retained = Dictionary(existing.map { ($0.path,$0) },uniquingKeysWith:{ first,_ in first })
+        node.children = entries.map { entry in
+            if let old = retained[entry.path],old.isDirectory == entry.directory,old.name == entry.name { return old }
+            return RemoteTreeNode(name:entry.name,path:entry.path,directory:entry.directory)
+        }
+        func expandedNodes(_ nodes: [RemoteTreeNode]) -> [RemoteTreeNode] {
+            nodes.flatMap { child in table.isItemExpanded(child) ? [child]+expandedNodes(child.children ?? []) : [] }
+        }
+        let expanded = expandedNodes(existing)
+        table.reloadItem(node,reloadChildren:true)
+        if node.wantsExpanded { table.expandItem(node) }
+        for child in expanded { table.expandItem(child) }
+    }
+    private func load(_ node: RemoteTreeNode,force: Bool = false) {
         guard !node.loading else { return }; node.loading = true
-        note.stringValue = L.text("Loading remote folder…")
+        if let cached = connection.cachedDirectory(node.path) { apply(cached,to:node) }
+        if node.children == nil { note.stringValue = L.text("Loading remote folder…") }
         let root = rootNode,remote = connection
         DispatchQueue.global(qos:.userInitiated).async { [weak self,weak node] in
             guard let node else { return }
-            let result = Result { try remote.request("list",path:node.path) }
+            let result = Result { try remote.listDirectory(node.path,force:force) }
             DispatchQueue.main.async {
                 guard let self,self.rootNode === root else { return }; node.loading = false
                 switch result {
                 case .success(let reply):
-                    if node === root,let path = reply.path { node.path = path; node.name = URL(fileURLWithPath:path).lastPathComponent }
-                    node.children = (reply.entries ?? []).map { RemoteTreeNode(name:$0.name,path:$0.path,directory:$0.directory) }
-                    self.note.stringValue = ""
-                    if node === root { self.table.reloadData() } else { self.table.reloadItem(node,reloadChildren:true) }
-                    if node.wantsExpanded { self.table.expandItem(node) }
+                    self.apply(reply,to:node); self.note.stringValue = ""
                     if node === root { self.onRootLoaded?(reply.path ?? node.path) }
                 case .failure(let error): self.note.stringValue = error.localizedDescription
                 }
@@ -93,14 +109,15 @@ final class RemoteExplorer: NSView, NSOutlineViewDataSource, NSOutlineViewDelega
         alert.addButton(withTitle:L.text("Create")); alert.addButton(withTitle:L.text("Cancel"))
         guard alert.runModal() == .alertFirstButtonReturn,!name.stringValue.isEmpty else { return }
         let selected = table.item(atRow:table.selectedRow) as? RemoteTreeNode
-        let base = selected?.isDirectory == true ? selected!.path : directory
+        let target = selected?.isDirectory == true ? selected! : rootNode
+        let base = target.path
         let path = (base as NSString).appendingPathComponent(name.stringValue),remote = connection
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
             let result = Result { try remote.request("create",path:path) }
             DispatchQueue.main.async {
                 guard let self else { return }
                 switch result {
-                case .success(let reply): self.reload(); self.onOpen?(reply.path ?? path)
+                case .success(let reply): self.load(target,force:true); self.onOpen?(reply.path ?? path)
                 case .failure(let error): self.note.stringValue = error.localizedDescription
                 }
             }

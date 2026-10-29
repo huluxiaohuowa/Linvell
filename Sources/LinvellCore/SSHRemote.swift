@@ -45,7 +45,7 @@ public enum SSHConfig {
     }
 }
 
-public struct RemoteEntry: Decodable {
+public struct RemoteEntry: Decodable, Equatable {
     public let name: String
     public let path: String
     public let directory: Bool
@@ -84,6 +84,7 @@ public struct SSHRemote {
         guard let line = result.output.components(separatedBy:.newlines).last(where:{ $0.hasPrefix("LINVELL_JSON:") }) else { throw GitError.command("The remote host needs Python 3 to browse and edit files. Open its SSH terminal to check authentication and Python availability.") }
         let reply = try JSONDecoder().decode(RemoteReply.self,from:Data(line.dropFirst("LINVELL_JSON:".count).utf8))
         if let error = reply.error { throw GitError.command(error) }
+        if operation == "create" { RemoteDirectoryCache.shared.invalidate(host:host) }
         return reply
     }
     public static func gitCommand(_ arguments: [String],directory: String) -> String {

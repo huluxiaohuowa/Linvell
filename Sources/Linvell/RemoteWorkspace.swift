@@ -84,11 +84,11 @@ final class RemoteBrowser: NSView, NSTableViewDelegate, NSTableViewDataSource {
         return RemoteEntryCell.make(in:tableView,name:entry.name,path:entry.path,directory:entry.directory)
     }
     @objc private func openSelected() {
-        guard entries.indices.contains(table.selectedRow) else { return }; let entry = entries[table.selectedRow]
+        guard !isLoading,entries.indices.contains(table.selectedRow) else { return }; let entry = entries[table.selectedRow]
         if entry.directory { browse(entry.path) } else { onOpen?(entry.path) }
     }
     @objc private func go() { browse(pathField.stringValue) }
-    @objc private func refresh() { browse(directory) }
+    @objc private func refresh() { browse(directory,force:true) }
     @objc private func parent() { browse((directory as NSString).deletingLastPathComponent) }
     @objc private func shell() { onTerminal?() }
     @objc func createFile() {
@@ -110,23 +110,38 @@ final class RemoteBrowser: NSView, NSTableViewDelegate, NSTableViewDataSource {
             }
         }
     }
-    func browse(_ path: String) {
-        let request = UUID(); generation = request; isLoading = true; table.deselectAll(nil); onSelectionChanged?(); note.stringValue = L.text("Connecting…")
+    func browse(_ path: String,force: Bool = false) {
+        let request = UUID(); generation = request
+        let cached = connection.cachedDirectory(path)
+        if let cached { apply(cached,fallback:path) }
+        isLoading = cached == nil
+        if isLoading { table.deselectAll(nil); note.stringValue = L.text("Connecting…") }
+        onSelectionChanged?()
         let remote = connection
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
-            let result = Result { try remote.request("list",path:path) }
+            let result = Result { try remote.listDirectory(path,force:force) }
             DispatchQueue.main.async {
                 guard let self,self.generation == request else { return }
                 self.isLoading = false
                 defer { self.onSelectionChanged?() }
                 switch result {
-                case .success(let reply):
-                    self.entries = (reply.entries ?? []).filter { !self.directoriesOnly || $0.directory }; self.directory = reply.path ?? path
-                    self.pathField.stringValue = self.directory; self.note.stringValue = L.format("%d entries",self.entries.count)
-                    self.onDirectory?(self.directory); self.table.reloadData(); self.table.deselectAll(nil)
+                case .success(let reply): self.apply(reply,fallback:path)
                 case .failure(let error): self.note.stringValue = error.localizedDescription
                 }
             }
         }
+    }
+    private func apply(_ reply: RemoteReply,fallback: String) {
+        let updated = (reply.entries ?? []).filter { !directoriesOnly || $0.directory }
+        let path = reply.path ?? fallback
+        let changed = directory != path || entries != updated
+        let selected = directory == path && entries.indices.contains(table.selectedRow) ? entries[table.selectedRow].path : nil
+        entries = updated; directory = path; pathField.stringValue = path
+        note.stringValue = L.format("%d entries",entries.count)
+        if changed {
+            table.reloadData(); table.deselectAll(nil)
+            if let selected,let index = entries.firstIndex(where:{ $0.path == selected }) { table.selectRowIndexes(IndexSet(integer:index),byExtendingSelection:false) }
+        }
+        onDirectory?(path)
     }
 }
