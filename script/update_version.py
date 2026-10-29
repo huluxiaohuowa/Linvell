@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Increment the app version: patch by default, or explicitly minor / major."""
+"""Increment patch (default), minor or major; patch/minor carry at 1000."""
 import argparse
 from pathlib import Path
 import plistlib
@@ -15,6 +15,9 @@ def next_version(current, level="patch"):
     position = {"major": 0, "minor": 1, "patch": 2}[level]
     values[position] += 1
     values[position + 1:] = [0] * (2 - position)
+    for index in (2, 1):
+        carry, values[index] = divmod(values[index], 1000)
+        values[index - 1] += carry
     return ".".join(map(str, values))
 
 def main():

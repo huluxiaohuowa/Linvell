@@ -6,6 +6,8 @@ The `Release macOS` workflow runs on the standard `macos-15-intel` GitHub-hosted
 
 `gh workflow run release.yml --field bump=patch` defaults to one patch increment. Choose `minor` or `major` explicitly. The workflow commits the resulting application version before building. A stable `vX.Y.Z` tag can instead build a version already committed in `Resources/Info.plist`; matching committed release notes are required for tag releases.
 
+Version components use a carry threshold of **1000** for patch and minor; major has no fixed ceiling. For example, patch updates go `0.2.9 → 0.2.10`, `0.2.999 → 0.3.0`, and `0.999.999 → 1.0.0`. An explicit minor update clears patch (`0.2.123 → 0.3.0`), and an explicit major update clears both lower components (`0.2.123 → 1.0.0`). `CFBundleVersion` remains an independent integer build counter.
+
 Local `python3 script/update_version.py` remains patch-by-default. Local production packaging is optional for explicit diagnostics; normal distribution runs in CI.
 
 ## Credentials
