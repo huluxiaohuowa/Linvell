@@ -28,3 +28,10 @@ Final broad local regression run: 108 native/UI tests and 172 core tests, zero f
 ## CI artifact isolation correction
 
 The first release CI run failed before publication. The installation snapshot test wrote to a task-specific build directory that happened to exist on the development Mac and was absent on the runner. The test now creates its destination, honors `LINVELL_UI_ARTIFACT_DIR`, and otherwise uses the standard build directory. A local rerun with a newly absent nested artifact directory passed. Build diagnostics now retain early compiler/XCTest errors ahead of the bounded log tail; the diagnostic regression and release-script checks passed. Signing/notarization tool output remains protected.
+
+
+## Published artifact verification
+
+The corrected [0.2.7 release/Homebrew workflow](https://github.com/huluxiaohuowa/Linvell/actions/runs/41018296152) succeeded, including its complete test stage. [Release v0.2.7](https://github.com/huluxiaohuowa/Linvell/releases/tag/v0.2.7) is public. The downloaded app reports 0.2.7 and contains `x86_64 arm64`; strict/deep signature verification, Gatekeeper assessment and stapled ticket validation all passed. The signed 0.2.6 → 0.2.7 upgrade test passed without replacing the installed app.
+
+The Homebrew Cask reports 0.2.7. Its checksum matches the downloaded ZIP: `e2b7d0d73f118c6257c1bfff22949cc31b1304c1044b7aaa56497d135c29f439`. No standalone test Linvell instances remain. System filesystem software was not installed as part of this work; physical SSHFS mounting still requires separate acceptance after installation.

@@ -1,3 +1,9 @@
+# Linvell 0.2.7 — published (2026-10-30)
+
+[0.2.7](https://github.com/huluxiaohuowa/Linvell/releases/tag/v0.2.7) synchronizes provider/local/SSH selection with the actual displayed Agent terminal and restores the last selected session for each combination. Empty combinations show setup guidance while other processes continue running. The open-session menu synchronizes the sidebar controls and identifies the execution host. DSH task and CLI prerequisites are explicit; local SSH-project mode includes installation detection, Homebrew command copying, official macFUSE instructions, recheck and project connection actions.
+
+Acceptance includes a failing 0.2.6 baseline reproduction and passing revised regression, a three-provider/two-location matrix checking actual terminal identity and PIDs, and missing-dependency actions. Local broad regression and corrected CI passed; signed Universal distribution, notarization, 0.2.6 → 0.2.7 upgrade and downstream Homebrew publication were verified. Physical SSHFS mounting remains unverified until the external prerequisites are installed. [Evidence and limits](validation/2026-10-30-agent-selection-and-installation.md).
+
 # Linvell 0.2.6 — published (2026-10-30)
 
 [0.2.6](https://github.com/huluxiaohuowa/Linvell/releases/tag/v0.2.6) fixes Agent workbenches staying attached to a previous local project after opening SSH. Session history and CLI selection now follow the project directory and SSH host. Remote projects expose the local/SSH execution selector; retained sessions continue running and are restored when returning to their project. The left Session interface remains available. All retained project sessions participate in shutdown.
