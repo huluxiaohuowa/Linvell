@@ -1270,11 +1270,15 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         let stripe = NSImage (size: size)
         stripe.addRepresentation (bitmapImage)
 
-        stripe.lockFocus()
+        // Keep the retained bitmap and the rendered representation identical.
+        // lockFocus() may add a cache while leaving bitmapImage transparent.
+        guard let context = NSGraphicsContext(bitmapImageRep: bitmapImage) else { return nil }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
         let srcRect = CGRect(x: 0, y: CGFloat(srcY), width: image.size.width, height: srcHeight)
         let destRect = CGRect(x: 0, y: 0, width: width, height: dstHeight)
         image.draw(in: destRect, from: srcRect, operation: .copy, fraction: 1.0)
-        stripe.unlockFocus()
+        NSGraphicsContext.restoreGraphicsState()
         return stripe
     }
     

@@ -158,7 +158,7 @@ extension AgentWorkspaceTests {
         try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
         let file = root.appendingPathComponent("note.txt"),image = root.appendingPathComponent("picture.png")
         try Data("one\ntwo\nthree\n".utf8).write(to:file)
-        let png = try XCTUnwrap(Data(base64Encoded:"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="))
+        let png = try XCTUnwrap(Data(base64Encoded:"iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGUlEQVR4nGP4z8DwnxLMMGrAqAGjBgwXAwAwxP4QHCfkAAAAAABJRU5ErkJggg=="))
         try png.write(to:image)
         let workspace = WorkspaceController(),view = AgentWorkspace(project:root.path,remote:nil,autoLoad:false)
         workspace.root = FileNode(root); workspace.agentWorkspace = view
@@ -184,8 +184,28 @@ extension AgentWorkspaceTests {
         XCTAssertTrue(runtime.terminal.getTerminal().buffer.hasAnyImages)
         view.startNew(); view.activate(runtime)
         XCTAssertTrue(runtime.terminal.getTerminal().buffer.hasAnyImages)
-        let bitmap = try XCTUnwrap(runtime.terminal.bitmapImageRepForCachingDisplay(in:runtime.terminal.bounds))
-        runtime.terminal.cacheDisplay(in:runtime.terminal.bounds,to:bitmap)
+        // Give the detached rendering check a stable viewport; AppKit can leave
+        // a terminal at its fitting size while test windows exchange key status.
+        runtime.terminal.removeFromSuperview(); runtime.terminal.translatesAutoresizingMaskIntoConstraints = true
+        runtime.terminal.frame = NSRect(x:0,y:0,width:800,height:600)
+        runtime.terminal.layoutSubtreeIfNeeded()
+        runtime.terminal.getTerminal().resize(cols:80,rows:24)
+        runtime.terminal.scroll(toPosition:1)
+        runtime.terminal.feed(text:"\u{1b}[2J\u{1b}[H\u{1b}]1337;File=inline=1;width=32px;height=32px:"+png.base64EncodedString()+"\u{7}")
+        pump(0.1)
+        runtime.terminal.scroll(toPosition:1)
+        let rendered = NSImage(size:runtime.terminal.bounds.size)
+        rendered.lockFocus()
+        runtime.terminal.draw(runtime.terminal.bounds)
+        rendered.unlockFocus()
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(data:try XCTUnwrap(rendered.tiffRepresentation)))
+        let redPixels = (0..<min(96,bitmap.pixelsWide)).contains { x in
+            (0..<bitmap.pixelsHigh).contains { y in
+                guard let color = bitmap.colorAt(x:x,y:y)?.usingColorSpace(.deviceRGB) else { return false }
+                return color.redComponent > 0.65 && color.redComponent > color.greenComponent+0.3 && color.redComponent > color.blueComponent+0.3
+            }
+        }
+        XCTAssertTrue(redPixels,"The terminal must draw the inline image, not merely retain its metadata.")
         try bitmap.representation(using:.png,properties:[:])?.write(to:root.deletingLastPathComponent().appendingPathComponent("inline-image.png"))
     }
     func testFileLinkParsingAndRemoteNamespace() throws {
