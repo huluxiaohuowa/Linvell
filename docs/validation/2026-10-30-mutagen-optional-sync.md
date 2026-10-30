@@ -28,4 +28,3 @@ No new model API calls or five-provider authentication/context-restoration accep
 - The extracted application reports 0.2.8, contains arm64 and x86_64, passes deep/strict signature verification, Gatekeeper assessment and stapled notarization-ticket validation. It was not launched or installed; its temporary Launch Services registration was removed.
 - The final affected Agent suites also cover opening both conflict versions inside the same workspace, safe-path validation, reviewed merge resolution and a failed conflict connection exposing review without leaving synchronization processes running.
 - No Mutagen process or standalone QA Linvell app remained after acceptance. Approximately 212 MB of temporary Mutagen download/test runtime files were removed; logs retained under the build directory.
-
