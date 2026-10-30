@@ -6,6 +6,9 @@ import Darwin
 /// Native controls around the providers' own interactive CLIs. No model runtime.
 final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate, LocalProcessTerminalViewDelegate {
     let configurationView = NSView()
+    let installationHint = Theme.label("",size:12,color:Theme.secondary)
+    let installationGuide = NSButton()
+    private let installationGuidance = NSStackView()
     var onStart: (() -> Void)?
     var onOpenFile: ((String, SSHRemote?, Int?) -> Void)?
     let openSessions = NSPopUpButton()
@@ -43,6 +46,12 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
     private var syncTimer: Timer?
     private var checkingSync = false
     private var closed = false
+    private var startingDSH: AgentRuntime? { runtimes.first { $0.context.kind == .dsh && $0.starting && channel(of:$0) == selectedChannel } }
+    private var runtimeRows: [String:AgentRuntime] = [:]
+    private var rebuildingRows = false
+    private var historyTimer: Timer?
+    private var historyError: String?
+    private var isolatedCodexPath: String?
     private static let syncQueue = DispatchQueue(label:"top.fuluwa.linvell.agent-sync",qos:.userInitiated)
     let syncStatus = NSTextField(labelWithString: "")
     let syncAvailability = NSTextField(labelWithString: "")
@@ -85,6 +94,11 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         historyStatus.maximumNumberOfLines = 3; historyStatus.lineBreakMode = .byWordWrapping; historyStatus.isHidden = true
         func button(_ button: NSButton,_ title: String,_ action: Selector) { button.title = L.text(title); button.target = self; button.action = action; button.bezelStyle = .rounded }
         button(refresh,"Refresh",#selector(reload)); button(newSession,"New Session",#selector(startNew)); button(resume,"Resume Session",#selector(resumeSelected)); button(stop,"Stop",#selector(stopAgent))
+        button(installationGuide,"Installation Guide…",#selector(openInstallationGuide))
+        installationHint.maximumNumberOfLines = 0; installationHint.lineBreakMode = .byWordWrapping
+        installationHint.setContentCompressionResistancePriority(.defaultLow,for:.horizontal)
+        installationGuidance.orientation = .vertical; installationGuidance.alignment = .leading; installationGuidance.spacing = 6
+        [installationHint,installationGuide].forEach { installationGuidance.addArrangedSubview($0) }
         button(browse,"Choose CLI…",#selector(chooseCLI)); button(connectSync,"Connect with Mutagen",#selector(connectProject))
         button(reviewConflicts,"Review Sync Conflicts…",#selector(showSyncConflicts)); reviewConflicts.isHidden = true
         let column = NSTableColumn(identifier:NSUserInterfaceItemIdentifier("agentSessions")); table.addTableColumn(column); table.headerView = nil
@@ -102,7 +116,7 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         configurationDetails.orientation = .vertical; configurationDetails.alignment = .leading; configurationDetails.spacing = 8
         [installationsPicker,Theme.stack([path,browse],spacing:6),agentHome].forEach { configurationDetails.addArrangedSubview($0) }
         configurationDetails.isHidden = true
-        let rows: [NSView] = [heading,location,kindPicker,newSession,mappingRow,search,historyStatus,scroll,resume,settingsToggle,configurationDetails]
+        let rows: [NSView] = [heading,location,kindPicker,installationGuidance,newSession,mappingRow,search,historyStatus,scroll,resume,settingsToggle,configurationDetails]
         let configuration = Theme.stack(rows,orientation:.vertical,spacing:10)
         let outer = ResponsiveScrollView(); outer.hasVerticalScroller = true; outer.drawsBackground = false
         let document = AgentConfigurationDocument(); document.translatesAutoresizingMaskIntoConstraints = false; outer.documentView = document
@@ -116,6 +130,9 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         openSessions.setAccessibilityLabel(L.text("Open agent sessions"))
         openSessions.setContentCompressionResistancePriority(.defaultLow,for:.horizontal)
         let mainHeading = Theme.stack([openSessions,NSView(),openFile,stop])
+        mainHeading.heightAnchor.constraint(equalToConstant:28).isActive = true
+        [scope,status].forEach { $0.setContentHuggingPriority(.required,for:.vertical); $0.setContentCompressionResistancePriority(.required,for:.vertical) }
+        terminalHost.setContentHuggingPriority(.init(1),for:.vertical)
         Theme.pin(Theme.stack([mainHeading,scope,status,terminalHost],orientation:.vertical,spacing:12),in:self,inset:20)
         emptyMessage.maximumNumberOfLines = 0; emptyMessage.lineBreakMode = .byWordWrapping
         let emptyContent = Theme.stack([emptyMessage,syncGuide],orientation:.vertical,spacing:20)
@@ -134,15 +151,20 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         let title = Theme.label(session.title == session.id || session.title == "Untitled session" ? L.text("Untitled session") : session.title,size:13); title.lineBreakMode = .byTruncatingTail
         title.toolTip = session.title
         let date = Date(timeIntervalSince1970:session.updated).formatted(date:.abbreviated,time:.shortened)
-        let detail = Theme.label(date+" · "+String(session.id.prefix(8))+(session.cwd == project ? "" : " · "+URL(fileURLWithPath:session.cwd).lastPathComponent),size:10,color:Theme.secondary); detail.lineBreakMode = .byTruncatingMiddle; detail.toolTip = session.cwd+"\n"+session.id
+        let state = runtimeRows[session.id].map { L.text($0.terminal.process.running ? "Running" : "Stopped") } ?? String(session.id.prefix(8))
+        let detail = Theme.label(date+" · "+state+(session.cwd == project ? "" : " · "+URL(fileURLWithPath:session.cwd).lastPathComponent),size:10,color:Theme.secondary); detail.lineBreakMode = .byTruncatingMiddle; detail.toolTip = session.cwd+(session.id.hasPrefix("linvell-open:") ? "" : "\n"+session.id)
         let stack = NSStackView(views:[title,detail]); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 4
         stack.edgeInsets = NSEdgeInsets(top:6,left:10,bottom:6,right:10)
         return stack
     }
-    func tableViewSelectionDidChange(_ notification: Notification) { updateControls() }
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        guard !rebuildingRows else { return }
+        if filtered.indices.contains(table.selectedRow),let runtime = runtimeRows[filtered[table.selectedRow].id],runtime !== activeRuntime { activate(runtime) }
+        updateControls()
+    }
     func controlTextDidChange(_ notification: Notification) {
         if notification.object as? NSSearchField === search { filterSessions() }
-        else { generation = UUID(); loading = false; selectionMessage = nil; sessions = []; filterSessions() }
+        else { generation = UUID(); loading = false; selectionMessage = nil; sessions = []; filterSessions(); updateControls() }
     }
     func controlTextDidEndEditing(_ notification: Notification) { if notification.object as? NSSearchField !== search { saveSettings(); reload() } }
     @objc private func toggleSettings() { configurationDetails.isHidden = settingsToggle.state != .on }
@@ -175,11 +197,20 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         guard installations.indices.contains(installationsPicker.indexOfSelectedItem) else { return }
         path.stringValue = installations[installationsPicker.indexOfSelectedItem].path; saveSettings(); generation = UUID(); loading = false; reload()
     }
+    @objc private func openInstallationGuide() { NSWorkspace.shared.open(kind.installationGuide) }
+    private func updateInstallationGuidance() {
+        let executable = (path.stringValue as NSString).expandingTildeInPath
+        let missing = executable.isEmpty || (!usesSSH && !FileManager.default.isExecutableFile(atPath:executable))
+        let missingTUI = kind == .dsh && !usesSSH && !missing && !AgentCLI.isDSHTUI(executable) && !AgentCLI.hasDSHTUIProfile(home:(agentHome.stringValue as NSString).expandingTildeInPath)
+        installationGuidance.isHidden = loading || (!missing && !missingTUI)
+        installationHint.stringValue = missingTUI ? L.text("DSH terminal sessions require a compatible TUI. Install dsh-tui, then choose its executable in Agent Settings.") : L.format("No usable %@ CLI was detected. Install it, or choose an existing executable in Agent Settings.",kind.title)
+    }
     private func updateControls() {
+        updateInstallationGuidance()
         [kindPicker,installationsPicker,location,path,agentHome,browse,connectSync].forEach { $0.isEnabled = true }
         connectSync.isEnabled = !syncing; syncGuide.connect.isEnabled = !syncing
         refresh.isEnabled = !loading
-        newSession.isEnabled = !(syncing && !usesSSH); newSession.toolTip = launchHint
+        newSession.isEnabled = !(syncing && !usesSSH) && !(kind == .dsh && startingDSH != nil); newSession.toolTip = launchHint
         resume.isEnabled = !(syncing && !usesSSH) && filtered.indices.contains(table.selectedRow); stop.isEnabled = terminal?.process.running == true; openFile.isEnabled = terminal != nil
         browse.isHidden = usesSSH; connectSync.isHidden = remote == nil || usesSSH
         mappingRow.isHidden = remote == nil || usesSSH
@@ -199,38 +230,45 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         guard !loading else { return }
         let selectedID = filtered.indices.contains(table.selectedRow) ? filtered[table.selectedRow].id : nil
         let request = UUID(); generation = request; loading = true
-        sessions = []; historyStatus.stringValue = L.text("Loading agent sessions…"); historyStatus.isHidden = false
+        historyStatus.stringValue = L.text("Loading agent sessions…"); historyStatus.isHidden = false
         if activeRuntime == nil { status.stringValue = selectionMessage ?? L.text("Loading agent sessions…") }; filterSessions()
         let remote = usesSSH ? self.remote : nil,kind = kind,path = path.stringValue,home = agentHome.stringValue
         let project = executionDirectory,expectedMapping = self.remote != nil && !usesSSH ? mapping : nil
+        let live = usesSSH ? [] : runtimes.filter { $0.context.kind == kind && $0.context.host == nil && $0.terminal.process.running }.map { AgentLiveSessions.ProcessSnapshot(id:$0.id,pid:$0.terminal.process.shellPid,directory:$0.directory) }
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
-            let result = Result { () throws -> ([AgentInstallation],[AgentSession]) in
+            let result = Result { () throws -> ([AgentInstallation],[AgentSession],[UUID:String],String?) in
                 if let remote {
                     let snapshot = try remote.agentSnapshot(project:project ?? "~",kind:kind,executable:path.isEmpty ? nil : path,agentHome:home.isEmpty ? nil : home)
-                    return (snapshot.installations.filter { $0.kind == kind },snapshot.sessions)
+                    return (snapshot.installations.filter { $0.kind == kind },snapshot.sessions,[:],nil)
                 }
                 let found = AgentCLI.discover().filter { $0.kind == kind }
-                guard let project else { return (found,[]) }
+                guard let project else { return (found,[],[:],nil) }
                 try expectedMapping?.validate()
                 var env = AgentCLI.environment
                 if let variable = kind.homeVariable,!home.isEmpty { env[variable] = (home as NSString).expandingTildeInPath }
                 let executable = path.isEmpty ? found.first?.path : (path as NSString).expandingTildeInPath
                 let storage = AgentCLI.defaultStorage(kind,environment:env)
-                return (found,try AgentCLI.sessions(kind:kind,project:project,storage:storage,executable:executable,environment:env))
+                let sessions = try AgentCLI.sessions(kind:kind,project:project,storage:storage,executable:executable,environment:env)
+                let isolated = kind == .codex && executable.map { AgentCLI.supportsIsolatedCodex($0,environment:env) } == true ? executable : nil
+                return (found,sessions,AgentLiveSessions.bindings(live,sessions:sessions),isolated)
             }
             DispatchQueue.main.async {
                 guard let self,self.generation == request else { return }
                 self.loading = false
                 switch result {
-                case .success(let (found,sessions)):
+                case .success(let (found,sessions,bindings,isolated)):
+                    self.historyError = nil; self.isolatedCodexPath = isolated
+                    let selectedRuntime = selectedID.flatMap { self.runtimeRows[$0] }
+                    for runtime in self.runtimes { if let id = bindings[runtime.id] { runtime.sessionID = id } }
                     self.installations = found; self.installationsPicker.removeAllItems()
                     self.installationsPicker.addItems(withTitles:found.map { $0.source+" · "+$0.path })
                     if self.path.stringValue.isEmpty,let first = found.first { self.path.stringValue = first.path; self.saveSettings() }
+                    if kind == .dsh,(self.path.stringValue as NSString).lastPathComponent == "dsh",let tui = found.first(where:{ AgentCLI.isDSHTUI($0.path) }) { self.path.stringValue = tui.path; self.saveSettings() }
                     if let index = found.firstIndex(where:{ $0.path == self.path.stringValue }) { self.installationsPicker.selectItem(at:index) }
-                    self.sessions = sessions; self.filterSessions(select:selectedID)
-                    self.historyStatus.stringValue = L.format("%d project sessions",sessions.count)
+                    self.sessions = sessions; self.filterSessions(select:selectedRuntime?.sessionID ?? selectedID)
                     if self.activeRuntime == nil { self.status.stringValue = self.selectionMessage ?? self.historyStatus.stringValue }
                 case .failure(let error):
+                    self.historyError = error.localizedDescription
                     self.historyStatus.stringValue = String(error.localizedDescription.prefix(240)); self.historyStatus.toolTip = error.localizedDescription
                     if self.activeRuntime == nil { self.status.stringValue = self.selectionMessage ?? error.localizedDescription }
                 }
@@ -239,9 +277,21 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         }
     }
     private func filterSessions(select id: String? = nil) {
+        guard !rebuildingRows else { return }; rebuildingRows = true; defer { rebuildingRows = false }
         let selectedID = id ?? (filtered.indices.contains(table.selectedRow) ? filtered[table.selectedRow].id : nil)
         let query = search.stringValue
-        filtered = sessions.filter { query.isEmpty || ($0.title+" "+$0.id).localizedCaseInsensitiveContains(query) }
+        var entries = sessions; runtimeRows = [:]
+        for runtime in runtimes where channel(of:runtime) == selectedChannel {
+            let key = runtime.sessionID ?? "linvell-open:"+runtime.id.uuidString
+            if runtimeRows[key] != nil,runtime !== activeRuntime { continue }
+            runtimeRows[key] = runtime
+            let row = AgentSession(id:key,title:runtime.title,cwd:runtime.directory,locator:key,updated:runtime.openedAt)
+            if let index = entries.firstIndex(where:{ $0.id == key }) {
+                if runtime.title != L.text("New Session") { entries[index].title = runtime.title }
+            } else { entries.insert(row,at:0) }
+        }
+        filtered = entries.filter { query.isEmpty || ($0.title+" "+$0.id).localizedCaseInsensitiveContains(query) }
+        if historyError == nil { historyStatus.stringValue = L.format("%d project sessions",entries.count) }
         table.reloadData()
         if let selectedID,let index = filtered.firstIndex(where:{ $0.id == selectedID }) { table.selectRowIndexes(IndexSet(integer:index),byExtendingSelection:false) }
         else { table.deselectAll(nil) }
@@ -295,7 +345,12 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         }
     }
     @objc func startNew() { start(session:nil) }
-    @objc func resumeSelected() { guard filtered.indices.contains(table.selectedRow) else { return }; start(session:filtered[table.selectedRow]) }
+    @objc func resumeSelected() {
+        guard filtered.indices.contains(table.selectedRow) else { return }
+        let session = filtered[table.selectedRow]
+        if let runtime = runtimeRows[session.id],runtime.terminal.process.running || runtime.sessionID == nil { activate(runtime); return }
+        start(session:session)
+    }
     private func matchingRuntime(_ session: AgentSession) -> AgentRuntime? {
         let executable = usesSSH ? path.stringValue : (path.stringValue as NSString).expandingTildeInPath
         let home = usesSSH ? agentHome.stringValue : (agentHome.stringValue as NSString).expandingTildeInPath
@@ -304,7 +359,9 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
     }
     func start(session: AgentSession?) { start(session:session,synchronized:false) }
     private func start(session: AgentSession?,synchronized: Bool) {
+        if let session,let existing = runtimeRows[session.id],existing.terminal.process.running || existing.sessionID == nil { activate(existing); return }
         if let session,let existing = matchingRuntime(session) { activate(existing); return }
+        if kind == .dsh,let startingDSH { activate(startingDSH); return }
         selectionMessage = nil
         guard !path.stringValue.isEmpty else {
             selectionMessage = L.text("Choose an agent CLI in Agent Settings, then create a session.")
@@ -330,11 +387,15 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
             if !usesSSH,!FileManager.default.isExecutableFile(atPath:executable) { throw GitError.command("The agent CLI is unavailable.") }
             let home = usesSSH ? agentHome.stringValue : (agentHome.stringValue as NSString).expandingTildeInPath
             guard home.isEmpty || home.hasPrefix("/") else { throw GitError.command("Use an absolute agent home path.") }
+            if kind == .dsh,!usesSSH,!AgentCLI.isDSHTUI(executable),!AgentCLI.hasDSHTUIProfile(home:home) {
+                selectionMessage = L.text("DSH terminal sessions require a compatible TUI. Select your installed dsh-tui executable in Agent Settings. The Desktop CLI alone is not a TUI.")
+                status.stringValue = selectionMessage!; showSettings(); updateControls(); onStart?(); return
+            }
             saveSettings()
             let context = AgentRuntime.Context(kind:kind,host:usesSSH ? remote?.host : nil,executable:executable,home:home)
             let term = DisplayPacedTerminalView(frame:terminalHost.bounds); term.processDelegate = self
             let runtime = AgentRuntime(context:context,session:session,directory:directory,remote:usesSSH ? remote : nil,mapping:usesSSH ? nil : mapping,terminal:term)
-            if kind == .dsh { runtime.dshView = AgentDSHView(runtime:runtime) }
+            if kind == .dsh { runtime.starting = true }
             register(runtime)
             term.font = .monospacedSystemFont(ofSize:Theme.fontSize,weight:.regular)
             term.nativeBackgroundColor = Theme.canvas; term.nativeForegroundColor = Theme.foreground; term.caretColor = Theme.accent
@@ -342,21 +403,22 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
             var env = AgentCLI.environment; env["PATH"] = (executable as NSString).deletingLastPathComponent+":"+(env["PATH"] ?? "")
             if let variable = kind.homeVariable,!home.isEmpty { env[variable] = home }
             if usesSSH,let remote {
-                var arguments = kind.arguments(session:session)
-                var forwarding: [String] = []
-                if kind == .dsh {
-                    let port = try RunWorkspace.availablePort()
-                    arguments[arguments.count-1] = String(port)
-                    forwarding = ["-o","ExitOnForwardFailure=yes","-L","127.0.0.1:\(port):127.0.0.1:\(port)"]
-                }
                 var command = "PATH="+SSHRemote.quote((executable as NSString).deletingLastPathComponent)+":\"$PATH\"; export PATH; "
                 if let variable = kind.homeVariable,!home.isEmpty { command += "export "+variable+"="+SSHRemote.quote(home)+"; " }
-                command += "exec "+([executable]+arguments).map(SSHRemote.quote).joined(separator:" ")
-                term.startProcess(executable:"/usr/bin/ssh",args:["-tt"]+forwarding+["--",remote.host,RunTasks.remoteCommand(directory:directory,command:"/bin/sh -c "+SSHRemote.quote(command))],environment:env.map { "\($0.key)=\($0.value)" },currentDirectory:FileManager.default.homeDirectoryForCurrentUser.path)
+                command += "exec "+AgentCLI.command(executable:executable,kind:kind,session:session)
+                term.startProcess(executable:"/usr/bin/ssh",args:["-tt","--",remote.host,RunTasks.remoteCommand(directory:directory,command:"/bin/sh -c "+SSHRemote.quote(command))],environment:env.map { "\($0.key)=\($0.value)" },currentDirectory:FileManager.default.homeDirectoryForCurrentUser.path)
             } else {
-                term.startProcess(executable:executable,args:kind.arguments(session:session),environment:env.map { "\($0.key)=\($0.value)" },currentDirectory:directory)
+                let isolated = kind == .codex && (isolatedCodexPath == executable || AgentCLI.supportsIsolatedCodex(executable,environment:env))
+                term.startProcess(executable:executable,args:AgentCLI.arguments(executable:executable,kind:kind,session:session)+(isolated ? ["--no-daemon"] : []),environment:env.map { "\($0.key)=\($0.value)" },currentDirectory:directory)
             }
-            runtime.dshView?.start()
+            if runtime.starting {
+                DispatchQueue.main.asyncAfter(deadline:.now()+30) { [weak self,weak runtime] in
+                    guard let self,let runtime,runtime.starting else { return }
+                    runtime.starting = false; Self.terminate(runtime.terminal)
+                    self.selectionMessage = L.text("The DSH TUI did not become ready. Check its terminal output and compatibility with your installed DSH.")
+                    self.updateRuntimeControls(); self.status.stringValue = self.selectionMessage!
+                }
+            }
             updateRuntimeControls(); onStart?(); window?.makeFirstResponder(runtime.contentView)
         } catch { status.stringValue = error.localizedDescription }
     }
@@ -365,6 +427,13 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         runtime.terminal.processDelegate = self
         runtime.links.onOpen = { [weak self,weak runtime] link in if let runtime { self?.openLink(link,in:runtime) } }
         runtimes.append(runtime)
+        if historyTimer == nil {
+            historyTimer = Timer.scheduledTimer(withTimeInterval:5,repeats:true) { [weak self] _ in
+                guard let self,self.window != nil,self.runtimes.contains(where:{ self.channel(of:$0) == self.selectedChannel && $0.terminal.process.running }) else { return }
+                self.reload()
+            }
+        }
+        filterSessions()
     }
     @objc func selectOpenSession() {
         guard runtimes.indices.contains(openSessions.indexOfSelectedItem) else { return }
@@ -380,6 +449,7 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
             restoreSettings(); path.stringValue = runtime.context.executable; agentHome.stringValue = runtime.context.home
         }
         display(runtime)
+        filterSessions(select:runtime.sessionID ?? "linvell-open:"+runtime.id.uuidString)
         if changed { reload() }
         if focus { onStart?(); window?.makeFirstResponder(runtime.contentView) }
     }
@@ -406,12 +476,13 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         openSessions.isEnabled = !runtimes.isEmpty
         if let activeRuntime,let index = runtimes.firstIndex(where:{ $0 === activeRuntime }) {
             if openSessions.indexOfSelectedItem != index { openSessions.selectItem(at:index) }
-            status.stringValue = activeRuntime.exitCode.map { L.format("Exited with status %d",Int($0)) } ?? L.text(activeRuntime.terminal.process.running ? "Running" : "Stopped")
+            status.stringValue = activeRuntime.exitCode.map { L.format("Exited with status %d",Int($0)) } ?? L.text(activeRuntime.starting ? "Starting DeepSeek Harness…" : activeRuntime.terminal.process.running ? "Running" : "Stopped")
         } else {
             openSessions.selectItem(at:openSessions.numberOfItems-1)
             status.stringValue = selectionMessage ?? L.text("No open session for this agent and location")
         }
         updateControls()
+        filterSessions()
     }
     @objc func openSelectedFile() {
         guard let runtime = activeRuntime,let selection = runtime.terminal.getSelection() else { return }
@@ -454,6 +525,7 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
     func shutdown() {
         guard !closed else { return }; closed = true
         syncTimer?.invalidate(); syncTimer = nil
+        historyTimer?.invalidate(); historyTimer = nil
         for runtime in runtimes { Self.terminate(runtime.terminal) }
         Self.syncQueue.sync { syncService.release(client:syncClient) }
     }
@@ -516,8 +588,10 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
     }
     func sizeChanged(source: LocalProcessTerminalView,newCols: Int,newRows: Int) {}
     func setTerminalTitle(source: LocalProcessTerminalView,title: String) {
-        guard let runtime = runtimes.first(where:{ $0.terminal === source }),!title.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,runtime.title != String(title.prefix(160)) else { return }
-        runtime.title = String(title.prefix(160)); updateRuntimeControls()
+        guard let runtime = runtimes.first(where:{ $0.terminal === source }),!title.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { return }
+        guard runtime.starting || runtime.title != String(title.prefix(160)) else { return }
+        runtime.title = String(title.prefix(160)); runtime.starting = false
+        updateRuntimeControls()
     }
     func hostCurrentDirectoryUpdate(source: TerminalView,directory: String?) {
         guard let runtime = runtimes.first(where:{ $0.terminal === source }),let directory,
@@ -526,7 +600,8 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
     }
     func processTerminated(source: TerminalView,exitCode: Int32?) {
         guard let runtime = runtimes.first(where:{ $0.terminal === source }) else { return }
-        runtime.exitCode = exitCode ?? -1; updateRuntimeControls(); stopIdleSync()
+        runtime.exitCode = exitCode ?? -1; runtime.starting = false
+        updateRuntimeControls(); stopIdleSync()
     }
 }
 

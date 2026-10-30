@@ -11,9 +11,11 @@ final class AgentRuntime {
         let home: String
     }
     let context: Context
+    let id = UUID()
+    let openedAt = Date().timeIntervalSince1970
     var sessionID: String?
-    var dshView: AgentDSHView?
-    var contentView: NSView { dshView ?? terminal }
+    var starting = false
+    var contentView: NSView { terminal }
     let remote: SSHRemote?
     let mapping: AgentSyncMapping?
     let terminal: LocalProcessTerminalView

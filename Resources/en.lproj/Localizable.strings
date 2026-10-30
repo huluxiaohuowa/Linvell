@@ -995,3 +995,9 @@
 
 "Starting DeepSeek Harness…" = "Starting DeepSeek Harness…";
 "DeepSeek Harness could not open the conversation. Check the selected CLI and agent home, then try again." = "DeepSeek Harness could not open the conversation. Check the selected CLI and agent home, then try again.";
+
+"DSH terminal sessions require a compatible TUI. Select your installed dsh-tui executable in Agent Settings. The Desktop CLI alone is not a TUI." = "DSH terminal sessions require a compatible TUI. Select your installed dsh-tui executable in Agent Settings. The Desktop CLI alone is not a TUI.";
+"The DSH TUI did not become ready. Check its terminal output and compatibility with your installed DSH." = "The DSH TUI did not become ready. Check its terminal output and compatibility with your installed DSH.";
+"Installation Guide…" = "Installation Guide…";
+"DSH terminal sessions require a compatible TUI. Install dsh-tui, then choose its executable in Agent Settings." = "DSH terminal sessions require a compatible TUI. Install dsh-tui, then choose its executable in Agent Settings.";
+"No usable %@ CLI was detected. Install it, or choose an existing executable in Agent Settings." = "No usable %@ CLI was detected. Install it, or choose an existing executable in Agent Settings.";

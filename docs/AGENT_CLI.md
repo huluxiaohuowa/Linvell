@@ -18,7 +18,7 @@ Available in Linvell 0.2.4; concurrent sessions and corrected DSH titles are add
 
 切换 Agent 或 **本机／SSH 主机** 时，主界面同步切换到该组合上次选中的终端；没有已打开会话时显示空状态，原会话继续在后台运行。从顶部已打开会话菜单选择时，左侧 Agent 和执行位置也同步更新，菜单中标明本机或 SSH 主机名。
 
-**新建会话** 不再因为缺少配置而无说明地变灰：未选择 CLI 时展开对应设置，DSH 未填写任务时给出说明并聚焦任务输入。本机 Agent 操作远程项目时，先通过 Mutagen 完成初次同步，再启动 CLI。
+**新建会话** 不再因为缺少配置而无说明地变灰：未选择 CLI 时展开对应设置，未检测到可用 CLI 时直接显示安装提示与安装指南入口；DSH 只有 Desktop CLI 而没有兼容 TUI 时明确说明需要安装 TUI。本机 Agent 操作远程项目时，先通过 Mutagen 完成初次同步，再启动 CLI。
 
 本机模式提供 Mutagen 可选依赖检测。未安装时显示安装命令；安装后显示绿色能力提示，连接后的同步状态单独显示：
 
@@ -66,11 +66,15 @@ Agent 直接读写所选执行位置的项目文件；远程项目的本机模�
 
 Agent 直接运行在主工作区：左侧 Agents 侧栏选择服务商、安装和会话，右侧显示运行终端，不另开窗口。切回文件管理器、打开其他文件或切换侧栏都不会重建 CLI 或 PTY；再次点击 Agents 会回到同一个进程和终端。切换项目不会暗中改变运行中 Agent 的目录。点击“停止”或退出工作区才会停止进程。
 
-DSH 使用安装中自带的官方 Web 交互界面，内嵌在 Agent 工作区。无需另装 TUI，也无需先输入任务：新建直接创建空白会话，双击历史项按原始 session ID 恢复。已有 DeepSeek 账号登录通过 DSH 自身的凭据服务复用；创建前调用官方默认模型初始化，避免把账号登录误当成缺少 API key。CLI、账号与 API key 的策略仍由 DSH 管理。SSH 模式通过 SSH 本地端口转发访问远端 Web 界面，认证使用远端账号；本次真实账号验收覆盖本机，未覆盖真实远端 DSH。压缩会话读取优先复用 DSH 桌面程序自带的 Node，其他安装需要其已有 Node 支持 Zstandard；不额外打包运行时。
+DSH 从 0.2.10 起使用独立安装的兼容 `dsh-tui`，与其他 Agent 一样在原生终端运行。只有 Desktop 的 `dsh` 不等于安装了 TUI；优先选择已安装的 `dsh-tui`，也支持带兼容 `dsh-tui` profile 的 `dsh`。缺少依赖时直接显示安装提示和指南入口，启动失败保留原始终端错误，启动期间阻止重复点击创建进程。新建无需预填任务；双击历史项使用 `--resume` 恢复原始 ID。认证由 DSH/TUI 自己管理，Linvell 不读取或复制凭据。
+
+本次本机验收使用 DSH `0.2.1-rc.5` 和 [dsh-TUI 源码](https://github.com/ccch1mneyyy/dsh-TUI/tree/83fcf892d49c4f4e5b05fab2936fac2241bad579)构建版，复用已有账号完成真实回复并恢复原会话。该源码构建安装在用户的 DSH profile 内，Linvell 安装包不捆绑 TUI；同名 npm `0.17.0` 发布包的兼容声明不同，不能仅凭版本号视为适配 rc.5。远程真实账号未验收，SSH 模式需要远端自行安装兼容 TUI。
+
+所有 Agent 点击新建后，运行中的本地条目立即进入左侧列表，不必等第一条消息。标题随终端更新；列表在可见且有运行进程时自动刷新保存记录。已有运行会话点击直接切回同一终端，停止后的已保存会话双击恢复。只有确定进程所属的会话文件 ID 才合并历史项；新版 Codex 支持时使用 `--no-daemon`，避免共用后台服务导致无法区分所属会话。尚未被 Agent 保存的空白会话只在当前工作区保留，不能承诺关闭应用后恢复。
 
 ## English
 
-Open **Agents** from the left activity bar, toolbar or command palette. Choose an existing Codex, OpenCode, Pi, Claude Code or DeepSeek Harness installation, or select a CLI executable / supported desktop app. Optional agent-home overrides must match the configuration used by that provider. Select a project session and resume it in the native terminal (DSH uses its embedded official Web UI); the provider restores its own context and applies its own authentication and permission policy.
+Open **Agents** from the left activity bar, toolbar or command palette. Choose an existing Codex, OpenCode, Pi, Claude Code or DeepSeek Harness installation, or select a CLI executable / supported desktop app. Optional agent-home overrides must match the configuration used by that provider. Select a project session and resume it in the native terminal; the provider restores its own context and applies its own authentication and permission policy.
 
 Local and SSH execution have separate session stores. Shared desktop/CLI stores are indexed together; cloud-only or private desktop sessions require the provider's handoff. Registered worktrees of the same repository are included by reading Git metadata without running Git remotely. Resuming uses the original session directory. Saved titles are read from each provider, including later rename events; unnamed sessions use the first user task as a preview. Indexing does not guarantee compatibility with every provider version or custom storage configuration.
 
@@ -91,4 +95,6 @@ DSH's Zstandard files contain concatenated frames. The Node codec previously ret
 
 Concurrent-session acceptance and remaining live-test limits: [verification record](validation/2026-10-30-agent-concurrent-sessions.md).
 
-DeepSeek Harness opens blank conversations and restores history without a task or an extra TUI installation. Its own credential service reuses the configured login; Linvell initializes the default model through the official account flow rather than demanding a separate API key. SSH DSH uses a loopback tunnel and remote credentials; live DSH acceptance in this release covers the local installation.
+DeepSeek Harness requires a separately installed, compatible TUI. Linvell prefers `dsh-tui`, supports the `dsh-tui` profile, and never substitutes an embedded website. Missing CLI/TUI installations show provider-specific guidance before a launch attempt. New sessions appear immediately in the sidebar; terminal titles update live, and saved records merge when the process-owned session identity is available. Current Codex versions supporting `--no-daemon` use a private server for that identity. Unsaved blank sessions remain local to the open workspace.
+
+Live account acceptance covered local Codex and DSH. DSH rc.5 was tested with upstream TUI source commit `83fcf892d49c4f4e5b05fab2936fac2241bad579`, installed separately; the similarly numbered npm package was not considered compatible. Other providers have fixture coverage, and remote real-account TUI acceptance remains untested.

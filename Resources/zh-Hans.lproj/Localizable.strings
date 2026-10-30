@@ -995,3 +995,9 @@
 
 "Starting DeepSeek Harness…" = "正在启动 DeepSeek Harness…";
 "DeepSeek Harness could not open the conversation. Check the selected CLI and agent home, then try again." = "DeepSeek Harness 无法打开会话。请检查所选 CLI 和 Agent 主目录后重试。";
+
+"DSH terminal sessions require a compatible TUI. Select your installed dsh-tui executable in Agent Settings. The Desktop CLI alone is not a TUI." = "DSH 终端会话需要兼容的 TUI。请在 Agent 设置中选择已安装的 dsh-tui 可执行文件；Desktop 自带的 dsh 本身不提供终端交互界面。";
+"The DSH TUI did not become ready. Check its terminal output and compatibility with your installed DSH." = "DSH TUI 未能完成启动。请检查终端输出以及它与当前 DSH 的版本兼容性。";
+"Installation Guide…" = "安装指南…";
+"DSH terminal sessions require a compatible TUI. Install dsh-tui, then choose its executable in Agent Settings." = "DSH 终端会话需要兼容的 TUI。请安装 dsh-tui，然后在 Agent 设置中选择它的可执行文件。";
+"No usable %@ CLI was detected. Install it, or choose an existing executable in Agent Settings." = "未检测到可用的 %@ CLI。请安装，或在 Agent 设置中选择已有的可执行文件。";

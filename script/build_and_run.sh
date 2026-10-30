@@ -55,12 +55,15 @@ for resource in "$BIN_DIR"/*.bundle; do
 done
 codesign --force --sign - "$APP/Contents/Helpers/LinvellUpdater"
 codesign --force --sign - "$APP"
+APP_ARGS=()
+# Development launches must not request the installed app's iCloud access.
+if [[ "$CONFIG" == "debug" ]]; then APP_ARGS=(-iCloudSyncEnabled NO); fi
 case "$MODE" in
   --build-only) printf '%s\n' "$APP" ;;
-  run) open "$APP" ;;
-  --demo) open "$APP" --args --demo "$ROOT_DIR/Samples/Welcome.swift" ;;
-  --verify) open -n "$APP"; sleep 1; pgrep -x Linvell >/dev/null ;;
-  --debug) lldb -- "$APP/Contents/MacOS/Linvell" ;;
-  --logs|--telemetry) open -n "$APP"; /usr/bin/log stream --info --style compact --predicate 'process == "Linvell"' ;;
+  run) open "$APP" --args "${APP_ARGS[@]}" ;;
+  --demo) open "$APP" --args "${APP_ARGS[@]}" --demo "$ROOT_DIR/Samples/Welcome.swift" ;;
+  --verify) open -n "$APP" --args "${APP_ARGS[@]}"; sleep 1; pgrep -x Linvell >/dev/null ;;
+  --debug) lldb -- "$APP/Contents/MacOS/Linvell" "${APP_ARGS[@]}" ;;
+  --logs|--telemetry) open -n "$APP" --args "${APP_ARGS[@]}"; /usr/bin/log stream --info --style compact --predicate 'process == "Linvell"' ;;
   *) echo "usage: $0 [run|--build-only|--demo|--verify|--debug|--logs]" >&2; exit 2 ;;
 esac

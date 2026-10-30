@@ -3,6 +3,17 @@ import Foundation
 public enum AgentKind: String, Codable, CaseIterable {
     case codex, opencode, pi, claude, dsh
     public var title: String { switch self { case .codex: return "Codex"; case .opencode: return "OpenCode"; case .pi: return "Pi"; case .claude: return "Claude Code"; case .dsh: return "DeepSeek Harness" } }
+    public var installationGuide: URL {
+        URL(string: {
+            switch self {
+            case .codex: return "https://developers.openai.com/codex/cli"
+            case .opencode: return "https://opencode.ai/docs/"
+            case .pi: return "https://github.com/earendil-works/pi/tree/main/packages/coding-agent"
+            case .claude: return "https://code.claude.com/docs/en/setup"
+            case .dsh: return "https://github.com/ccch1mneyyy/dsh-TUI#readme"
+            }
+        }())!
+    }
     public var homeVariable: String? { switch self { case .codex: return "CODEX_HOME"; case .claude: return "CLAUDE_CONFIG_DIR"; case .pi: return "PI_CODING_AGENT_DIR"; case .dsh: return "DSH_HOME"; case .opencode: return nil } }
     public func arguments(session: AgentSession? = nil) -> [String] {
         switch self {
@@ -10,7 +21,7 @@ public enum AgentKind: String, Codable, CaseIterable {
         case .opencode: return session.map { ["--session",$0.id] } ?? []
         case .pi: return session.map { ["--session",$0.locator] } ?? []
         case .claude: return session.map { ["--resume",$0.id] } ?? []
-        case .dsh: return ["web","--no-open","--host","127.0.0.1","--port","0"]
+        case .dsh: return ["--profile","dsh-tui"]+(session.map { ["--resume",$0.id] } ?? [])
         }
     }
 }
@@ -52,6 +63,7 @@ public enum AgentCLI {
             result.append(AgentInstallation(kind:kind,path:url.path,source:source))
         }
         let directories = (environment["PATH"] ?? "").components(separatedBy:":")
+        for directory in directories { add(.dsh,URL(fileURLWithPath:directory).appendingPathComponent("dsh-tui"),"TUI") }
         for kind in AgentKind.allCases { for directory in directories { add(kind,URL(fileURLWithPath:directory).appendingPathComponent(kind.rawValue),"CLI") } }
         // Common version-manager locations are not normally in a GUI app's PATH.
         for base in [home.appendingPathComponent(".nvm/versions/node"),home.appendingPathComponent(".local/share/mise/installs/node")] {
@@ -212,6 +224,25 @@ public enum AgentCLI {
         }.sorted { $0.updated > $1.updated }
     }
     public static func command(executable: String,kind: AgentKind,session: AgentSession? = nil) -> String {
-        ([executable]+kind.arguments(session:session)).map(SSHRemote.quote).joined(separator:" ")
+        ([executable]+arguments(executable:executable,kind:kind,session:session)).map(SSHRemote.quote).joined(separator:" ")
+    }
+    public static func arguments(executable: String,kind: AgentKind,session: AgentSession? = nil) -> [String] {
+        if kind == .dsh,isDSHTUI(executable) { return ["--backend","dsh"]+(session.map { ["--resume",$0.id] } ?? []) }
+        return kind.arguments(session:session)
+    }
+    /// A private server keeps each terminal's rollout owned by its process tree.
+    /// Older CLIs without this option retain their normal launch arguments.
+    public static func supportsIsolatedCodex(_ executable: String,environment: [String:String]) -> Bool {
+        guard let help = try? ToolCommand.run(URL(fileURLWithPath:executable),arguments:["--help"],directory:nil,timeout:3,environment:environment),help.succeeded else { return false }
+        return help.output.split(separator:"\n").contains { $0.trimmingCharacters(in:.whitespaces).hasPrefix("--no-daemon") }
+    }
+    public static func isDSHTUI(_ executable: String) -> Bool { ["dsh-tui","dsh-tui.js","dst"].contains((executable as NSString).lastPathComponent) }
+    public static func hasDSHTUIProfile(home: String,environment: [String:String] = AgentCLI.environment) -> Bool {
+        let root = home.isEmpty ? (environment["DSH_HOME"] ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".dsh").path) : home
+        let file = URL(fileURLWithPath:root).appendingPathComponent("profiles/dsh-tui/package.json")
+        guard let data = try? Data(contentsOf:file),let manifest = try? JSONSerialization.jsonObject(with:data) as? [String:Any],
+              let dsh = manifest["dsh"] as? [String:Any],let profile = dsh["profile"] as? [String:Any],
+              let bundles = profile["bundles"] as? [String],bundles.contains(where:{ $0.contains("dsh-tui") }) else { return false }
+        return true
     }
 }

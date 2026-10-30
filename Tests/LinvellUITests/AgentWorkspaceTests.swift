@@ -89,7 +89,7 @@ final class AgentWorkspaceTests: XCTestCase {
         try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
         defer { try? FileManager.default.removeItem(at:root) }
         let cli = root.appendingPathComponent("fixture agent"),capture = root.appendingPathComponent("capture")
-        try Data(("#!/bin/sh\nprintf '%s\\n' \"$PWD\" \"$@\" > "+SSHRemote.quote(capture.path)+"\nsleep 0.2\n").utf8).write(to:cli)
+        try Data(("#!/bin/sh\n[ \"$1\" = --help ] && exit 0\nprintf '%s\\n' \"$PWD\" \"$@\" > "+SSHRemote.quote(capture.path)+"\nsleep 0.2\n").utf8).write(to:cli)
         try FileManager.default.setAttributes([.posixPermissions:0o700],ofItemAtPath:cli.path)
         let view = AgentWorkspace(project:root.path,remote:nil,autoLoad:false)
         let key = "agentCLI.local.codex.path",previous = UserDefaults.standard.object(forKey:key)

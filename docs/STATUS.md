@@ -1,4 +1,10 @@
-# Linvell 0.2.9 — published (2026-10-30)
+# Linvell 0.2.10 — release candidate (2026-10-30)
+
+Native DSH TUI sessions replace 0.2.9's rejected embedded website. All providers show newly opened sessions immediately in the sidebar, update running titles and refresh persisted records. Missing CLI/TUI detection provides installation guidance. Full-height terminal layout, repeated-start protection and resumed-session readiness are corrected. Development launches disable iCloud sync to prevent test copies requesting that access.
+
+Local real-account checks covered Codex and DSH with an independently installed source-built TUI. Other provider fixtures pass; remote real-account TUI acceptance remains untested. [Evidence and limits](validation/2026-10-30-agent-native-terminal.md).
+
+# Linvell 0.2.9 — superseded by 0.2.10 (2026-10-30)
 
 [0.2.9](https://github.com/huluxiaohuowa/Linvell/releases/tag/v0.2.9) fixes DeepSeek Harness integration by embedding its installed official Web UI. New conversations need no task, and double-click restores the original conversation, including after its process stops. No extra TUI is required. The official account/default-model initialization reuses an existing login rather than demanding a separate API key.
 

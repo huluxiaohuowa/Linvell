@@ -26,8 +26,8 @@ final class AgentSelectionTests: XCTestCase {
         XCTAssertTrue(view.newSession.isEnabled); let count = view.runtimes.count
         view.path.stringValue = "/usr/bin/false"; view.agentHome.stringValue = root.path
         view.startNew()
-        XCTAssertEqual(view.runtimes.count,count+1)
-        XCTAssertNotNil(view.activeRuntime?.dshView)
+        XCTAssertEqual(view.runtimes.count,count)
+        XCTAssertTrue(view.status.stringValue.contains("TUI"))
         view.openSessions.selectItem(at:0); view.selectOpenSession()
         XCTAssertEqual(view.kind,.codex); XCTAssertTrue(view.terminal === codex)
         XCTAssertTrue(codex.superview === view.terminalHost); XCTAssertEqual(codex.process.shellPid,codexPID)
