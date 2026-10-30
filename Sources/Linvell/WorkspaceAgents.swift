@@ -53,6 +53,6 @@ extension WorkspaceController {
         languageStatus.stringValue = ""
         status.stringValue = agent.terminal?.process.running == true ? L.text("Running")+" · "+(agent.activeRuntime?.context.kind.title ?? agent.kind.title) : L.text("Agents")
         window?.title = L.text("Agents")+" — Linvell"
-        if showConfiguration { showSidebar("agents") }; window?.makeFirstResponder(agent.terminal)
+        if showConfiguration { showSidebar("agents") }; window?.makeFirstResponder(agent.activeRuntime?.contentView)
     }
 }

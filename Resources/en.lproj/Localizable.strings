@@ -938,7 +938,6 @@
 
 "Untitled session" = "Untitled session";
 
-"DSH task — each run continues the selected session for one task" = "DSH task — each run continues the selected session for one task";
 
 "Changed on disk · unsaved edits kept" = "Changed on disk · unsaved edits kept";
 
@@ -957,7 +956,6 @@
 
 "No open session for this agent and location. Create a session or select one from the list." = "No open session for this agent and location. Create a session or select one from the list.";
 
-"Enter a DSH task, then create or resume a session." = "Enter a DSH task, then create or resume a session.";
 
 
 "Choose an agent CLI in Agent Settings, then create a session." = "Choose an agent CLI in Agent Settings, then create a session.";
@@ -994,3 +992,6 @@
 "Changes synchronize in both directions. Conflicts require review. Build and test commands still run locally unless explicitly sent over SSH." = "Changes synchronize in both directions. Conflicts require review. Build and test commands still run locally unless explicitly sent over SSH.";
 "Review Sync Conflicts…" = "Review Sync Conflicts…";
 "Project root" = "Project root";
+
+"Starting DeepSeek Harness…" = "Starting DeepSeek Harness…";
+"DeepSeek Harness could not open the conversation. Check the selected CLI and agent home, then try again." = "DeepSeek Harness could not open the conversation. Check the selected CLI and agent home, then try again.";

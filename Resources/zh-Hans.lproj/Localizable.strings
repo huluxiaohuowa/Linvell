@@ -938,7 +938,6 @@
 
 "Untitled session" = "未命名会话";
 
-"DSH task — each run continues the selected session for one task" = "DSH 任务：每次运行在所选会话中继续完成一个任务";
 
 "Changed on disk · unsaved edits kept" = "磁盘文件已更改 · 已保留未保存的编辑";
 
@@ -957,7 +956,6 @@
 
 "No open session for this agent and location. Create a session or select one from the list." = "当前 Agent 和执行位置暂无已打开会话。可以新建会话，或从列表中选择会话。";
 
-"Enter a DSH task, then create or resume a session." = "请先输入 DSH 任务，再新建或继续会话。";
 
 
 "Choose an agent CLI in Agent Settings, then create a session." = "请先在 Agent 设置中选择 CLI，再新建会话。";
@@ -994,3 +992,6 @@
 "Changes synchronize in both directions. Conflicts require review. Build and test commands still run locally unless explicitly sent over SSH." = "文件双向同步，冲突需要处理。编译和测试命令默认仍在本机运行，需要明确通过 SSH 执行远程命令。";
 "Review Sync Conflicts…" = "查看同步冲突…";
 "Project root" = "项目根目录";
+
+"Starting DeepSeek Harness…" = "正在启动 DeepSeek Harness…";
+"DeepSeek Harness could not open the conversation. Check the selected CLI and agent home, then try again." = "DeepSeek Harness 无法打开会话。请检查所选 CLI 和 Agent 主目录后重试。";

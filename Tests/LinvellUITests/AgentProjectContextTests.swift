@@ -95,8 +95,8 @@ final class AgentProjectContextTests: XCTestCase {
         // The open-session menu must synchronize the provider and execution selector too.
         remote.kindPicker.selectItem(at:AgentKind.allCases.firstIndex(of:.dsh)!); remote.selectionChanged()
         XCTAssertEqual(remote.kind,.dsh); XCTAssertNil(remote.terminal); XCTAssertTrue(remoteTerminal.process.running)
-        remote.task.stringValue = ""; let before = remote.runtimes.count; remote.startNew()
-        XCTAssertEqual(remote.runtimes.count,before); XCTAssertTrue(remote.status.stringValue.contains(L.text("Enter a DSH task, then create or resume a session.")))
+        remote.path.stringValue = ""; let before = remote.runtimes.count; remote.startNew()
+        XCTAssertEqual(remote.runtimes.count,before); XCTAssertTrue(remote.status.stringValue.contains(L.text("Choose an agent CLI in Agent Settings, then create a session.")))
         remote.openSessions.selectItem(at:0); remote.selectOpenSession()
         XCTAssertEqual(remote.kind,.codex); XCTAssertTrue(remote.usesSSH); XCTAssertTrue(remote.terminal === remoteTerminal)
         workspace.setProject(root); workspace.showAgents()

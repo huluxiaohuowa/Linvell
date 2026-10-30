@@ -2,6 +2,9 @@ import XCTest
 @testable import LinvellCore
 
 final class AgentCLITests: XCTestCase {
+    func testDSHLaunchesInteractiveWebWithoutRequiringATask() {
+        XCTAssertEqual(AgentKind.dsh.arguments(),["web","--no-open","--host","127.0.0.1","--port","0"])
+    }
     func fixture() throws -> URL {
         let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("dev/build/linvell/agent-test-fixtures/"+UUID().uuidString)
         try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
@@ -69,7 +72,7 @@ for line in sys.stdin:
         XCTAssertEqual(Set(sessions.map(\.title)),["Named first","Named second","Named archive"])
         XCTAssertEqual(AgentCodexSessions.parseThread(["id":"preview","cwd":root.path,"preview":"First user task"],project:root.path)?.title,"First user task")
     }
-    func testDSHCompressedSessionUsesLatestTitleAndResumesWithTask() throws {
+    func testDSHCompressedSessionUsesLatestTitleAndLaunchesInteractiveWeb() throws {
         let root = try fixture(),project = root.appendingPathComponent("project"),home = root.appendingPathComponent("dsh")
         try FileManager.default.createDirectory(at:project,withIntermediateDirectories:true)
         guard let node = ToolCommand.executable("node") else { throw XCTSkip("Node is not installed") }
@@ -84,7 +87,7 @@ for line in sys.stdin:
         var env = AgentCLI.environment; env["DSH_HOME"] = home.path
         let sessions = try AgentDSHSessions.list(executable:"/fixture/dsh",project:project.path,environment:env)
         XCTAssertEqual(sessions.first?.title,"Saved DSH title")
-        XCTAssertEqual(AgentKind.dsh.arguments(session:sessions.first,task:"--literal; $(task)"),["headless","--session-id","session-a","--","--literal; $(task)"])
+        XCTAssertEqual(AgentKind.dsh.arguments(session:sessions.first),["web","--no-open","--host","127.0.0.1","--port","0"])
     }
     func testOpenCodeJSONUsesExactDirectoryAndUpdatedTime() throws {
         let data = try JSONSerialization.data(withJSONObject:[["id":"ses_a","directory":"/work/project","title":"Task","time":["updated":4000]],["id":"ses_b","directory":"/work/project-other","title":"Other"]])

@@ -42,7 +42,7 @@ brew install mutagen-io/mutagen/mutagen
 | Claude Code | agent home 中 `projects` 下的 JSONL，排除子 agent 会话 | `claude --resume <id>` |
 | Pi | 默认或环境变量指定的 session 目录下 JSONL | `pi --session <file>`，保留原会话树 |
 | OpenCode | `opencode session list --format json`，不读取私有数据库结构 | `opencode --session <id>` |
-| DeepSeek Harness | `DSH_HOME/sessions` 中最新版本会话日志的 `session/title`，支持 `.jsonl.zstd`，读取完整标题事件 | `dsh headless --session-id <id> -- <task>` |
+| DeepSeek Harness | `DSH_HOME/sessions` 中最新版本会话日志的 `session/title`，支持 `.jsonl.zstd`，读取完整标题事件 | `dsh web --no-open`，在内嵌界面按原始 session ID 打开 |
 
 Codex、OpenCode 优先使用自身提供的列表接口。Claude Code 和 Pi 先读取 256 KiB 会话头，再流式读取标题及重命名事件；DSH 使用现有安装附带的 Node 解码 Zstandard 日志并读取正式标题事件。没有名称时使用首条用户消息摘要，空会话显示“未命名会话”，UUID 只在次要信息中缩略显示。损坏或未能解析的会话不会列出。列表包含当前工作目录及 Git 元数据中双向登记的同仓库 worktree（包括桌面程序创建的 worktree），不运行远程 Git 命令。未登记的其他目录与子目录不会自动合并。恢复时在会话原来的工作目录运行，避免把 worktree 中的工作误写到主检出目录；列表次要信息与运行状态会标明目录。无会话持久化的运行无法恢复。自定义会话存储设置、未来版本的格式变动可能需要适配，不能把列表称为所有服务商的完整会话档案。
 
@@ -66,11 +66,11 @@ Agent 直接读写所选执行位置的项目文件；远程项目的本机模�
 
 Agent 直接运行在主工作区：左侧 Agents 侧栏选择服务商、安装和会话，右侧显示运行终端，不另开窗口。切回文件管理器、打开其他文件或切换侧栏都不会重建 CLI 或 PTY；再次点击 Agents 会回到同一个进程和终端。切换项目不会暗中改变运行中 Agent 的目录。点击“停止”或退出工作区才会停止进程。
 
-DSH 本机版本只有官方 `headless` 任务接口。选择 DSH 后填写任务输入框，再新建或继续所选会话；每次完成一个任务并退出，下次通过同一 session ID 继续，完整上下文仍归 DSH 管理。没有假定用户已经安装第三方 TUI profile。压缩会话读取优先复用 DSH 桌面程序自带的 Node，其他安装需要其已有 Node 支持 Zstandard；不额外打包运行时。
+DSH 使用安装中自带的官方 Web 交互界面，内嵌在 Agent 工作区。无需另装 TUI，也无需先输入任务：新建直接创建空白会话，双击历史项按原始 session ID 恢复。已有 DeepSeek 账号登录通过 DSH 自身的凭据服务复用；创建前调用官方默认模型初始化，避免把账号登录误当成缺少 API key。CLI、账号与 API key 的策略仍由 DSH 管理。SSH 模式通过 SSH 本地端口转发访问远端 Web 界面，认证使用远端账号；本次真实账号验收覆盖本机，未覆盖真实远端 DSH。压缩会话读取优先复用 DSH 桌面程序自带的 Node，其他安装需要其已有 Node 支持 Zstandard；不额外打包运行时。
 
 ## English
 
-Open **Agents** from the left activity bar, toolbar or command palette. Choose an existing Codex, OpenCode, Pi, Claude Code or DeepSeek Harness installation, or select a CLI executable / supported desktop app. Optional agent-home overrides must match the configuration used by that provider. Select a project session and resume it in the native terminal; the provider restores its own context and applies its own authentication and permission policy.
+Open **Agents** from the left activity bar, toolbar or command palette. Choose an existing Codex, OpenCode, Pi, Claude Code or DeepSeek Harness installation, or select a CLI executable / supported desktop app. Optional agent-home overrides must match the configuration used by that provider. Select a project session and resume it in the native terminal (DSH uses its embedded official Web UI); the provider restores its own context and applies its own authentication and permission policy.
 
 Local and SSH execution have separate session stores. Shared desktop/CLI stores are indexed together; cloud-only or private desktop sessions require the provider's handoff. Registered worktrees of the same repository are included by reading Git metadata without running Git remotely. Resuming uses the original session directory. Saved titles are read from each provider, including later rename events; unnamed sessions use the first user task as a preview. Indexing does not guarantee compatibility with every provider version or custom storage configuration.
 
@@ -90,3 +90,5 @@ Reviewed [CloudCLI's session-keyed store](https://github.com/siteboon/claudecode
 DSH's Zstandard files contain concatenated frames. The Node codec previously returned only the first frame (the header), losing subsequent title events. Discovery now consumes each complete frame using the codec's consumed-byte count, keeps the latest title, and tolerates an unfinished final frame while DSH writes. Installed DSH acceptance found five project sessions and read five saved titles; private title content is excluded from logs and fixtures.
 
 Concurrent-session acceptance and remaining live-test limits: [verification record](validation/2026-10-30-agent-concurrent-sessions.md).
+
+DeepSeek Harness opens blank conversations and restores history without a task or an extra TUI installation. Its own credential service reuses the configured login; Linvell initializes the default model through the official account flow rather than demanding a separate API key. SSH DSH uses a loopback tunnel and remote credentials; live DSH acceptance in this release covers the local installation.

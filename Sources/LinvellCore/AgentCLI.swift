@@ -4,13 +4,13 @@ public enum AgentKind: String, Codable, CaseIterable {
     case codex, opencode, pi, claude, dsh
     public var title: String { switch self { case .codex: return "Codex"; case .opencode: return "OpenCode"; case .pi: return "Pi"; case .claude: return "Claude Code"; case .dsh: return "DeepSeek Harness" } }
     public var homeVariable: String? { switch self { case .codex: return "CODEX_HOME"; case .claude: return "CLAUDE_CONFIG_DIR"; case .pi: return "PI_CODING_AGENT_DIR"; case .dsh: return "DSH_HOME"; case .opencode: return nil } }
-    public func arguments(session: AgentSession? = nil,task: String? = nil) -> [String] {
+    public func arguments(session: AgentSession? = nil) -> [String] {
         switch self {
         case .codex: return session.map { ["resume",$0.id] } ?? []
         case .opencode: return session.map { ["--session",$0.id] } ?? []
         case .pi: return session.map { ["--session",$0.locator] } ?? []
         case .claude: return session.map { ["--resume",$0.id] } ?? []
-        case .dsh: return ["headless"]+(session.map { ["--session-id",$0.id] } ?? [])+(task.map { ["--",$0] } ?? [])
+        case .dsh: return ["web","--no-open","--host","127.0.0.1","--port","0"]
         }
     }
 }
@@ -211,7 +211,7 @@ public enum AgentCLI {
             return AgentSession(id:id,title:value["title"] as? String ?? id,cwd:cwd,locator:id,updated:updated)
         }.sorted { $0.updated > $1.updated }
     }
-    public static func command(executable: String,kind: AgentKind,session: AgentSession? = nil,task: String? = nil) -> String {
-        ([executable]+kind.arguments(session:session,task:task)).map(SSHRemote.quote).joined(separator:" ")
+    public static func command(executable: String,kind: AgentKind,session: AgentSession? = nil) -> String {
+        ([executable]+kind.arguments(session:session)).map(SSHRemote.quote).joined(separator:" ")
     }
 }

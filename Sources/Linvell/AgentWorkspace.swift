@@ -18,7 +18,7 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
     let remote: SSHRemote?
     let kindPicker = NSPopUpButton(),installationsPicker = NSPopUpButton()
     let location = NSSegmentedControl(labels:[L.text("This Mac"),L.text("SSH Host")],trackingMode:.selectOne,target:nil,action:nil)
-    let path = NSTextField(),agentHome = NSTextField(),search = NSSearchField(),task = NSTextField()
+    let path = NSTextField(),agentHome = NSTextField(),search = NSSearchField()
     let table = ResponsiveTableView(),terminalHost = NSView()
     let historyStatus = Theme.label("",size:11,color:Theme.secondary)
     let status = Theme.label("",size:12,color:Theme.secondary)
@@ -83,7 +83,6 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         agentHome.toolTip = L.text("Use the same agent home as your CLI or desktop app. Leave empty for the default.")
         search.placeholderString = L.text("Search sessions"); search.delegate = self
         historyStatus.maximumNumberOfLines = 3; historyStatus.lineBreakMode = .byWordWrapping; historyStatus.isHidden = true
-        task.placeholderString = L.text("DSH task — each run continues the selected session for one task"); task.delegate = self
         func button(_ button: NSButton,_ title: String,_ action: Selector) { button.title = L.text(title); button.target = self; button.action = action; button.bezelStyle = .rounded }
         button(refresh,"Refresh",#selector(reload)); button(newSession,"New Session",#selector(startNew)); button(resume,"Resume Session",#selector(resumeSelected)); button(stop,"Stop",#selector(stopAgent))
         button(browse,"Choose CLI…",#selector(chooseCLI)); button(connectSync,"Connect with Mutagen",#selector(connectProject))
@@ -103,7 +102,7 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         configurationDetails.orientation = .vertical; configurationDetails.alignment = .leading; configurationDetails.spacing = 8
         [installationsPicker,Theme.stack([path,browse],spacing:6),agentHome].forEach { configurationDetails.addArrangedSubview($0) }
         configurationDetails.isHidden = true
-        let rows: [NSView] = [heading,location,kindPicker,newSession,task,mappingRow,search,historyStatus,scroll,resume,settingsToggle,configurationDetails]
+        let rows: [NSView] = [heading,location,kindPicker,newSession,mappingRow,search,historyStatus,scroll,resume,settingsToggle,configurationDetails]
         let configuration = Theme.stack(rows,orientation:.vertical,spacing:10)
         let outer = ResponsiveScrollView(); outer.hasVerticalScroller = true; outer.drawsBackground = false
         let document = AgentConfigurationDocument(); document.translatesAutoresizingMaskIntoConstraints = false; outer.documentView = document
@@ -142,18 +141,16 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
     }
     func tableViewSelectionDidChange(_ notification: Notification) { updateControls() }
     func controlTextDidChange(_ notification: Notification) {
-        if notification.object as? NSTextField === task { selectionMessage = nil; updateRuntimeControls() }
-        else if notification.object as? NSSearchField === search { filterSessions() }
+        if notification.object as? NSSearchField === search { filterSessions() }
         else { generation = UUID(); loading = false; selectionMessage = nil; sessions = []; filterSessions() }
     }
-    func controlTextDidEndEditing(_ notification: Notification) { if notification.object as? NSSearchField !== search,notification.object as? NSTextField !== task { saveSettings(); reload() } }
+    func controlTextDidEndEditing(_ notification: Notification) { if notification.object as? NSSearchField !== search { saveSettings(); reload() } }
     @objc private func toggleSettings() { configurationDetails.isHidden = settingsToggle.state != .on }
     private func restoreSettings() {
         if mapping == nil,let data = UserDefaults.standard.data(forKey:mappingKey) { mapping = try? JSONDecoder().decode(AgentSyncMapping.self,from:data) }
         path.stringValue = UserDefaults.standard.string(forKey:settingsKey+".path") ?? ""
         agentHome.stringValue = UserDefaults.standard.string(forKey:settingsKey+".home") ?? ""
         agentHome.isHidden = kind.homeVariable == nil
-        task.isHidden = kind != .dsh
     }
     private func saveSettings() {
         UserDefaults.standard.set(path.stringValue,forKey:settingsKey+".path")
@@ -170,7 +167,6 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
     }
     private func showSettings() { settingsToggle.state = .on; configurationDetails.isHidden = false }
     private var launchHint: String {
-        if kind == .dsh,task.stringValue.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty { return L.text("Enter a DSH task, then create or resume a session.") }
         if remote != nil,!usesSSH,mapping == nil { return L.text("Connect this SSH project before starting a local agent.") }
         if path.stringValue.isEmpty { return L.text("Choose an agent CLI in Agent Settings, then create a session.") }
         return L.text("No open session for this agent and location. Create a session or select one from the list.")
@@ -180,7 +176,7 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         path.stringValue = installations[installationsPicker.indexOfSelectedItem].path; saveSettings(); generation = UUID(); loading = false; reload()
     }
     private func updateControls() {
-        [kindPicker,installationsPicker,location,path,agentHome,task,browse,connectSync].forEach { $0.isEnabled = true }
+        [kindPicker,installationsPicker,location,path,agentHome,browse,connectSync].forEach { $0.isEnabled = true }
         connectSync.isEnabled = !syncing; syncGuide.connect.isEnabled = !syncing
         refresh.isEnabled = !loading
         newSession.isEnabled = !(syncing && !usesSSH); newSession.toolTip = launchHint
@@ -310,20 +306,16 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
     private func start(session: AgentSession?,synchronized: Bool) {
         if let session,let existing = matchingRuntime(session) { activate(existing); return }
         selectionMessage = nil
-        if kind == .dsh,task.stringValue.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty {
-            selectionMessage = L.text("Enter a DSH task, then create or resume a session.")
-            status.stringValue = selectionMessage!; updateControls(); onStart?(); window?.makeFirstResponder(task); return
-        }
         guard !path.stringValue.isEmpty else {
             selectionMessage = L.text("Choose an agent CLI in Agent Settings, then create a session.")
             showSettings(); status.stringValue = selectionMessage!; updateControls(); onStart?(); window?.makeFirstResponder(path); return
         }
         if let remote,!usesSSH,!synchronized {
-            let expectedKind = kind,expectedPath = path.stringValue,expectedHome = agentHome.stringValue,expectedTask = task.stringValue
+            let expectedKind = kind,expectedPath = path.stringValue,expectedHome = agentHome.stringValue
             let project = project,client = syncClient,service = syncService
             performMapping({ try service.prepare(remote:remote,directory:project,client:client) }) { [weak self] in
                 guard let self,!self.usesSSH,self.kind == expectedKind,self.path.stringValue == expectedPath,
-                      self.agentHome.stringValue == expectedHome,self.task.stringValue == expectedTask,
+                      self.agentHome.stringValue == expectedHome,
                       self.window != nil,self.configurationView.window != nil else { return }
                 self.start(session:session,synchronized:true)
             }
@@ -331,7 +323,6 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         }
         guard let projectDirectory = executionDirectory else { return }
         let directory = session?.cwd ?? projectDirectory
-        let task = kind == .dsh ? task.stringValue.trimmingCharacters(in:.whitespacesAndNewlines) : nil
         do {
             if remote != nil && !usesSSH { try mapping?.validate() }
             let executable = usesSSH ? path.stringValue : (path.stringValue as NSString).expandingTildeInPath
@@ -343,6 +334,7 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
             let context = AgentRuntime.Context(kind:kind,host:usesSSH ? remote?.host : nil,executable:executable,home:home)
             let term = DisplayPacedTerminalView(frame:terminalHost.bounds); term.processDelegate = self
             let runtime = AgentRuntime(context:context,session:session,directory:directory,remote:usesSSH ? remote : nil,mapping:usesSSH ? nil : mapping,terminal:term)
+            if kind == .dsh { runtime.dshView = AgentDSHView(runtime:runtime) }
             register(runtime)
             term.font = .monospacedSystemFont(ofSize:Theme.fontSize,weight:.regular)
             term.nativeBackgroundColor = Theme.canvas; term.nativeForegroundColor = Theme.foreground; term.caretColor = Theme.accent
@@ -350,14 +342,22 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
             var env = AgentCLI.environment; env["PATH"] = (executable as NSString).deletingLastPathComponent+":"+(env["PATH"] ?? "")
             if let variable = kind.homeVariable,!home.isEmpty { env[variable] = home }
             if usesSSH,let remote {
+                var arguments = kind.arguments(session:session)
+                var forwarding: [String] = []
+                if kind == .dsh {
+                    let port = try RunWorkspace.availablePort()
+                    arguments[arguments.count-1] = String(port)
+                    forwarding = ["-o","ExitOnForwardFailure=yes","-L","127.0.0.1:\(port):127.0.0.1:\(port)"]
+                }
                 var command = "PATH="+SSHRemote.quote((executable as NSString).deletingLastPathComponent)+":\"$PATH\"; export PATH; "
                 if let variable = kind.homeVariable,!home.isEmpty { command += "export "+variable+"="+SSHRemote.quote(home)+"; " }
-                command += "exec "+AgentCLI.command(executable:executable,kind:kind,session:session,task:task)
-                term.startProcess(executable:"/usr/bin/ssh",args:["-tt","--",remote.host,RunTasks.remoteCommand(directory:directory,command:"/bin/sh -c "+SSHRemote.quote(command))],environment:env.map { "\($0.key)=\($0.value)" },currentDirectory:FileManager.default.homeDirectoryForCurrentUser.path)
+                command += "exec "+([executable]+arguments).map(SSHRemote.quote).joined(separator:" ")
+                term.startProcess(executable:"/usr/bin/ssh",args:["-tt"]+forwarding+["--",remote.host,RunTasks.remoteCommand(directory:directory,command:"/bin/sh -c "+SSHRemote.quote(command))],environment:env.map { "\($0.key)=\($0.value)" },currentDirectory:FileManager.default.homeDirectoryForCurrentUser.path)
             } else {
-                term.startProcess(executable:executable,args:kind.arguments(session:session,task:task),environment:env.map { "\($0.key)=\($0.value)" },currentDirectory:directory)
+                term.startProcess(executable:executable,args:kind.arguments(session:session),environment:env.map { "\($0.key)=\($0.value)" },currentDirectory:directory)
             }
-            updateRuntimeControls(); onStart?(); window?.makeFirstResponder(term)
+            runtime.dshView?.start()
+            updateRuntimeControls(); onStart?(); window?.makeFirstResponder(runtime.contentView)
         } catch { status.stringValue = error.localizedDescription }
     }
     func register(_ runtime: AgentRuntime) {
@@ -381,12 +381,12 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         }
         display(runtime)
         if changed { reload() }
-        if focus { onStart?(); window?.makeFirstResponder(runtime.terminal) }
+        if focus { onStart?(); window?.makeFirstResponder(runtime.contentView) }
     }
     private func display(_ runtime: AgentRuntime?) {
-        terminal?.removeFromSuperview(); emptyState.removeFromSuperview(); activeRuntime = runtime
+        activeRuntime?.contentView.removeFromSuperview(); emptyState.removeFromSuperview(); activeRuntime = runtime
         if let runtime {
-            lastActive[channel(of:runtime)] = runtime; Theme.pin(runtime.terminal,in:terminalHost)
+            lastActive[channel(of:runtime)] = runtime; Theme.pin(runtime.contentView,in:terminalHost)
         } else {
             Theme.pin(emptyState,in:terminalHost)
         }

@@ -6,7 +6,7 @@ import SwiftTerm
 
 final class AgentSelectionTests: XCTestCase {
     private func pump(_ seconds: TimeInterval) { RunLoop.current.run(until:Date().addingTimeInterval(seconds)) }
-    func testProviderSelectionChangesTheDisplayedTerminalAndExplainsMissingTask() throws {
+    func testProviderSelectionChangesTheDisplayedTerminalAndAllowsBlankDSHSession() throws {
         _ = NSApplication.shared
         let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("dev/build/linvell/agent-test-fixtures/selection-"+UUID().uuidString)
         try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
@@ -24,9 +24,10 @@ final class AgentSelectionTests: XCTestCase {
         view.kindPicker.selectItem(at:AgentKind.allCases.firstIndex(of:.dsh)!); view.selectionChanged()
         XCTAssertNil(view.terminal); XCTAssertNil(pi.superview); XCTAssertTrue(pi.process.running)
         XCTAssertTrue(view.newSession.isEnabled); let count = view.runtimes.count
+        view.path.stringValue = "/usr/bin/false"; view.agentHome.stringValue = root.path
         view.startNew()
-        XCTAssertEqual(view.runtimes.count,count)
-        XCTAssertEqual(view.status.stringValue,L.text("Enter a DSH task, then create or resume a session."))
+        XCTAssertEqual(view.runtimes.count,count+1)
+        XCTAssertNotNil(view.activeRuntime?.dshView)
         view.openSessions.selectItem(at:0); view.selectOpenSession()
         XCTAssertEqual(view.kind,.codex); XCTAssertTrue(view.terminal === codex)
         XCTAssertTrue(codex.superview === view.terminalHost); XCTAssertEqual(codex.process.shellPid,codexPID)
