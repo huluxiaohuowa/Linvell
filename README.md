@@ -10,13 +10,26 @@ A native macOS editor built in Swift and AppKit. The workspace follows the famil
 
 Actual welcome screen with the built-in Linvell Light theme.
 
-## Install with Homebrew
+## Install with Homebrew / 通过 Homebrew 安装
 
 ```sh
 brew install --cask huluxiaohuowa/tap/linvell
 ```
 
-Requires macOS 15.6 or later. The Linvell-maintained tap provides the signed, notarized Universal app and updates after stable GitHub Releases. Use `brew upgrade --cask huluxiaohuowa/tap/linvell` to upgrade this installation. Official Homebrew Cask inclusion is pending; see [distribution details](docs/CI_RELEASE.md#homebrew-distribution).
+Requires Homebrew and macOS 15.6 or later. The Linvell-maintained tap provides the signed, notarized Universal app and updates after stable GitHub Releases.
+
+需要先安装 Homebrew，支持 macOS 15.6 及以上。Linvell 自建 tap 提供已签名、公证的 Universal 应用，并随稳定版 GitHub Release 自动更新。
+
+Upgrade / 升级：
+
+```sh
+brew update
+brew upgrade --cask huluxiaohuowa/tap/linvell
+```
+
+Homebrew installations are updated through Homebrew. / 通过 Homebrew 安装的版本请通过 Homebrew 更新。
+
+Official Homebrew Cask inclusion is pending; see [distribution details](docs/CI_RELEASE.md#homebrew-distribution).
 
 ## Run locally
 
