@@ -1,4 +1,8 @@
-Mutagen integration (pending release): optional CLI discovery, copyable `brew install mutagen-io/mutagen/mutagen`, green availability and separate synchronization status. Local agents on SSH projects use two-way-safe replicas instead of filesystem mounts. Linvell starts an isolated synchronization process only on demand and stops it when no local session needs it. No Mutagen binary, filesystem driver or login item is bundled.
+# Linvell 0.2.8 — published (2026-10-30)
+
+[0.2.8](https://github.com/huluxiaohuowa/Linvell/releases/tag/v0.2.8) replaces the SSHFS/macFUSE path with optional, user-installed Mutagen. Missing installations show `brew install mutagen-io/mutagen/mutagen`; installed CLIs show a green capability indicator independently of actual synchronization health. Local agents on SSH projects use two-way-safe replicas. Synchronization starts on explicit demand and stops when no local session needs it; no login item or Mutagen binary is bundled.
+
+Clean remote buffers refresh after agent writes. Dirty buffers keep manual edits, suspend automatic saves and reject stale remote writes. Sync conflicts preserve both versions and can be reviewed in the current workspace. Real Mutagen/SSH, native session lifecycle and editor conflict acceptance passed, followed by release CI, Universal signature/notarization checks and Homebrew tap synchronization. The public ZIP is 10,709,773 bytes. [Evidence and limits](validation/2026-10-30-mutagen-optional-sync.md).
 
 # Linvell 0.2.7 — published (2026-10-30)
 

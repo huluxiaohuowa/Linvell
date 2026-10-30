@@ -20,4 +20,12 @@
 
 No new model API calls or five-provider authentication/context-restoration acceptance is claimed. Physical display cadence, isolated Homebrew installation, signed upgrade integration and other opt-in toolchain/network cases were not enabled in this local full run. Remote Git mutation remains excluded, and no remote Git command ran. Source and fixtures were rsynced before remote runs. No standalone Linvell QA application was launched. Existing AppKit constraint warnings are still emitted by native test hosts.
 
-Publication, signing, notarization and downstream tap synchronization are verified separately after release CI finishes.
+## Published distribution
+
+- Implementation commit `08e108a`; release-version commit `1de629a`; [v0.2.8](https://github.com/huluxiaohuowa/Linvell/releases/tag/v0.2.8).
+- [Release and downstream Homebrew CI](https://github.com/huluxiaohuowa/Linvell/actions/runs/41024113727) both completed successfully.
+- The downloaded public ZIP matches SHA-256 `a7d5a9e06ecd215baf4f61e36e85e000b13170a251d482b431f38a09c23ab669`, also present in the published Cask. ZIP size: 10,709,773 bytes. No Mutagen executable or agent bundle is embedded.
+- The extracted application reports 0.2.8, contains arm64 and x86_64, passes deep/strict signature verification, Gatekeeper assessment and stapled notarization-ticket validation. It was not launched or installed; its temporary Launch Services registration was removed.
+- The final affected Agent suites also cover opening both conflict versions inside the same workspace, safe-path validation, reviewed merge resolution and a failed conflict connection exposing review without leaving synchronization processes running.
+- No Mutagen process or standalone QA Linvell app remained after acceptance. Approximately 212 MB of temporary Mutagen download/test runtime files were removed; logs retained under the build directory.
+
