@@ -71,6 +71,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     var terminal: LocalProcessTerminalView?
     var terminalHost: NSView?
     var agentWorkspace: AgentWorkspace?
+    var agentWorkspaces: [AgentWorkspace] = []
     var agentFileMonitor: AgentFileMonitor?
     var recoveryTimer: Timer?
     var commandPanel: NSPanel?
@@ -384,6 +385,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
             DispatchQueue.main.async { [weak self] in if self?.root?.url == url { self?.fileIndex = files } }
         }
         if wasRemote || sidebarKind != "files" { showSidebar(wasRemote ? "files" : sidebarKind) }
+        agentProjectDidChange()
     }
     func open(_ url: URL,completion: (() -> Void)? = nil) {
         if (try? url.resourceValues(forKeys:[.isDirectoryKey]).isDirectory) == true { setProject(url); return }
@@ -544,7 +546,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         a.addButton(withTitle:L.text("Save")); a.addButton(withTitle:L.text("Cancel")); a.addButton(withTitle:L.text("Discard"))
         switch a.runModal() { case .alertFirstButtonReturn: return saveDocument(doc); case .alertThirdButtonReturn: return true; default: return false }
     }
-    func windowShouldClose(_ sender: NSWindow) -> Bool { autoSaveWork.values.forEach { $0.cancel() }; autoSaveWork.removeAll(); return documents.allSatisfy(mayClose) && mayCloseTerminal() && (agentWorkspace?.mayClose() ?? true) }
+    func windowShouldClose(_ sender: NSWindow) -> Bool { autoSaveWork.values.forEach { $0.cancel() }; autoSaveWork.removeAll(); return documents.allSatisfy(mayClose) && mayCloseTerminal() && mayCloseAgents() }
     func mayCloseTerminal() -> Bool {
         if gitWorkspaceView?.running == true {
             let alert = NSAlert(); alert.messageText = L.text("Finish the current Git operation first.")
@@ -571,7 +573,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         terminal.terminate()
     }
     func windowWillClose(_ notification: Notification) {
-        shutdownAgent(); agentWorkspace = nil
+        shutdownAgent(); agentWorkspace = nil; agentWorkspaces.removeAll()
         stopPlugins(); managedPluginLoad = UUID()
         pluginWindows.removeValue(forKey:"manager")?.close()
         picker?.dismiss(); picker = nil
@@ -643,7 +645,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         }
         if let view = window?.contentView { refresh(view) }
         (editors.arrangedSubviews.first as? GitWorkspace)?.refreshTheme()
-        agentWorkspace?.refreshTheme(); runWorkspaceView?.refreshTheme(); remoteBrowser?.table.backgroundColor = Theme.panel
+        allAgentWorkspaces.forEach { $0.refreshTheme() }; runWorkspaceView?.refreshTheme(); remoteBrowser?.table.backgroundColor = Theme.panel
         panes.forEach { $0.updateTheme() }; outline.backgroundColor = Theme.panel; outline.reloadData(); renderTabs()
         for (index,row) in tabs.arrangedSubviews.enumerated() where documents.indices.contains(index) {
             if let icon = (row as? NSStackView)?.arrangedSubviews.first as? NSImageView { icon.image = FileIcon.image(for:documents[index].fileURL); icon.contentTintColor = icon.image?.isTemplate == true ? Theme.secondary : nil }

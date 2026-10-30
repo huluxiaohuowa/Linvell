@@ -955,3 +955,5 @@
 "Unsupported file link." = "Unsupported file link.";
 "Stop running agent sessions?" = "Stop running agent sessions?";
 "The running CLIs will stop. Saved sessions remain in the agent’s own storage." = "The running CLIs will stop. Saved sessions remain in the agent’s own storage.";
+
+"Agent execution location" = "Agent execution location";

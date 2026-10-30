@@ -50,7 +50,7 @@ extension WorkspaceController {
             projectTitle.stringValue = "SSH · "+host; window?.title = "SSH · "+host
             sidebarKind = "files"; sidebar.subviews.forEach { $0.removeFromSuperview() }
             remoteDirectory = folder; setupRemoteSidebar(connection)
-            sidebar.isHidden = false; body.adjustSubviews()
+            sidebar.isHidden = false; body.adjustSubviews(); agentProjectDidChange()
         } catch { show(error) }
     }
     func setupRemoteSidebar(_ connection: SSHRemote) {
@@ -58,7 +58,7 @@ extension WorkspaceController {
         browser.onOpen = { [weak self] in self?.openRemote($0,connection:connection) }
         browser.onRootLoaded = { [weak self,weak browser] path in
             guard let self,self.remoteBrowser === browser else { return }
-            self.remoteDirectory = path; self.syncManagedPlugins()
+            self.remoteDirectory = path; self.syncManagedPlugins(); self.agentProjectDidChange()
             self.projectTitle.stringValue = URL(fileURLWithPath:path).lastPathComponent+" · SSH"
             WorkspaceSession.save(.ssh(host:connection.host,path:path))
         }
@@ -73,7 +73,7 @@ extension WorkspaceController {
             guard let self,self.remoteConnection?.host == connection.host else { return }
             self.stopPlugins(); self.resetLanguageServices()
             self.remoteDirectory = path; self.sidebar.subviews.forEach { $0.removeFromSuperview() }
-            self.setupRemoteSidebar(connection); self.sidebar.isHidden = false; self.body.adjustSubviews(); self.selectActivity(0)
+            self.setupRemoteSidebar(connection); self.sidebar.isHidden = false; self.body.adjustSubviews(); self.selectActivity(0); self.agentProjectDidChange()
         }
         picker.onTerminal = { [weak self] in self?.toggleTerminal() }
     }

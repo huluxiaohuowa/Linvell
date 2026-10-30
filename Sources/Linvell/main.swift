@@ -112,8 +112,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !flag { workspaceForOpening().window?.makeKeyAndOrderFront(nil) }; return true
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        for workspace in workspaces where workspace.window?.isVisible == true || workspace.agentWorkspace?.running == true {
-            if !workspace.documents.allSatisfy(workspace.mayClose) || !workspace.mayCloseTerminal() || !(workspace.agentWorkspace?.mayClose() ?? true) { return .terminateCancel }
+        for workspace in workspaces where workspace.window?.isVisible == true || workspace.agentsRunning {
+            if !workspace.documents.allSatisfy(workspace.mayClose) || !workspace.mayCloseTerminal() || !workspace.mayCloseAgents() { return .terminateCancel }
         }
         if UpdateManager.shared.shouldInstallOnQuit {
             do { try UpdateManager.shared.scheduleInstallation() }

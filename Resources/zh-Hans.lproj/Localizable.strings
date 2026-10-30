@@ -955,3 +955,5 @@
 "Unsupported file link." = "不支持的文件链接。";
 "Stop running agent sessions?" = "停止正在运行的 Agent 会话？";
 "The running CLIs will stop. Saved sessions remain in the agent’s own storage." = "将停止正在运行的 CLI，已保存的会话仍保留在 Agent 自己的存储中。";
+
+"Agent execution location" = "Agent 执行位置";

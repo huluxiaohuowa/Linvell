@@ -49,6 +49,7 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         kindPicker.setAccessibilityLabel(L.text("Agent"))
         location.selectedSegment = remote == nil ? 0 : 1; location.isHidden = remote == nil
         location.target = self; location.action = #selector(selectionChanged)
+        location.setAccessibilityLabel(L.text("Agent execution location"))
         installationsPicker.target = self; installationsPicker.action = #selector(installationChanged)
         installationsPicker.setContentCompressionResistancePriority(.defaultLow,for:.horizontal)
         path.placeholderString = L.text("Agent CLI executable path"); path.delegate = self; path.font = .monospacedSystemFont(ofSize:12,weight:.regular)
