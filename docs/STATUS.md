@@ -1,4 +1,10 @@
-# Existing agent CLIs — source preview (2026-10-30)
+# Linvell 0.2.5 — published (2026-10-30)
+
+[0.2.5](https://github.com/huluxiaohuowa/Linvell/releases/tag/v0.2.5) keeps the left Agents session list/search/resume interface and runs independent concurrent sessions in the main workspace. New Session and provider switching remain available while agents run. Session switching retains PTYs, output and images; Stop only affects the selected session. File links open in the current workspace, macOS inline image rendering is fixed, and actual DSH saved titles are read across concatenated compressed frames. The plugin manager and all previously released editor/plugin changes remain included.
+
+274 local tests: zero failures, two environment-dependent skips. Signed/notarized Universal ZIP and signed 0.2.4 → 0.2.5 upgrade verified; downstream Homebrew publication succeeded with matching version/checksum. [Acceptance and remaining limits](validation/2026-10-30-agent-concurrent-sessions.md). The installed application was not replaced by these checks.
+
+# Existing agent CLIs — 0.2.4 baseline (2026-10-30)
 
 Native selection and session resume for Codex, OpenCode, Pi, Claude Code and DeepSeek Harness, including saved session titles, CLI/desktop shared stores, SSH execution and optional SSHFS mappings for local agents on SSH projects. Open text files and expanded directories update after agent edits while the same CLI process and terminal survive file browsing; dirty buffers retain conflict protection. [Usage, acceptance and limits](AGENT_CLI.md). Included in Linvell 0.2.4, with selection in the left Agents sidebar and execution in the main workspace. Live Codex metadata and local native UI were checked; full provider authentication/context and live SSHFS acceptance remain unverified.
 

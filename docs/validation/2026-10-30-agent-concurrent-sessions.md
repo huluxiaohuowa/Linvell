@@ -20,3 +20,11 @@ Final full local run: **274 tests, 0 failures, 2 skipped** (103 native/UI tests 
 ## Design references
 
 Reviewed behavior and owning source in [CloudCLI's session store](https://github.com/siteboon/claudecodeui/blob/main/src/modules/chat/hooks/useSessionStore.ts), [Orca's session model](https://www.onorca.dev/docs/model/agents-sessions) and [Orca's file-link routing](https://github.com/stablyai/orca/blob/main/src/renderer/src/components/native-chat/native-chat-file-link.ts). Agent Deck and Claude Squad also separate session creation, attachment and stopping. Linvell keeps its native PTY implementation; no third-party application code was copied.
+
+## Published artifact acceptance
+
+[Release v0.2.5](https://github.com/huluxiaohuowa/Linvell/releases/tag/v0.2.5), source `f4cc002c6eb17b669b0a26cf97b96f88cbaef0fb`. [Release and downstream Homebrew jobs](https://github.com/huluxiaohuowa/Linvell/actions/runs/41007572859) both succeeded.
+
+The downloaded release reports 0.2.5 and contains `x86_64 arm64`. Deep/strict code-signature verification, Gatekeeper assessment and stapled notarization-ticket validation all passed. The separately exercised signed 0.2.4 → 0.2.5 upgrade passed, retaining one compressed rollback and cleaning temporary application registrations; the installed application was not replaced.
+
+The published Homebrew Cask reports 0.2.5. Its archive SHA-256 matches the independently downloaded ZIP: `676a018cebc5cae456654a745117ff0ddd933e9b5c60e488e2c69bba2e537a71`. Official Homebrew inclusion remains deferred; this is the existing self-hosted tap.
