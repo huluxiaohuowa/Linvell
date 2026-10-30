@@ -12,7 +12,12 @@ extension WorkspaceController {
             do {
                 let package = try PluginPackage(directory:directory)
                 let alert = NSAlert(); alert.messageText = L.format("Load plugin: %@?",package.manifest.name)
-                alert.informativeText = (package.manifest.execution == "workspace" && self.remoteConnection != nil ? L.text("Workspace programs will be copied to and executed on the connected SSH host.")+"\n\n" : "")+L.text("Only load code you trust. Plugins run as your user account, outside a security sandbox. Declared permissions restrict editor APIs, not direct file, network or process access.")+"\n\n"+L.text("Editor permissions")+": "+(package.manifest.permissions.isEmpty ? L.text("None") : package.manifest.permissions.joined(separator:", "))+"\n\n"+directory.path
+                let remoteWarning = package.manifest.execution == "workspace" && self.remoteConnection != nil
+                    ? L.text("Workspace programs will be copied to and executed on the connected SSH host.")+"\n\n" : ""
+                let warning = L.text("Only load code you trust. Plugins run as your user account, outside a security sandbox. Declared permissions restrict editor APIs, not direct file, network or process access.")
+                let permissions = package.manifest.permissions.isEmpty ? L.text("None") : package.manifest.permissions.joined(separator:", ")
+                let permissionSummary = L.text("Editor permissions")+": "+permissions
+                alert.informativeText = remoteWarning+[warning,permissionSummary,directory.path].joined(separator:"\n\n")
                 alert.addButton(withTitle:L.text("Cancel")); alert.addButton(withTitle:L.text("Load Plugin"))
                 alert.beginSheetModal(for:window) { [weak self] response in
                     guard response == .alertSecondButtonReturn,let self else { return }

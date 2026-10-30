@@ -19,10 +19,12 @@ Scope: the committed main branch plus targeted syntax-analysis sharing, remote-c
 - Python release-script tests: 13 passed. Both release and Homebrew workflow files passed actionlint. Generated Cask passed Ruby style and online audit; isolated application-directory installation succeeded.
 - `brew audit --cask --new` is blocked by repository notability. Official Homebrew inclusion is pending; the third-party tap is independently usable.
 
-Remaining local boundaries: physical display-cadence probe skipped; live remote Git mutation test intentionally excluded because remote git commands are prohibited in this environment; signed 0.2.0 → 0.2.1 upgrade is checked separately after the new signed archive exists. Intel hardware and every possible OS/toolchain combination are not covered by local arm64 execution. CI builds the Universal distributable and runs its own tests on Intel.
+Remaining local boundaries: physical display-cadence probe skipped; live remote Git mutation test intentionally excluded because remote git commands are prohibited in this environment; signed 0.2.0 → 0.2.2 upgrade is checked separately after the new signed archive exists. Intel hardware and every possible OS/toolchain combination are not covered by local arm64 execution. CI builds the Universal distributable and runs its own tests on Intel.
 
 ## Distribution
 
 The `Release macOS` workflow builds, signs, notarizes and publishes the Universal ZIP/DMG. Its downstream `Publish Homebrew` job downloads the published ZIP, verifies the release checksum, checks the Cask style and pushes the new version to `huluxiaohuowa/homebrew-tap`. This job can also be retried independently by stable release tag.
 
 Official Homebrew submission requires human review of the generated Cask and satisfaction of the acceptance policy or a maintainer exception. It is not represented as complete by a successful third-party tap update.
+
+CI initially rejected two existing plugin confirmation expressions with Xcode 26.3 type-check timeouts. The expressions were split without changing their output; the failed 0.2.1 tag is retained and the corrected distribution uses 0.2.2.

@@ -159,7 +159,14 @@ final class PluginManagerWindow: PluginOwnedWindow, NSTableViewDataSource, NSTab
         guard let window else { return }
         let manifest = candidate.package.manifest,old = registry.installed.first { $0.id == manifest.id }
         let alert = NSAlert();alert.messageText = L.text(old == nil ? "Install Plugin" : "Replace Plugin")+": "+manifest.name+" "+manifest.version
-        alert.informativeText = manifest.id+"\n"+(old.map { $0.version+" → "+manifest.version+"\n" } ?? "")+(candidate.downloadURL?.absoluteString ?? L.text("Local package"))+"\n\n"+L.text("Only install plugins you trust. Code runs with your account's access. Enabled plugins load in each workspace and after restart.")+"\n\n"+L.text("Editor permissions")+": "+(manifest.permissions.isEmpty ? L.text("None") : manifest.permissions.joined(separator:", "))+"\n"+L.text(manifest.execution == "workspace" ? "Execution: project host, including SSH workspaces" : "Execution: this Mac")
+        let history = old.map { $0.version+" → "+manifest.version+"\n" } ?? ""
+        let origin = candidate.downloadURL?.absoluteString ?? L.text("Local package")
+        let identity = manifest.id+"\n"+history+origin
+        let warning = L.text("Only install plugins you trust. Code runs with your account's access. Enabled plugins load in each workspace and after restart.")
+        let permissions = manifest.permissions.isEmpty ? L.text("None") : manifest.permissions.joined(separator:", ")
+        let permissionSummary = L.text("Editor permissions")+": "+permissions
+        let execution = L.text(manifest.execution == "workspace" ? "Execution: project host, including SSH workspaces" : "Execution: this Mac")
+        alert.informativeText = [identity,warning,permissionSummary+"\n"+execution].joined(separator:"\n\n")
         let enable = NSButton(checkboxWithTitle:L.text("Enable now and at startup"),target:nil,action:nil);enable.state = old?.enabled == false ? .off : .on;alert.accessoryView = enable
         alert.addButton(withTitle:L.text("Install Plugin"));alert.addButton(withTitle:L.text("Cancel"))
         alert.beginSheetModal(for:window) { [weak self] reply in
