@@ -1,3 +1,9 @@
+# Linvell 0.2.9 — published (2026-10-30)
+
+[0.2.9](https://github.com/huluxiaohuowa/Linvell/releases/tag/v0.2.9) fixes DeepSeek Harness integration by embedding its installed official Web UI. New conversations need no task, and double-click restores the original conversation, including after its process stops. No extra TUI is required. The official account/default-model initialization reuses an existing login rather than demanding a separate API key.
+
+Installed-runtime acceptance verified blank creation, an actual assistant response through the stored account, double-action activation, and stopped-session restoration with the same rendered ID and assistant history. The public Universal ZIP, version, SHA-256, strict signature, Gatekeeper acceptance, stapled notarization ticket and public latest-release update feed were verified. The installed application was not replaced. Live remote DSH account acceptance remains untested. [Evidence and limits](validation/2026-10-30-dsh-interactive.md).
+
 # Linvell 0.2.8 — published (2026-10-30)
 
 [0.2.8](https://github.com/huluxiaohuowa/Linvell/releases/tag/v0.2.8) replaces the SSHFS/macFUSE path with optional, user-installed Mutagen. Missing installations show `brew install mutagen-io/mutagen/mutagen`; installed CLIs show a green capability indicator independently of actual synchronization health. Local agents on SSH projects use two-way-safe replicas. Synchronization starts on explicit demand and stops when no local session needs it; no login item or Mutagen binary is bundled.
