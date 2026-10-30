@@ -946,3 +946,12 @@
 "DSH task — each run continues the selected session for one task" = "DSH 任务：每次运行在所选会话中继续完成一个任务";
 
 "Changed on disk · unsaved edits kept" = "磁盘文件已更改 · 已保留未保存的编辑";
+
+"Open agent sessions" = "已打开的 Agent 会话";
+"Open Selected File" = "打开选中文件";
+"Select a file path in the terminal to open it in this workspace. Command-click terminal links to open them directly." = "在终端中选中文件路径，可在当前工作区打开；按住 Command 点击终端链接可直接打开。";
+"Agent Settings" = "Agent 设置";
+"No open sessions" = "尚未打开会话";
+"Unsupported file link." = "不支持的文件链接。";
+"Stop running agent sessions?" = "停止正在运行的 Agent 会话？";
+"The running CLIs will stop. Saved sessions remain in the agent’s own storage." = "将停止正在运行的 CLI，已保存的会话仍保留在 Agent 自己的存储中。";

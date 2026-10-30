@@ -1,16 +1,18 @@
 # Existing agent CLIs / 接入已有 Agent
 
-Available in Linvell 0.2.4. Open the **Agents** sparkle button in the left activity bar or at the top right of the workspace, or search **Agents** in the command palette.
+Available in Linvell 0.2.4; concurrent sessions and corrected DSH titles are added in 0.2.5. Open the **Agents** sparkle button in the left activity bar or at the top right of the workspace, or search **Agents** in the command palette.
 
 ## 使用
 
 打开项目后，点击左侧边栏或右上角 **Agents**（星光图标），或在命令面板中搜索 **Agents**。
 
 1. 选择 Codex、OpenCode、Pi、Claude Code 或 DeepSeek Harness（DSH）。自动识别 PATH、常用用户安装目录、Node 版本管理器目录，以及 `/Applications`、`~/Applications` 内已知的桌面程序 CLI 路径。
-2. 可从发现的安装中选择，也可点击 **选择 CLI…**，选择可执行文件或包含受支持 CLI 的桌面 `.app`。远程 CLI 可以直接输入绝对路径；不会运行桌面程序的 GUI 主进程。
+2. 展开 **Agent 设置**，可从发现的安装中选择，也可点击 **选择 CLI…**，选择可执行文件或包含受支持 CLI 的桌面 `.app`。远程 CLI 可以直接输入绝对路径；不会运行桌面程序的 GUI 主进程。
 3. 如果桌面版或 CLI 使用独立配置目录，填写相同的 **Agent 主目录**。Codex 对应 `CODEX_HOME`，Claude 对应 `CLAUDE_CONFIG_DIR`，Pi 对应 `PI_CODING_AGENT_DIR`，DSH 对应 `DSH_HOME`；留空保留默认环境。OpenCode 通过自己的 CLI 查询会话。
 4. 面板会自动索引所选机器上、与当前目录匹配的会话。搜索后双击或点击 **继续会话**；也可以 **新建会话**。完整交互在已有 SwiftTerm 原生终端中运行，包括原 agent 的登录、权限确认和工具执行。
-5. Agent 保存的历史、压缩记录、分支、项目指令及其他上下文由该 agent 恢复。Linvell 不把不同产品的聊天记录拼成一个新会话，也不创建自己的 agent 引擎。
+5. 已运行的会话在主界面顶部切换。每个会话拥有独立进程、终端输出、滚动记录和图片；运行中仍可新建会话、选择其他 Agent、刷新历史或继续另一个会话。继续已经在本实例运行的同一历史会话时直接切回原终端。**停止** 只作用于当前显示的会话，切换不会停止后台会话。退出工作区时统一确认并停止仍在运行的会话。
+6. 终端中的文件链接按住 Command 点击，在当前 Linvell 工作区打开；普通路径可选中后点击 **打开选中文件**，支持相对路径及 `文件:行:列` 的行号定位。图片文件使用现有图片预览；支持 CLI 输出的 iTerm2、Kitty 和 Sixel 终端图片协议。远程路径沿所属会话的 SSH 连接或挂载映射打开。
+7. Agent 保存的历史、压缩记录、分支、项目指令及其他上下文由该 agent 恢复。Linvell 不把不同产品的聊天记录拼成一个新会话，也不创建自己的 agent 引擎。
 
 ## 会话来源与边界
 
@@ -53,6 +55,15 @@ For a local CLI working on an SSH project, mount the exact remote directory with
 
 ## Validation
 
-Focused tests cover metadata parsing, project isolation, duplicate/archive records, incomplete JSONL, official OpenCode JSON, desktop GUI/CLI distinction, live-mount identity rules, local/remote probe consistency and launching/resuming a fixture CLI in the native terminal. They do not make model API calls. Additional tests cover late title changes across providers, official Codex list pagination, compressed DSH logs, file/tree refresh, dirty-buffer protection and preserving the same agent PID while switching files. Live local Codex `thread/list` and native title rendering were verified, and the installed DSH CLI was detected in the UI. Real CLI authentication, provider context restoration, SSH execution and SSHFS mounting need live acceptance on the intended installations; no claim of five-provider end-to-end acceptance is made here.
+Focused tests cover metadata parsing, project isolation, duplicate/archive records, incomplete JSONL, official OpenCode JSON, desktop GUI/CLI distinction, live-mount identity rules, local/remote probe consistency and launching/resuming a fixture CLI in the native terminal. Automated fixtures do not make model API calls. A separate ephemeral read-only installed Codex execution also verified one real model reply. Additional tests cover late title changes across providers, official Codex list pagination, compressed DSH logs, file/tree refresh, dirty-buffer protection and preserving the same agent PID while switching files. Live local Codex `thread/list` and native title rendering were verified, and the installed DSH CLI was detected in the UI. Real CLI authentication, provider context restoration, SSH execution and SSHFS mounting need live acceptance on the intended installations; no claim of five-provider end-to-end acceptance is made here.
 
 Provider references: [OpenCode CLI](https://opencode.ai/docs/cli/), [Pi sessions](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/sessions.md), [Pi session format](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/session-format.md), [Claude desktop handoff](https://code.claude.com/docs/en/desktop#continue-in-another-surface). Codex resume arguments were also checked against the locally installed CLI's `codex resume --help`.
+
+
+## Session design references (0.2.5)
+
+Reviewed [CloudCLI's session-keyed store](https://github.com/siteboon/claudecodeui/blob/main/src/modules/chat/hooks/useSessionStore.ts), [Orca's session lifecycle](https://www.onorca.dev/docs/model/agents-sessions), and [Orca's file-link ownership](https://github.com/stablyai/orca/blob/main/src/renderer/src/components/native-chat/native-chat-file-link.ts). Linvell uses its existing native SwiftTerm PTYs: each runtime retains its terminal and launch context; selection changes the visible runtime. No source code or runtime from these projects is incorporated. Agent Deck and Claude Squad also informed the separation between creating, attaching and stopping a session.
+
+DSH's Zstandard files contain concatenated frames. The Node codec previously returned only the first frame (the header), losing subsequent title events. Discovery now consumes each complete frame using the codec's consumed-byte count, keeps the latest title, and tolerates an unfinished final frame while DSH writes. Installed DSH acceptance found five project sessions and read five saved titles; private title content is excluded from logs and fixtures.
+
+Concurrent-session acceptance and remaining live-test limits: [verification record](validation/2026-10-30-agent-concurrent-sessions.md).

@@ -946,3 +946,12 @@
 "DSH task — each run continues the selected session for one task" = "DSH task — each run continues the selected session for one task";
 
 "Changed on disk · unsaved edits kept" = "Changed on disk · unsaved edits kept";
+
+"Open agent sessions" = "Open agent sessions";
+"Open Selected File" = "Open Selected File";
+"Select a file path in the terminal to open it in this workspace. Command-click terminal links to open them directly." = "Select a file path in the terminal to open it in this workspace. Command-click terminal links to open them directly.";
+"Agent Settings" = "Agent Settings";
+"No open sessions" = "No open sessions";
+"Unsupported file link." = "Unsupported file link.";
+"Stop running agent sessions?" = "Stop running agent sessions?";
+"The running CLIs will stop. Saved sessions remain in the agent’s own storage." = "The running CLIs will stop. Saved sessions remain in the agent’s own storage.";

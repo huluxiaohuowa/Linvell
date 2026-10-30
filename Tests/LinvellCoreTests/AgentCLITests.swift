@@ -74,10 +74,13 @@ for line in sys.stdin:
         try FileManager.default.createDirectory(at:project,withIntermediateDirectories:true)
         guard let node = ToolCommand.executable("node") else { throw XCTSkip("Node is not installed") }
         let log = home.appendingPathComponent("sessions/project/session-a/session.v4.jsonl.zstd")
-        let data = try jsonl([["type":"session","version":4,"id":"session-a","cwd":project.path,"delegationDepth":0], ["type":"user/message","data":["source":["kind":"user"],"content":[["type":"text","text":"Original task"]]]], ["type":"session/title","data":["title":"Saved DSH title"]]])
+        let data = try jsonl([["type":"session","version":4,"id":"session-a","cwd":project.path,"delegationDepth":0], ["type":"user/message","data":["source":["kind":"user"],"content":[["type":"text","text":"Original task"]]]], ["type":"session/title","data":["title":"Earlier title"]], ["type":"assistant/message","data":["text":String(repeating:"content",count:20000)]], ["type":"session/title","data":["title":"Saved DSH title"]]])
         try FileManager.default.createDirectory(at:log.deletingLastPathComponent(),withIntermediateDirectories:true)
-        let compressed = try ToolCommand.run(node,arguments:["-e","const fs=require('fs'),z=require('zlib');fs.writeFileSync(process.argv[1],z.zstdCompressSync(fs.readFileSync(0)))",log.path],directory:project,input:data)
+        let compressed = try ToolCommand.run(node,arguments:["-e","const fs=require('fs'),z=require('zlib');fs.writeFileSync(process.argv[1],Buffer.concat(fs.readFileSync(0,'utf8').trimEnd().split('\\n').map(line=>z.zstdCompressSync(Buffer.from(line+'\\n')))))",log.path],directory:project,input:data)
         XCTAssertTrue(compressed.succeeded)
+        // The writer may be appending another frame during discovery.
+        let handle = try FileHandle(forWritingTo:log); try handle.seekToEnd()
+        try handle.write(contentsOf:Data([0x28,0xb5,0x2f,0xfd])); try handle.close()
         var env = AgentCLI.environment; env["DSH_HOME"] = home.path
         let sessions = try AgentDSHSessions.list(executable:"/fixture/dsh",project:project.path,environment:env)
         XCTAssertEqual(sessions.first?.title,"Saved DSH title")

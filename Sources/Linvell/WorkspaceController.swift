@@ -241,7 +241,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         activeActivity = index
         for button in activityButtons { button.state = button.tag == index ? .on : .off; button.contentTintColor = button.tag == index ? Theme.accent : Theme.secondary; button.needsDisplay = true }
     }
-    private func goToLine(_ line: Int) {
+    func goToLine(_ line: Int) {
         guard let view = activePane?.textView else { return }
         let lines = view.string.components(separatedBy:"\n"), preceding = lines.prefix(max(0,min(line-1,lines.count)))
         let offset = min(view.string.utf16.count,preceding.reduce(0) { $0 + $1.utf16.count + 1 })

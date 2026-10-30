@@ -44,7 +44,7 @@ try:
 except Exception as error:print('LINVELL_DSH:'+json.dumps(dict(sessions=[],error=str(error))))
 """#
     public static let script = #"""
-const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),zlib=require('node:zlib'),readline=require('node:readline');
+const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),zlib=require('node:zlib'),readline=require('node:readline'),{Readable}=require('node:stream');
 (async()=>{
  const req=JSON.parse(fs.readFileSync(0,'utf8'));const root=path.join(req.home||process.env.DSH_HOME||path.join(os.homedir(),'.dsh'),'sessions');
  const canonical=p=>{try{return fs.realpathSync(p)}catch{return path.resolve(p)}};const project=canonical(req.project),sessions=new Map(),projects=new Set([project]);
@@ -53,12 +53,31 @@ const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),zlib
  let common=gitdir(project);if(common){const relative=readtext(path.join(common,'commondir'));if(relative)common=canonical(path.resolve(common,relative));const worktrees=path.join(common,'worktrees');let names=[];try{names=fs.readdirSync(worktrees)}catch{}
   for(const name of names){const entry=path.join(worktrees,name),pointer=readtext(path.join(entry,'gitdir'));if(pointer){const candidate=path.dirname(canonical(path.resolve(entry,pointer)));if(gitdir(candidate)===canonical(entry))projects.add(candidate)}}
   if(path.basename(common)==='.git'&&gitdir(path.dirname(common))===common)projects.add(path.dirname(common));}
+ async function* decodedChunks(file){
+  let pending=Buffer.alloc(0);const input=fs.createReadStream(file,{highWaterMark:65536});
+  try{for await(const chunk of input){
+   if(!file.endsWith('.zstd')){yield chunk;continue}
+   pending=Buffer.concat([pending,chunk]);
+   while(pending.length){
+    let result;try{result=zlib.zstdDecompressSync(pending,{info:true,maxOutputLength:16*1024*1024})}
+    catch(error){if(error.code==='Z_BUF_ERROR')break;throw error}
+    const consumed=result.engine.bytesWritten;
+    if(!consumed||consumed>pending.length)throw Error('Invalid DSH compressed frame.');
+    yield result.buffer;pending=pending.subarray(consumed);
+   }
+   if(pending.length>16*1024*1024)throw Error('DSH compressed frame exceeds the metadata limit.');
+  }}finally{input.destroy()}
+  // Newer Node codecs consume concatenated frames in one call. At EOF retain
+  // their complete output even when a writer has left the last frame unfinished.
+  if(pending.length){const result=zlib.zstdDecompressSync(pending,{finishFlush:zlib.constants.ZSTD_e_flush,maxOutputLength:16*1024*1024});if(result.length)yield result}
+ }
  async function scan(directory){
   let entries;try{entries=await fs.promises.readdir(directory,{withFileTypes:true})}catch(e){if(e.code==='ENOENT')return;throw e}
   const logs=entries.filter(e=>e.isFile()&&/^session(?:\.v\d+)?\.jsonl(?:\.zstd)?$/.test(e.name)).sort((a,b)=>Number((b.name.match(/\.v(\d+)/)||[])[1]||0)-Number((a.name.match(/\.v(\d+)/)||[])[1]||0));
   if(logs.length){
-   const file=path.join(directory,logs[0].name);let stream=fs.createReadStream(file);let source=stream;
-   if(file.endsWith('.zstd')){if(!zlib.createZstdDecompress)throw Error('DSH session logs require Node with Zstandard support. Select the runtime shipped with DSH.');source=zlib.createZstdDecompress();stream.on('error',e=>source.destroy(e));stream.pipe(source)}
+   const file=path.join(directory,logs[0].name);
+   if(file.endsWith('.zstd')&&!zlib.zstdDecompressSync)throw Error('DSH session logs require Node with Zstandard support. Select the runtime shipped with DSH.');
+   const stream=Readable.from(decodedChunks(file)),source=stream;
    let header,title,first;const lines=readline.createInterface({input:source,crlfDelay:Infinity});
    try{for await(const line of lines){let value;try{value=JSON.parse(line)}catch{continue}
     if(value.type==='session'&&!header){header=value;if(!header.cwd||!projects.has(canonical(header.cwd))||header.origin==='subagent'||header.delegationDepth>0){stream.destroy();lines.close();return}}

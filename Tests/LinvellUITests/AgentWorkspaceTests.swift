@@ -104,3 +104,101 @@ final class AgentWorkspaceTests: XCTestCase {
         XCTAssertNotNil(view.terminal)
     }
 }
+
+extension AgentWorkspaceTests {
+    private func pump(_ seconds: TimeInterval = 0.1) { RunLoop.current.run(until:Date().addingTimeInterval(seconds)) }
+    func testConcurrentSessionsSwitchProvidersAndStopOnlyCapturedSession() throws {
+        _ = NSApplication.shared
+        let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("dev/build/linvell/agent-test-fixtures/multi-"+UUID().uuidString)
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+        let cli = root.appendingPathComponent("agent")
+        try Data("#!/bin/sh\ntrap '' INT\nprintf 'ready\\n'\nsleep 0.3\nprintf 'background output\\n'\nwhile :; do sleep 1; done\n".utf8).write(to:cli)
+        try FileManager.default.setAttributes([.posixPermissions:0o700],ofItemAtPath:cli.path)
+        let view = AgentWorkspace(project:root.path,remote:nil,autoLoad:false)
+        let defaults = UserDefaults.standard
+        let keys = ["agentCLI.local.codex.path","agentCLI.local.codex.home","agentCLI.local.pi.path","agentCLI.local.pi.home"]
+        let previous = keys.map { defaults.object(forKey:$0) }
+        defer { view.shutdown(); for (key,value) in zip(keys,previous) { defaults.set(value,forKey:key) }; try? FileManager.default.removeItem(at:root) }
+        view.path.stringValue = cli.path; view.agentHome.stringValue = root.path
+        let saved = AgentSession(id:"saved-a",title:"Named session",cwd:root.path,locator:"saved-a",updated:0)
+        view.start(session:saved)
+        let a = try XCTUnwrap(view.activeRuntime),pidA = a.terminal.process.shellPid
+        XCTAssertTrue(a.terminal.process.running)
+        let originalMenuItem = view.openSessions.item(at:0)
+        view.setTerminalTitle(source:a.terminal,title:"Session A")
+        view.setTerminalTitle(source:a.terminal,title:"Session A")
+        XCTAssertTrue(view.openSessions.item(at:0) === originalMenuItem)
+        XCTAssertTrue(view.table.isDescendant(of:view.configurationView)); XCTAssertTrue(view.search.isEnabled)
+        XCTAssertTrue(view.newSession.isEnabled); XCTAssertTrue(view.kindPicker.isEnabled)
+        view.startNew(); let b = try XCTUnwrap(view.activeRuntime),pidB = b.terminal.process.shellPid
+        XCTAssertNotEqual(pidA,pidB); XCTAssertTrue(a.terminal.process.running)
+        view.start(session:saved)
+        XCTAssertTrue(view.activeRuntime === a); XCTAssertEqual(view.runtimes.count,2)
+        view.kindPicker.selectItem(at:AgentKind.allCases.firstIndex(of:.pi)!)
+        view.selectionChanged()
+        XCTAssertEqual(view.kind,.pi); XCTAssertTrue(view.kindPicker.isEnabled); XCTAssertTrue(a.terminal.process.running); XCTAssertTrue(b.terminal.process.running)
+        view.path.stringValue = cli.path; view.agentHome.stringValue = root.path
+        // A metadata request does not prevent starting another provider.
+        view.startNew(); let c = try XCTUnwrap(view.activeRuntime)
+        XCTAssertEqual(c.context.kind,.pi); XCTAssertEqual(view.runtimes.count,3)
+        pump(0.6)
+        XCTAssertTrue(String(decoding:a.terminal.getTerminal().getBufferAsData(),as:UTF8.self).contains("background output"))
+        view.activate(b); view.stopAgent(); view.activate(a)
+        pump(1.3)
+        XCTAssertFalse(b.terminal.process.running); XCTAssertTrue(a.terminal.process.running); XCTAssertTrue(c.terminal.process.running)
+        XCTAssertTrue(view.terminal === a.terminal); XCTAssertEqual(view.terminal?.process.shellPid,pidA)
+        view.openSessions.selectItem(at:2); view.selectOpenSession()
+        XCTAssertTrue(view.activeRuntime === c)
+        view.shutdown(); pump(0.2)
+        XCTAssertFalse(view.running)
+    }
+    func testLinksUseOwningSessionDirectoryAndCurrentWorkspaceIncludingImages() throws {
+        _ = NSApplication.shared
+        let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("dev/build/linvell/agent-test-fixtures/links-"+UUID().uuidString)
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+        let file = root.appendingPathComponent("note.txt"),image = root.appendingPathComponent("picture.png")
+        try Data("one\ntwo\nthree\n".utf8).write(to:file)
+        let png = try XCTUnwrap(Data(base64Encoded:"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII="))
+        try png.write(to:image)
+        let workspace = WorkspaceController(),view = AgentWorkspace(project:root.path,remote:nil,autoLoad:false)
+        workspace.root = FileNode(root); workspace.agentWorkspace = view
+        workspace.window?.makeKeyAndOrderFront(nil); workspace.showAgents()
+        let key = "agentCLI.local.codex.path",homeKey = "agentCLI.local.codex.home"
+        let previous = UserDefaults.standard.object(forKey:key),previousHome = UserDefaults.standard.object(forKey:homeKey)
+        defer { workspace.shutdownAgent(); workspace.recoveryTimer?.invalidate(); workspace.window?.orderOut(nil); UserDefaults.standard.set(previous,forKey:key); UserDefaults.standard.set(previousHome,forKey:homeKey); try? FileManager.default.removeItem(at:root) }
+        view.path.stringValue = "/bin/cat"; view.agentHome.stringValue = root.path; view.startNew()
+        let runtime = try XCTUnwrap(view.activeRuntime),pid = runtime.terminal.process.shellPid
+        let windows = Set(NSApp.windows.map(ObjectIdentifier.init))
+        // Exercise protocol dispatch rather than invoking a subclass lookalike.
+        runtime.terminal.terminalDelegate?.requestOpenLink(source:runtime.terminal,link:"note.txt:2:1",params:[:])
+        let deadline = Date().addingTimeInterval(4)
+        while workspace.current?.fileURL != file,Date() < deadline { pump(0.02) }
+        XCTAssertEqual(workspace.current?.fileURL,file)
+        XCTAssertEqual(workspace.activePane?.textView.selectedRange().location,4)
+        runtime.terminal.terminalDelegate?.requestOpenLink(source:runtime.terminal,link:image.absoluteString,params:[:])
+        XCTAssertEqual(workspace.current?.fileURL,image)
+        XCTAssertEqual(Set(NSApp.windows.map(ObjectIdentifier.init)),windows)
+        workspace.showAgents(); XCTAssertEqual(view.terminal?.process.shellPid,pid); XCTAssertTrue(view.running)
+        runtime.terminal.feed(text:"\u{1b}]1337;File=inline=1;width=32px;height=32px:"+png.base64EncodedString()+"\u{7}")
+        pump(0.1)
+        XCTAssertTrue(runtime.terminal.getTerminal().buffer.hasAnyImages)
+        view.startNew(); view.activate(runtime)
+        XCTAssertTrue(runtime.terminal.getTerminal().buffer.hasAnyImages)
+        let bitmap = try XCTUnwrap(runtime.terminal.bitmapImageRepForCachingDisplay(in:runtime.terminal.bounds))
+        runtime.terminal.cacheDisplay(in:runtime.terminal.bounds,to:bitmap)
+        try bitmap.representation(using:.png,properties:[:])?.write(to:root.deletingLastPathComponent().appendingPathComponent("inline-image.png"))
+    }
+    func testFileLinkParsingAndRemoteNamespace() throws {
+        XCTAssertEqual(AgentFileLink.resolve("../file name.swift:12:3",directory:"/work/src")?.path,"/work/file name.swift")
+        XCTAssertEqual(AgentFileLink.resolve("file:///work/a%20b.swift#L20",directory:"/elsewhere")?.line,20)
+        XCTAssertNil(AgentFileLink.resolve("ssh://host/work/file",directory:"/work"))
+        XCTAssertNil(AgentFileLink.resolve("a\nb",directory:"/work"))
+        let view = AgentWorkspace(project:"/remote/work",remote:try SSHRemote(host:"fixture"),autoLoad:false)
+        let terminal = DisplayPacedTerminalView(frame:NSRect(x:0,y:0,width:400,height:300))
+        let runtime = AgentRuntime(context:.init(kind:.codex,host:"fixture",executable:"/bin/cat",home:""),session:nil,directory:"/remote/work",remote:view.remote,mapping:nil,terminal:terminal)
+        var opened: (String,String?,Int?)?
+        view.onOpenFile = { opened = ($0,$1?.host,$2) }
+        view.openLink("relative.swift:9",in:runtime)
+        XCTAssertEqual(opened?.0,"/remote/work/relative.swift"); XCTAssertEqual(opened?.1,"fixture"); XCTAssertEqual(opened?.2,9)
+    }
+}
