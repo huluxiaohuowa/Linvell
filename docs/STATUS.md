@@ -1,8 +1,10 @@
-# Linvell 0.2.10 — release candidate (2026-10-30)
+# Linvell 0.2.10 — published (2026-10-31)
 
 Native DSH TUI sessions replace 0.2.9's rejected embedded website. All providers show newly opened sessions immediately in the sidebar, update running titles and refresh persisted records. Missing CLI/TUI detection provides installation guidance. Full-height terminal layout, repeated-start protection and resumed-session readiness are corrected. Development launches disable iCloud sync to prevent test copies requesting that access.
 
-Local real-account checks covered Codex and DSH with an independently installed source-built TUI. Other provider fixtures pass; remote real-account TUI acceptance remains untested. [Evidence and limits](validation/2026-10-30-agent-native-terminal.md).
+[0.2.10](https://github.com/huluxiaohuowa/Linvell/releases/tag/v0.2.10) is public and is the latest stable release. The downloaded public Universal ZIP passed version/commit, SHA-256, both architectures, strict code signature, Gatekeeper and stapled-ticket verification. CI compiled and notarized successfully but failed attaching Apple's ticket; a clean local Universal release completed all signing/notarization checks and published the same source commit. Homebrew publication succeeded and its public cask version/ZIP checksum match 0.2.10. The installed application was not replaced.
+
+Local real-account checks covered Codex and DSH with an independently installed source-built TUI. Final local suite: 295 tests, 29 environment-dependent skips, zero failures; 14 release-script tests passed. Other provider fixtures pass; remote real-account TUI acceptance remains untested. [Evidence and limits](validation/2026-10-30-agent-native-terminal.md).
 
 # Linvell 0.2.9 — superseded by 0.2.10 (2026-10-30)
 

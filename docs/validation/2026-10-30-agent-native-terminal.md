@@ -26,3 +26,11 @@ Final Swift suite: 295 tests, 29 environment-dependent skips, zero failures (116
 ## Validation logs
 
 Build and test artifacts live outside the repository under the Linvell build directory. Final Swift suite, release-script tests, installed-TUI acceptance and actual-window screenshots are recorded there. Public package verification is performed after release publication and recorded in STATUS.md.
+
+## Public release verification — 2026-10-31
+
+Tag `v0.2.10`, source commit `67da0e883f89ed197b5a758e841279695f1f82ed`. The GitHub Actions build/tests/signature and Apple submission passed; ticket attachment failed after the runner's four retries, so no package was published by that run. A first local fallback encountered stale Xcode-generated module caches. A separate clean local build directory completed the full suite and Universal release, Developer ID signing, notarization, stapling and Gatekeeper acceptance, then published without changing the tagged app source.
+
+The public downloaded ZIP is 10,850,557 bytes. SHA-256 matched the published checksum; manifest version and commit, bundle version/identity, arm64/x86_64 architectures, strict signature, Gatekeeper assessment and stapled ticket all passed. The public latest-release API returns `v0.2.10`, stable and non-draft. No installation over the user's existing application was performed.
+
+Homebrew workflow `41088515981` succeeded. The public tap cask reports `0.2.10` and exactly matches the verified public ZIP checksum.
