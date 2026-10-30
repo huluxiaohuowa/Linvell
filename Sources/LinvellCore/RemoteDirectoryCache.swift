@@ -46,7 +46,7 @@ public final class RemoteDirectoryCache {
             clock &+= 1
             let record = Record(reply:reply,date:Date(),access:clock)
             insert(record,for:key)
-            if let canonical = reply.path { insert(record,for:Key(host:host,path:canonical)) }
+            if let canonical = reply.path,canonical != path { insert(record,for:Key(host:host,path:canonical)) }
             while records.count > maximumDirectories || entryCount > maximumEntries {
                 guard let oldest = records.min(by:{ $0.value.access < $1.value.access })?.key else { break }
                 remove(oldest)
@@ -57,7 +57,8 @@ public final class RemoteDirectoryCache {
     }
     // Call only while condition is locked, including replacement and eviction.
     private func insert(_ record: Record,for key: Key) {
-        remove(key); records[key] = record; entryCount += record.reply.entries?.count ?? 0
+        let previous = records.updateValue(record,forKey:key)
+        entryCount += (record.reply.entries?.count ?? 0) - (previous?.reply.entries?.count ?? 0)
     }
     private func remove(_ key: Key) {
         if let record = records.removeValue(forKey:key) { entryCount -= record.reply.entries?.count ?? 0 }

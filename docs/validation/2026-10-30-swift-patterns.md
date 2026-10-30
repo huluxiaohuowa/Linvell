@@ -10,6 +10,8 @@ Scope: the committed main branch plus targeted syntax-analysis sharing, remote-c
 
 ## Local verification
 
+- CPU microbenchmark using the actual baseline and updated cache implementations: five runs of 100,000 forced refreshes across 128 directories with 100 entries each, optimized Swift build. Median elapsed time decreased from 28.65 ms to 15.09 ms (about 47%). The harness stubs immutable replies and excludes SSH, parsing and display; this is not an end-to-end application speedup. An earlier remove/reinsert variant regressed this benchmark and was replaced before publication.
+
 - Baseline: 81 native UI tests and 149 core tests, zero failures; 16 environment-dependent skips.
 - Updated suite: 82 native UI tests and 152 core tests. Core suite: zero failures, two skips. UI suite initially found a reused disposable fixture file; after fixture cleanup the affected remote-language test passed. No remaining functional failures in executed tests.
 - Real clangd and SourceKit definition/rename, plugin clangd and LLDB DAP, Linux SSH plugin transfer/reconnect/process cleanup/Swift SDK, managed language-tool installation and TypeScript indexing were enabled and passed.
