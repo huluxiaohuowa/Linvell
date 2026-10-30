@@ -42,9 +42,12 @@ public final class DocumentBuffer {
     }
 
     public convenience init(url: URL) throws {
+        let resolved = url.resolvingSymlinksInPath()
+        try self.init(data:Data(contentsOf:resolved),url:resolved)
+    }
+    public convenience init(data: Data,url: URL) throws {
         self.init()
         let resolved = url.resolvingSymlinksInPath()
-        let data = try Data(contentsOf: resolved)
         var content = data
         if data.starts(with: [0xEF, 0xBB, 0xBF]) { hasBOM = true; content = data.dropFirst(3) }
         else if data.starts(with: [0xFF, 0xFE]) { hasBOM = true; encoding = .utf16LittleEndian; content = data.dropFirst(2) }
@@ -66,6 +69,15 @@ public final class DocumentBuffer {
         lineEnding = crlf ? "\r\n" : cr ? "\r" : "\n"
         text = crlf || cr ? decoded.replacingOccurrences(of:"\r\n",with:"\n").replacingOccurrences(of:"\r",with:"\n") : decoded
         savedText = text; self.url = resolved; diskDigest = Self.digest(data)
+    }
+
+    public func matchesDisk(_ snapshot: DocumentBuffer) -> Bool { diskDigest == snapshot.diskDigest }
+    /// The caller rechecks the captured revision on the UI thread before applying.
+    @discardableResult public func adoptExternal(_ snapshot: DocumentBuffer) -> Bool {
+        guard !isModified,url == snapshot.url else { return false }
+        text = snapshot.text; savedText = snapshot.text; diskDigest = snapshot.diskDigest
+        encoding = snapshot.encoding; hasBOM = snapshot.hasBOM; lineEnding = snapshot.lineEnding; hasMixedLineEndings = snapshot.hasMixedLineEndings
+        revision += 1; modificationCheck = nil; return true
     }
 
     public func replace(_ range: NSRange, with replacement: String) throws {

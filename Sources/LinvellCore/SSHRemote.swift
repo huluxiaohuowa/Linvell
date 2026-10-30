@@ -170,6 +170,17 @@ try:
                     if os.path.exists(temporary): os.unlink(temporary)
         value,checksum=readsettings()
         reply=dict(path=config,content=base64.b64encode(value).decode(),digest=checksum)
+    elif op=='editor-file-states':
+        paths=json.loads(base64.b64decode(req.get('content','W10=')))
+        if not isinstance(paths,list) or len(paths)>5000:raise ValueError('Too many open files or expanded directories to watch.')
+        states={}
+        for name in paths:
+            name=os.path.abspath(os.path.expanduser(name))
+            try:
+                item=os.stat(name)
+                states[name]=str(item.st_mtime_ns)+':'+str(item.st_size)+':'+str(item.st_ino)
+            except FileNotFoundError:states[name]='missing'
+        reply=dict(path=path,fileStates=states)
     elif op=='language-file-states':
         states={};truncated=False
         excluded={'.git','node_modules','.venv','venv','__pycache__','build','dist','.build'}

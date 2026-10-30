@@ -64,6 +64,16 @@ final class RemoteExplorer: NSView, NSOutlineViewDataSource, NSOutlineViewDelega
     @objc private func chooseFolder() { onChooseFolder?() }
     @objc private func terminal() { onTerminal?() }
     @objc func reload() { rootNode.wantsExpanded = true; load(rootNode,force:true) }
+    var visibleDirectories: [String] {
+        [rootNode.path]+(0..<table.numberOfRows).compactMap { row in
+            guard let node = table.item(atRow:row) as? RemoteTreeNode,node !== rootNode,node.isDirectory,table.isItemExpanded(node) else { return nil }; return node.path
+        }
+    }
+    func refreshDirectories(_ paths: Set<String>) {
+        let nodes = [rootNode]+(0..<table.numberOfRows).compactMap { table.item(atRow:$0) as? RemoteTreeNode }
+        var visited = Set<String>()
+        for node in nodes where node.isDirectory && paths.contains(node.path) && visited.insert(node.path).inserted { load(node,force:true) }
+    }
     private func apply(_ reply: RemoteReply,to node: RemoteTreeNode) {
         if node === rootNode,let path = reply.path { node.path = path; node.name = URL(fileURLWithPath:path).lastPathComponent }
         let entries = reply.entries ?? []

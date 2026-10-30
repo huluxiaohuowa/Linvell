@@ -29,6 +29,9 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     let pluginStatusBar = NSStackView()
     let languageServices = WorkspaceLanguageServices()
     var languageEdits: [UUID:DispatchWorkItem] = [:]
+    var languageDiagnostics: [UUID:DispatchWorkItem] = [:]
+    var tabRows: [UUID:NSStackView] = [:]
+    var tabIconURLs: [UUID:URL] = [:]
     var languageSyncs: [UUID:LanguageQueryTicket] = [:]
     var languageQueries: [String:LanguageQueryTicket] = [:]
     var navigationBack: [CodeNavigationPoint] = [],navigationForward: [CodeNavigationPoint] = []
@@ -67,6 +70,8 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     var vimEnabled = UserDefaults.standard.bool(forKey:"vimEnabled")
     var terminal: LocalProcessTerminalView?
     var terminalHost: NSView?
+    var agentWorkspace: AgentWorkspace?
+    var agentFileMonitor: AgentFileMonitor?
     var recoveryTimer: Timer?
     var commandPanel: NSPanel?
     let recovery: RecoveryStore
@@ -129,7 +134,8 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
             Theme.button("sidebar.left",help:"Toggle Sidebar",target:self,action:#selector(toggleSidebar)),
             Theme.button("folder.badge.plus",help:"Open Folder…",target:self,action:#selector(openFolder)),
             Theme.button("rectangle.split.2x1",help:"Split Editor",target:self,action:#selector(toggleSplit)),
-            Theme.button("terminal",help:"Toggle Terminal",target:self,action:#selector(toggleTerminal))
+            Theme.button("terminal",help:"Toggle Terminal",target:self,action:#selector(toggleTerminal)),
+            Theme.button("sparkles",help:"Agents",target:self,action:#selector(showAgents))
         ])
         heading.translatesAutoresizingMaskIntoConstraints = false; header.addSubview(heading)
         command.widthAnchor.constraint(equalTo:header.widthAnchor,multiplier:0.35).isActive = true
@@ -193,9 +199,10 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         if let url = Bundle.main.url(forResource:"Linvell",withExtension:"png") { icon.image = NSImage(contentsOf:url) }
         icon.imageScaling = .scaleProportionallyUpOrDown; icon.heightAnchor.constraint(equalToConstant:32).isActive = true
         var controls: [NSView] = [icon]
-        for (index,entry) in [("doc.on.doc","Explorer"),("magnifyingglass","Search Project"),("arrow.triangle.branch","Source Control"),("list.bullet.rectangle","Document Symbols"),("square.grid.2x2","Project Tools")].enumerated() {
+        for (index,entry) in [("doc.on.doc","Explorer"),("magnifyingglass","Search Project"),("arrow.triangle.branch","Source Control"),("list.bullet.rectangle","Document Symbols"),("square.grid.2x2","Project Tools"),("sparkles","Agents")].enumerated() {
             let button = Theme.activityButton(entry.0,help:entry.1,target:self,action:#selector(activityClicked(_:)))
             button.tag = index; button.image?.isTemplate = true
+            if index == 5 { button.identifier = .init("Linvell.AgentsActivity") }
             button.state = index == activeActivity ? .on : .off
             button.contentTintColor = index == activeActivity ? Theme.accent : Theme.secondary
             activityButtons.append(button); controls.append(button)
@@ -205,9 +212,14 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     }
     @objc private func activityClicked(_ sender: NSButton) {
         selectActivity(sender.tag)
-        switch sender.tag { case 0: showSidebar("files"); case 1: showSidebar("search"); case 2: gitWorkspace(); case 3: showSymbols(); default: projectTools() }
+        switch sender.tag { case 0: showSidebar("files"); case 1: showSidebar("search"); case 2: gitWorkspace(); case 3: showSymbols(); case 4: projectTools(); default: showAgents() }
     }
     func showSidebar(_ kind: String) {
+        if kind == "agents",let agentWorkspace {
+            sidebarKind = kind; sidebar.isHidden = false
+            sidebar.subviews.forEach { $0.removeFromSuperview() }
+            Theme.pin(agentWorkspace.configurationView,in:sidebar); selectActivity(5); body.adjustSubviews(); return
+        }
         if kind.hasPrefix("plugin:"),restorePluginSidebar(String(kind.dropFirst(7))) { return }
         sidebarKind = kind; sidebar.isHidden = false
         sidebar.subviews.forEach { $0.removeFromSuperview() }
@@ -420,7 +432,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         if let anchor = document.lastScroll { activePane?.scrollFromPreview(anchor); markdownView?.scrollFromSource(anchor) }
         window?.title = "\(document.displayName) — Linvell"
     }
-    private func preserveEditorPosition() {
+    func preserveEditorPosition() {
         completionPanel?.dismiss(); hoverPopover?.close(); languageQueries["textDocument/completion"]?.cancel(); languageQueries["textDocument/hover"]?.cancel()
         if let pane = activePane {
             pane.document.lastScroll = pane.scrollAnchor
@@ -439,26 +451,47 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     }
     func renderTabs() {
         synchronizePluginDocuments()
-        tabs.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let ids = Set(documents.map { $0.buffer.id })
+        for id in Array(tabRows.keys) where !ids.contains(id) {
+            tabRows.removeValue(forKey:id)?.removeFromSuperview(); tabIconURLs.removeValue(forKey:id)
+        }
         for (index,doc) in documents.enumerated() {
-            let b = NSButton(title:doc.displayName,target:self,action:#selector(tabClicked(_:)))
-            b.tag = index; b.bezelStyle = .inline; b.isBordered = false; b.font = .systemFont(ofSize:13,weight:doc === current ? .semibold : .regular)
-            b.contentTintColor = doc === current ? Theme.foreground : Theme.secondary
-            let close = TabCloseButton(); close.target = self; close.action = #selector(closeTab(_:)); close.tag = index
+            let id = doc.buffer.id
+            let row: NSStackView
+            if let existing = tabRows[id] { row = existing }
+            else {
+                let button = NSButton(title:doc.displayName,target:self,action:#selector(tabClicked(_:)))
+                button.bezelStyle = .inline; button.isBordered = false
+                let close = TabCloseButton(); close.target = self; close.action = #selector(closeTab(_:))
+                row = Theme.stack([FileIcon.view(for:doc.fileURL),button,close],spacing:10)
+                row.edgeInsets = NSEdgeInsets(top:0,left:16,bottom:0,right:6)
+                row.heightAnchor.constraint(equalToConstant:42).isActive = true; row.wantsLayer = true
+                tabRows[id] = row; tabIconURLs[id] = doc.fileURL
+            }
+            if tabIconURLs[id] != doc.fileURL,let icon = row.arrangedSubviews.first {
+                icon.removeFromSuperview(); row.insertArrangedSubview(FileIcon.view(for:doc.fileURL),at:0)
+                tabIconURLs[id] = doc.fileURL
+            }
+            if index >= tabs.arrangedSubviews.count || tabs.arrangedSubviews[index] !== row {
+                row.removeFromSuperview(); tabs.insertArrangedSubview(row,at:index)
+            }
+            if let icon = row.arrangedSubviews.first as? NSImageView { icon.contentTintColor = icon.image?.isTemplate == true ? Theme.secondary : nil }
+            let selected = doc === current
+            let button = row.arrangedSubviews[1] as! NSButton,close = row.arrangedSubviews[2] as! TabCloseButton
+            button.tag = index; close.tag = index
+            button.font = .systemFont(ofSize:13,weight:selected ? .semibold : .regular)
+            button.contentTintColor = selected ? Theme.foreground : Theme.secondary
             close.toolTip = L.format("Close %@",doc.displayName); close.setAccessibilityLabel(close.toolTip)
-            let icon = FileIcon.view(for:doc.fileURL)
-            let row = Theme.stack([icon,b,close],spacing:10); row.edgeInsets = NSEdgeInsets(top:0,left:16,bottom:0,right:6)
-            row.heightAnchor.constraint(equalToConstant:42).isActive = true
-            row.wantsLayer = true; row.layer?.backgroundColor = (doc === current ? Theme.canvas : Theme.panel).cgColor
-            if doc === current { row.layer?.borderColor = Theme.accent.withAlphaComponent(0.3).cgColor; row.layer?.borderWidth = 1 }
-            tabs.addArrangedSubview(row)
+            row.layer?.backgroundColor = (selected ? Theme.canvas : Theme.panel).cgColor
+            row.layer?.borderColor = Theme.accent.withAlphaComponent(0.3).cgColor
+            row.layer?.borderWidth = selected ? 1 : 0
         }
         updateTabTitles()
     }
     func updateTabTitles() {
         for (i,row) in tabs.arrangedSubviews.enumerated() {
             guard i < documents.count,let b = (row as? NSStackView)?.arrangedSubviews.compactMap({ $0 as? NSButton }).first else { continue }
-            b.title = documents[i].displayName
+            if b.title != documents[i].displayName { b.title = documents[i].displayName }
             ((row as? NSStackView)?.arrangedSubviews.last as? TabCloseButton)?.modified = documents[i].buffer.isModified
         }
         window?.isDocumentEdited = documents.contains { $0.buffer.isModified }
@@ -472,6 +505,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         do { try recovery.remove(doc.buffer.id) } catch { show(error); return }
         if let snapshot = codeSnapshot(doc,forClosing:true) { languageServices.close(snapshot) }
         languageEdits.removeValue(forKey:doc.buffer.id)?.cancel()
+        languageDiagnostics.removeValue(forKey:doc.buffer.id)?.cancel()
         documents.removeAll { $0 === doc }
         if current === doc {
             if let next = documents.last { activate(next) } else { current = nil; renderTabs(); showWelcome(); updateStatus() }
@@ -510,7 +544,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         a.addButton(withTitle:L.text("Save")); a.addButton(withTitle:L.text("Cancel")); a.addButton(withTitle:L.text("Discard"))
         switch a.runModal() { case .alertFirstButtonReturn: return saveDocument(doc); case .alertThirdButtonReturn: return true; default: return false }
     }
-    func windowShouldClose(_ sender: NSWindow) -> Bool { autoSaveWork.values.forEach { $0.cancel() }; autoSaveWork.removeAll(); return documents.allSatisfy(mayClose) && mayCloseTerminal() }
+    func windowShouldClose(_ sender: NSWindow) -> Bool { autoSaveWork.values.forEach { $0.cancel() }; autoSaveWork.removeAll(); return documents.allSatisfy(mayClose) && mayCloseTerminal() && (agentWorkspace?.mayClose() ?? true) }
     func mayCloseTerminal() -> Bool {
         if gitWorkspaceView?.running == true {
             let alert = NSAlert(); alert.messageText = L.text("Finish the current Git operation first.")
@@ -537,12 +571,14 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         terminal.terminate()
     }
     func windowWillClose(_ notification: Notification) {
+        agentFileMonitor?.stop(); agentFileMonitor = nil
+        agentWorkspace?.shutdown(); agentWorkspace = nil
         stopPlugins(); managedPluginLoad = UUID()
         pluginWindows.removeValue(forKey:"manager")?.close()
         picker?.dismiss(); picker = nil
         window?.undoManager?.removeAllActions(withTarget:self)
         completionPanel?.dismiss(); hoverPopover?.close(); languageServices.stop()
-        languageQueries.values.forEach { $0.cancel() }; languageSyncs.values.forEach { $0.cancel() }; languageEdits.values.forEach { $0.cancel() }; autoSaveWork.values.forEach { $0.cancel() }
+        languageQueries.values.forEach { $0.cancel() }; languageSyncs.values.forEach { $0.cancel() }; languageEdits.values.forEach { $0.cancel() }; languageDiagnostics.values.forEach { $0.cancel() }; autoSaveWork.values.forEach { $0.cancel() }
         terminateTerminal(); recoveryTimer?.invalidate()
         for d in documents { try? recovery.remove(d.buffer.id) }
     }
@@ -575,6 +611,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         let row = current.lines.line(at:p),start = current.lines.starts[row]
         let line = row+1,column = (current.buffer.text as NSString).substring(with:NSRange(location:start,length:p-start)).count+1
         status.stringValue = L.format("Ln %d, Col %d     %@     %d pt",line,column,current.buffer.formatLabel,Int(Theme.fontSize))
+        if current.externalChange { status.stringValue += " · "+L.text("Changed on disk · unsaved edits kept") }
         modeLabel.stringValue = vimEnabled ? L.text(current.vim.mode.rawValue) + (current.vim.pending.isEmpty ? "" : "  \(current.vim.pending)") : L.text("TEXT")
         if vimEnabled,let recording = current.vim.recordingRegister { modeLabel.stringValue += "  ● @"+recording }
     }
@@ -607,7 +644,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         }
         if let view = window?.contentView { refresh(view) }
         (editors.arrangedSubviews.first as? GitWorkspace)?.refreshTheme()
-        runWorkspaceView?.refreshTheme(); remoteBrowser?.table.backgroundColor = Theme.panel
+        agentWorkspace?.refreshTheme(); runWorkspaceView?.refreshTheme(); remoteBrowser?.table.backgroundColor = Theme.panel
         panes.forEach { $0.updateTheme() }; outline.backgroundColor = Theme.panel; outline.reloadData(); renderTabs()
         for (index,row) in tabs.arrangedSubviews.enumerated() where documents.indices.contains(index) {
             if let icon = (row as? NSStackView)?.arrangedSubviews.first as? NSImageView { icon.image = FileIcon.image(for:documents[index].fileURL); icon.contentTintColor = icon.image?.isTemplate == true ? Theme.secondary : nil }
@@ -765,7 +802,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     }
     @objc func commandPalette() {
         var options: [PickerOption] = []
-        for (title,selector) in [("New File",#selector(newFile)),("Open Folder…",#selector(openFolder)),("Connect to SSH Host…",#selector(connectSSH)),("Go to Definition",#selector(definitionCommand)),("Find All References",#selector(findReferences)),("Rename Symbol…",#selector(renameSymbol)),("Language Tools…",#selector(showLanguageTools)),("Go Back",#selector(goBack)),("Go Forward",#selector(goForward)),("Source Control",#selector(gitWorkspace)),("Git Commit Graph",#selector(gitWorkspace)),("Run & Preview",#selector(runWorkspace)),("Find in File",#selector(find)),("Toggle Vim Mode",#selector(toggleVim)),("Split Editor",#selector(toggleSplit)),("Toggle Terminal",#selector(toggleTerminal)),("Increase Font Size",#selector(increaseFont)),("Decrease Font Size",#selector(decreaseFont))] {
+        for (title,selector) in [("New File",#selector(newFile)),("Open Folder…",#selector(openFolder)),("Connect to SSH Host…",#selector(connectSSH)),("Go to Definition",#selector(definitionCommand)),("Find All References",#selector(findReferences)),("Rename Symbol…",#selector(renameSymbol)),("Language Tools…",#selector(showLanguageTools)),("Go Back",#selector(goBack)),("Go Forward",#selector(goForward)),("Source Control",#selector(gitWorkspace)),("Git Commit Graph",#selector(gitWorkspace)),("Run & Preview",#selector(runWorkspace)),("Find in File",#selector(find)),("Toggle Vim Mode",#selector(toggleVim)),("Split Editor",#selector(toggleSplit)),("Toggle Terminal",#selector(toggleTerminal)),("Agents",#selector(showAgents)),("Increase Font Size",#selector(increaseFont)),("Decrease Font Size",#selector(decreaseFont))] {
             options.append(PickerOption(title:title,detail:"Linvell command",invoke:{ [weak self] in self?.perform(selector) }))
         }
         options.append(PickerOption(title:L.text("Preferences: Theme and Font"),detail:"Appearance",invoke:{ [weak self] in self?.showSettings() }))

@@ -915,3 +915,34 @@
 "Could not check Homebrew updates. %@" = "无法检查 Homebrew 更新。%@";
 "Use Homebrew to upgrade this installation. Linvell will not download or replace the app itself." = "此安装由 Homebrew 管理。请通过 Homebrew 升级，Linvell 不会自行下载或替换应用。";
 "Homebrew updates are checked every six hours. Run the upgrade command in Terminal to install a newer version." = "每六小时检查一次 Homebrew 更新。请在终端运行升级命令来安装新版本。";
+
+"Agents" = "Agent";
+"Agent" = "Agent";
+"SSH Host" = "SSH 主机";
+"Agent CLI executable path" = "Agent CLI 可执行文件路径";
+"Agent home (optional)" = "Agent 主目录（可选）";
+"Use the same agent home as your CLI or desktop app. Leave empty for the default." = "使用与 CLI 或桌面程序相同的 Agent 主目录，留空使用默认目录。";
+"Search sessions" = "搜索会话";
+"New Session" = "新建会话";
+"Resume Session" = "继续会话";
+"Choose CLI…" = "选择 CLI…";
+"Mount SSH Folder…" = "挂载 SSH 目录…";
+"Choose Mount…" = "选择挂载目录…";
+"Project agent sessions" = "项目 Agent 会话";
+"Sessions come from the selected machine and agent home. Shared CLI/desktop sessions can resume; cloud-only sessions need the provider’s handoff. Context is restored by the agent itself." = "会话来自所选机器和 Agent 主目录。CLI 与桌面版共享的会话可以继续；仅存于云端的会话需要通过服务商转交。上下文由 Agent 自行恢复。";
+"Mount the SSH project to use a local agent." = "挂载 SSH 项目后即可使用本机 Agent。";
+"Loading agent sessions…" = "正在加载 Agent 会话…";
+"%d project sessions" = "%d 个项目会话";
+"Choose the agent executable or its desktop application." = "选择 Agent 可执行文件或其桌面程序。";
+"No supported CLI was found in this app. Choose its CLI executable directly." = "此程序中未找到支持的 CLI，请直接选择 CLI 可执行文件。";
+"Choose an executable CLI file." = "请选择可执行的 CLI 文件。";
+"Choose the SSHFS mount of this remote project." = "请选择此远程项目的 SSHFS 挂载目录。";
+"Connecting project mount…" = "正在连接项目挂载…";
+"Stop this agent session?" = "停止此 Agent 会话？";
+"The running CLI will stop. Saved sessions remain in the agent’s own storage." = "将停止正在运行的 CLI，已保存的会话仍保留在 Agent 自己的存储中。";
+
+"Untitled session" = "未命名会话";
+
+"DSH task — each run continues the selected session for one task" = "DSH 任务：每次运行在所选会话中继续完成一个任务";
+
+"Changed on disk · unsaved edits kept" = "磁盘文件已更改 · 已保留未保存的编辑";

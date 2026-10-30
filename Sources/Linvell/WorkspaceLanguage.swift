@@ -22,6 +22,7 @@ extension WorkspaceController {
         languageQueries.values.forEach { $0.cancel() }; languageQueries.removeAll()
         languageSyncs.values.forEach { $0.cancel() }; languageSyncs.removeAll()
         languageEdits.values.forEach { $0.cancel() }; languageEdits.removeAll()
+        languageDiagnostics.values.forEach { $0.cancel() }; languageDiagnostics.removeAll()
         completionPanel?.dismiss(); hoverPopover?.close(); workspaceDiagnostics.removeAll(); languageCompletionTriggers.removeAll(); languageSignatureTriggers.removeAll(); workspaceDiagnosticCount = 0; languageStatus.stringValue = ""; languageServices.stop()
     }
     @objc func languageToolsChanged(_ notification: Notification) {
@@ -79,9 +80,20 @@ extension WorkspaceController {
     }
     func languageDocumentChanged(_ document: OpenDocument) {
         completionPanel?.dismiss(); hoverPopover?.close()
+        for method in ["textDocument/completion","textDocument/signatureHelp","textDocument/hover"] { languageQueries.removeValue(forKey:method)?.cancel() }
+        languageSyncs.removeValue(forKey:document.buffer.id)?.cancel()
         languageEdits.removeValue(forKey:document.buffer.id)?.cancel()
+        languageDiagnostics.removeValue(forKey:document.buffer.id)?.cancel()
+        let revision = document.buffer.revision
+        let diagnostics = DispatchWorkItem { [weak self,weak document] in
+            guard let self,let document,document.buffer.revision == revision else { return }
+            self.synchronizeLanguage(document)
+        }
+        languageDiagnostics[document.buffer.id] = diagnostics
+        DispatchQueue.main.asyncAfter(deadline:.now()+0.7,execute:diagnostics)
+        let delay = completionDelay(document)
         let work = DispatchWorkItem { [weak self,weak document] in
-            guard let self,let document else { return }; self.synchronizeLanguage(document)
+            guard let self,let document else { return }; self.synchronizeLanguage(document,pullDiagnostics:false)
             guard self.current === document,let editor = self.activePane?.textView,!editor.hasMarkedText(),(!editor.vimEnabled || document.vim.mode == .insert) else { return }
             let at = editor.selectedRange().location,word = EditorTextView.codeWord(in:editor.string,at:at)
             let trigger = at > 0 ? (editor.string as NSString).substring(with:NSRange(location:at-1,length:1)) : ""
@@ -90,9 +102,17 @@ extension WorkspaceController {
             if (self.languageSignatureTriggers[key] ?? ["(",","]).contains(trigger) { self.signatureHelp() }
         }
         languageEdits[document.buffer.id] = work
-        DispatchQueue.main.asyncAfter(deadline:.now()+0.3,execute:work)
+        DispatchQueue.main.asyncAfter(deadline:.now()+delay,execute:work)
     }
-    func synchronizeLanguage(_ document: OpenDocument) {
+    func completionDelay(_ document: OpenDocument) -> TimeInterval {
+        guard current === document,let editor = activePane?.textView else { return 0.12 }
+        let at = editor.selectedRange().location
+        guard at > 0,at <= (editor.string as NSString).length else { return 0.12 }
+        let trigger = (editor.string as NSString).substring(with:NSRange(location:at-1,length:1))
+        let key = codeSnapshot(document).map { LanguageTools.scope(remote:$0.remote,root:$0.root)+"|"+$0.language.id } ?? ""
+        return (languageCompletionTriggers[key] ?? [".",":"]).contains(trigger) || (languageSignatureTriggers[key] ?? ["(",","]).contains(trigger) ? 0.035 : 0.12
+    }
+    func synchronizeLanguage(_ document: OpenDocument,pullDiagnostics: Bool = true) {
         guard !panes.contains(where:{ $0.document === document && $0.textView.hasMarkedText() }),let snapshot = codeSnapshot(document),LanguageTools.cached(snapshot.language,remote:snapshot.remote,root:snapshot.root).enabled else { return }
         let services = languageServices
         let ticket = LanguageQueryTicket(); languageSyncs.removeValue(forKey:snapshot.id)?.cancel(); languageSyncs[snapshot.id] = ticket
@@ -111,7 +131,7 @@ extension WorkspaceController {
                     self?.languageSignatureTriggers[key] = Set((signature?["triggerCharacters"] as? [String] ?? [])+(signature?["retriggerCharacters"] as? [String] ?? []))
                 }
                 session.synchronize(uri:snapshot.uri,language:snapshot.language.documentID(path:snapshot.path),text:snapshot.text,version:snapshot.version)
-                if let report = try session.pullDiagnostics(uri:snapshot.uri,cancellation:ticket.cancellation),report["kind"] as? String != "unchanged",let items = report["items"] as? [[String:Any]] {
+                if pullDiagnostics,let report = try session.pullDiagnostics(uri:snapshot.uri,cancellation:ticket.cancellation),report["kind"] as? String != "unchanged",let items = report["items"] as? [[String:Any]] {
                     self?.receiveCodeDiagnostics(uri:snapshot.uri,values:items,version:snapshot.version,snapshot:snapshot)
                     if let related = report["relatedDocuments"] as? [String:[String:Any]] {
                         for (uri,report) in related where report["kind"] as? String != "unchanged" {

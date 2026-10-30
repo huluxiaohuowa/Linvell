@@ -915,3 +915,34 @@
 "Could not check Homebrew updates. %@" = "Could not check Homebrew updates. %@";
 "Use Homebrew to upgrade this installation. Linvell will not download or replace the app itself." = "Use Homebrew to upgrade this installation. Linvell will not download or replace the app itself.";
 "Homebrew updates are checked every six hours. Run the upgrade command in Terminal to install a newer version." = "Homebrew updates are checked every six hours. Run the upgrade command in Terminal to install a newer version.";
+
+"Agents" = "Agents";
+"Agent" = "Agent";
+"SSH Host" = "SSH Host";
+"Agent CLI executable path" = "Agent CLI executable path";
+"Agent home (optional)" = "Agent home (optional)";
+"Use the same agent home as your CLI or desktop app. Leave empty for the default." = "Use the same agent home as your CLI or desktop app. Leave empty for the default.";
+"Search sessions" = "Search sessions";
+"New Session" = "New Session";
+"Resume Session" = "Resume Session";
+"Choose CLI…" = "Choose CLI…";
+"Mount SSH Folder…" = "Mount SSH Folder…";
+"Choose Mount…" = "Choose Mount…";
+"Project agent sessions" = "Project agent sessions";
+"Sessions come from the selected machine and agent home. Shared CLI/desktop sessions can resume; cloud-only sessions need the provider’s handoff. Context is restored by the agent itself." = "Sessions come from the selected machine and agent home. Shared CLI/desktop sessions can resume; cloud-only sessions need the provider’s handoff. Context is restored by the agent itself.";
+"Mount the SSH project to use a local agent." = "Mount the SSH project to use a local agent.";
+"Loading agent sessions…" = "Loading agent sessions…";
+"%d project sessions" = "%d project sessions";
+"Choose the agent executable or its desktop application." = "Choose the agent executable or its desktop application.";
+"No supported CLI was found in this app. Choose its CLI executable directly." = "No supported CLI was found in this app. Choose its CLI executable directly.";
+"Choose an executable CLI file." = "Choose an executable CLI file.";
+"Choose the SSHFS mount of this remote project." = "Choose the SSHFS mount of this remote project.";
+"Connecting project mount…" = "Connecting project mount…";
+"Stop this agent session?" = "Stop this agent session?";
+"The running CLI will stop. Saved sessions remain in the agent’s own storage." = "The running CLI will stop. Saved sessions remain in the agent’s own storage.";
+
+"Untitled session" = "Untitled session";
+
+"DSH task — each run continues the selected session for one task" = "DSH task — each run continues the selected session for one task";
+
+"Changed on disk · unsaved edits kept" = "Changed on disk · unsaved edits kept";

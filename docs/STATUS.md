@@ -1,3 +1,7 @@
+# Existing agent CLIs — source preview (2026-10-30)
+
+Native selection and session resume for Codex, OpenCode, Pi, Claude Code and DeepSeek Harness, including saved session titles, CLI/desktop shared stores, SSH execution and optional SSHFS mappings for local agents on SSH projects. Open text files and expanded directories update after agent edits while the same CLI process and terminal survive file browsing; dirty buffers retain conflict protection. [Usage, acceptance and limits](AGENT_CLI.md). Included in Linvell 0.2.4, with selection in the left Agents sidebar and execution in the main workspace. Live Codex metadata and local native UI were checked; full provider authentication/context and live SSHFS acceptance remain unverified.
+
 # Plugin P6 — installation and management (source preview)
 
 New on main after 0.2.0: native ZIP/HTTPS/catalog installation, installed/catalog/source tabs, persistent enablement and startup restore, explicit updates, rollback, uninstall and local data cleanup. [Format and limits](plugins/management.md); [acceptance](verification/plugins-management.md). The published 0.2.0 app does not include this manager.

@@ -11,6 +11,7 @@ final class OpenDocument: NSObject, NSTextStorageDelegate {
     var codeDiagnostics: [CodeDiagnostic] = []
     var markdownPreview = false
     var remote: RemoteDocument?
+    var externalChange = false
     var lastScroll: DocumentScrollAnchor?
     var lastSelections: [NSRange]?
     var fileURL: URL? { imageURL ?? buffer.url }
