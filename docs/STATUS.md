@@ -1,3 +1,9 @@
+# Linvell 0.2.6 — published (2026-10-30)
+
+[0.2.6](https://github.com/huluxiaohuowa/Linvell/releases/tag/v0.2.6) fixes Agent workbenches staying attached to a previous local project after opening SSH. Session history and CLI selection now follow the project directory and SSH host. Remote projects expose the local/SSH execution selector; retained sessions continue running and are restored when returning to their project. The left Session interface remains available. All retained project sessions participate in shutdown.
+
+276 tests: zero failures, two environment-dependent skips; actual SSH transport/discovery/PTY and local-to-SSH-to-local process retention verified. Universal signing, notarization, 0.2.5 → 0.2.6 upgrade and downstream Homebrew publication passed. [Acceptance and limits](validation/2026-10-30-agent-project-context.md).
+
 # Linvell 0.2.5 — published (2026-10-30)
 
 [0.2.5](https://github.com/huluxiaohuowa/Linvell/releases/tag/v0.2.5) keeps the left Agents session list/search/resume interface and runs independent concurrent sessions in the main workspace. New Session and provider switching remain available while agents run. Session switching retains PTYs, output and images; Stop only affects the selected session. File links open in the current workspace, macOS inline image rendering is fixed, and actual DSH saved titles are read across concatenated compressed frames. The plugin manager and all previously released editor/plugin changes remain included.

@@ -21,3 +21,12 @@ This is transport/lifecycle acceptance with a disposable provider-protocol fixtu
 ## Homebrew documentation
 
 The main application README now presents bilingual install/upgrade commands. Website commit `31e5eb8` adds a homepage entry and installation section, updates the update FAQ, both Markdown guides, the rendered bilingual guide and the website README. Five website regression checks passed. The deployed Chinese homepage and guide were verified in one hidden browser tab, which was then closed.
+
+
+## Publication verification
+
+[0.2.6 release](https://github.com/huluxiaohuowa/Linvell/releases/tag/v0.2.6) and [release/Homebrew workflow](https://github.com/huluxiaohuowa/Linvell/actions/runs/41013036855) succeeded. The downloaded app reports 0.2.6, includes `x86_64 arm64`, and passes strict/deep signature verification, Gatekeeper assessment and stapled notarization-ticket validation. A signed 0.2.5 → 0.2.6 upgrade test also passed, without replacing the installed application.
+
+The Homebrew Cask reports 0.2.6, and its SHA-256 matches the downloaded archive: `7c553096dc4c3d8a9b8820cd84556e93253bbc3b4825d5495c8a641a5defb701`.
+
+Website commit `124cdd9` also adds the source repository to the homepage navigation. The live English desktop navigation and expanded mobile menu in both languages were verified. The temporary viewport override was cleared and the hidden verification tab was closed.
