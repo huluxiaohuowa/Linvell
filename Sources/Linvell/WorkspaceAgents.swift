@@ -1,6 +1,10 @@
 import AppKit
 
 extension WorkspaceController {
+    func shutdownAgent() {
+        agentFileMonitor?.stop(); agentFileMonitor = nil
+        agentWorkspace?.shutdown()
+    }
     @objc func showAgents() {
         if let existing = agentWorkspace,existing.running { presentAgent(existing); return }
         let directory = remoteConnection == nil ? (root?.url.path ?? current?.fileURL?.deletingLastPathComponent().path) : remoteDirectory

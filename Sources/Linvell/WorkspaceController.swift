@@ -571,8 +571,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         terminal.terminate()
     }
     func windowWillClose(_ notification: Notification) {
-        agentFileMonitor?.stop(); agentFileMonitor = nil
-        agentWorkspace?.shutdown(); agentWorkspace = nil
+        shutdownAgent(); agentWorkspace = nil
         stopPlugins(); managedPluginLoad = UUID()
         pluginWindows.removeValue(forKey:"manager")?.close()
         picker?.dismiss(); picker = nil

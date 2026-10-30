@@ -112,14 +112,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !flag { workspaceForOpening().window?.makeKeyAndOrderFront(nil) }; return true
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        for workspace in workspaces where workspace.window?.isVisible == true {
-            if !workspace.documents.allSatisfy(workspace.mayClose) || !workspace.mayCloseTerminal() { return .terminateCancel }
+        for workspace in workspaces where workspace.window?.isVisible == true || workspace.agentWorkspace?.running == true {
+            if !workspace.documents.allSatisfy(workspace.mayClose) || !workspace.mayCloseTerminal() || !(workspace.agentWorkspace?.mayClose() ?? true) { return .terminateCancel }
         }
         if UpdateManager.shared.shouldInstallOnQuit {
             do { try UpdateManager.shared.scheduleInstallation() }
             catch { NSAlert(error:error).runModal(); return .terminateCancel }
         }
         for workspace in workspaces {
+            workspace.shutdownAgent()
             workspace.stopPlugins()
             workspace.terminateTerminal()
             for doc in workspace.documents { try? workspace.recovery.remove(doc.buffer.id) }

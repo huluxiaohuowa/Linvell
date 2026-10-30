@@ -44,6 +44,10 @@ final class AgentFileMonitorTests: XCTestCase {
         XCTAssertTrue(document.externalChange); XCTAssertEqual(document.buffer.text,"unsaved local edit\n")
         XCTAssertEqual(try String(contentsOf:file,encoding:.utf8),"second agent edit\n"); XCTAssertThrowsError(try document.buffer.save())
         XCTAssertTrue(agent.running); XCTAssertEqual(terminal.process.shellPid,pid)
+        workspace.shutdownAgent()
+        let stopDeadline = Date().addingTimeInterval(3)
+        while agent.running,Date() < stopDeadline { RunLoop.current.run(until:Date().addingTimeInterval(0.01)) }
+        XCTAssertFalse(agent.running); XCTAssertNil(workspace.agentFileMonitor)
     }
     func testExternalRemoteSnapshotUpdatesDigestButNeverOverwritesUnsavedText() throws {
         _ = NSApplication.shared
