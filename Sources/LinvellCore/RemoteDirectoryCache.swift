@@ -7,6 +7,8 @@ public final class RemoteDirectoryCache {
     private struct Record { let reply: RemoteReply; let date: Date; var access: UInt64 }
     private let condition = NSCondition()
     private var records: [Key: Record] = [:]
+    // Updated with records under condition; aliases count toward the same storage limit.
+    private var entryCount = 0
     private var pending: Set<Key> = []
     private var revision: UInt64 = 0
     private var clock: UInt64 = 0
@@ -25,7 +27,8 @@ public final class RemoteDirectoryCache {
     }
     public func invalidate(host: String) {
         condition.lock(); defer { condition.unlock() }
-        records = records.filter { $0.key.host != host }; revision &+= 1
+        for key in records.keys.filter({ $0.host == host }) { remove(key) }
+        revision &+= 1
     }
     public func list(host: String,path: String,force: Bool = false,load: () throws -> RemoteReply) throws -> RemoteReply {
         let key = Key(host:host,path:path)
@@ -42,15 +45,22 @@ public final class RemoteDirectoryCache {
         if case .success(let reply) = result,started == revision {
             clock &+= 1
             let record = Record(reply:reply,date:Date(),access:clock)
-            records[key] = record
-            if let canonical = reply.path { records[Key(host:host,path:canonical)] = record }
-            while records.count > maximumDirectories || records.values.reduce(0,{ $0 + ($1.reply.entries?.count ?? 0) }) > maximumEntries {
+            insert(record,for:key)
+            if let canonical = reply.path { insert(record,for:Key(host:host,path:canonical)) }
+            while records.count > maximumDirectories || entryCount > maximumEntries {
                 guard let oldest = records.min(by:{ $0.value.access < $1.value.access })?.key else { break }
-                records.removeValue(forKey:oldest)
+                remove(oldest)
             }
         }
         pending.remove(key); condition.broadcast(); condition.unlock()
         return try result.get()
+    }
+    // Call only while condition is locked, including replacement and eviction.
+    private func insert(_ record: Record,for key: Key) {
+        remove(key); records[key] = record; entryCount += record.reply.entries?.count ?? 0
+    }
+    private func remove(_ key: Key) {
+        if let record = records.removeValue(forKey:key) { entryCount -= record.reply.entries?.count ?? 0 }
     }
 }
 

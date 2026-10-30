@@ -35,6 +35,34 @@ final class RemoteDirectoryCacheTests: XCTestCase {
         XCTAssertNil(cache.snapshot(host:"a",path:"/0"))
         XCTAssertNotNil(cache.snapshot(host:"a",path:"/2"))
     }
+    func testEntryBudgetCountsCanonicalAliasesAndReplacements() throws {
+        let cache = RemoteDirectoryCache(maximumEntries:2)
+        _ = try cache.list(host:"a",path:"~") { try reply() }
+        // Replacing both aliases must subtract their previous entry counts.
+        for _ in 0..<5 { _ = try cache.list(host:"a",path:"~",force:true) { try reply(name:"new") } }
+        XCTAssertNotNil(cache.snapshot(host:"a",path:"~"))
+        XCTAssertNotNil(cache.snapshot(host:"a",path:"/project"))
+        _ = try cache.list(host:"b",path:"/other") { try reply("/other") }
+        let remaining = [cache.snapshot(host:"a",path:"~"),cache.snapshot(host:"a",path:"/project"),cache.snapshot(host:"b",path:"/other")].compactMap { $0 }
+        XCTAssertEqual(remaining.count,2)
+        XCTAssertNotNil(cache.snapshot(host:"b",path:"/other"))
+    }
+    func testInvalidationReleasesEntryBudgetWithoutEvictingOtherHosts() throws {
+        let cache = RemoteDirectoryCache(maximumEntries:2)
+        _ = try cache.list(host:"a",path:"/a") { try reply("/a") }
+        _ = try cache.list(host:"b",path:"/b") { try reply("/b") }
+        cache.invalidate(host:"a")
+        _ = try cache.list(host:"c",path:"/c") { try reply("/c") }
+        XCTAssertNil(cache.snapshot(host:"a",path:"/a"))
+        XCTAssertNotNil(cache.snapshot(host:"b",path:"/b"))
+        XCTAssertNotNil(cache.snapshot(host:"c",path:"/c"))
+    }
+    func testOversizedReplyStillReturnsWithoutExceedingStorageBudget() throws {
+        let cache = RemoteDirectoryCache(maximumEntries:0)
+        XCTAssertEqual(try cache.list(host:"a",path:"~") { try reply() }.entries?.count,1)
+        XCTAssertNil(cache.snapshot(host:"a",path:"~"))
+        XCTAssertNil(cache.snapshot(host:"a",path:"/project"))
+    }
     func testLiveCachedNavigationAvoidsRepeatedSSHLatency() throws {
         guard let file = ProcessInfo.processInfo.environment["LINVELL_SSH_FIXTURE"] else { throw XCTSkip("Disposable SSH fixture required.") }
         let object = try JSONSerialization.jsonObject(with:Data(contentsOf:URL(fileURLWithPath:file))) as! [String:String]

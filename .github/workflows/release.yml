@@ -24,6 +24,8 @@ jobs:
     if: github.repository == 'huluxiaohuowa/Linvell'
     runs-on: macos-15-intel
     timeout-minutes: 45
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
       GH_TOKEN: ${{ github.token }}
@@ -115,3 +117,11 @@ jobs:
           protected_log = Path.home() / 'dev/build/linvell/release-error.log'
           protected_log.unlink(missing_ok=True)
           PY
+
+  homebrew:
+    needs: release
+    uses: ./.github/workflows/homebrew.yml
+    with:
+      tag: v${{ needs.release.outputs.version }}
+    secrets:
+      HOMEBREW_TAP_SSH_KEY: ${{ secrets.HOMEBREW_TAP_SSH_KEY }}

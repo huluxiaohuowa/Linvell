@@ -1,0 +1,72 @@
+name: Publish Homebrew
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+    secrets:
+      HOMEBREW_TAP_SSH_KEY:
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published stable release tag (vX.Y.Z)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linvell-homebrew
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'huluxiaohuowa/Linvell'
+    runs-on: macos-15-intel
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Configure build directories
+        run: |
+          release_build="$HOME/dev/build/linvell-homebrew"
+          mkdir -p "$release_build/private" "$release_build/tmp"
+          chmod 700 "$release_build/private"
+          echo "LINVELL_BUILD_DIR=$release_build" >> "$GITHUB_ENV"
+          echo "TMPDIR=$release_build/tmp" >> "$GITHUB_ENV"
+          echo "HOMEBREW_CACHE=$release_build/cache" >> "$GITHUB_ENV"
+          echo "PYTHONPYCACHEPREFIX=$release_build/python-cache" >> "$GITHUB_ENV"
+      - name: Publish verified release to Homebrew tap
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          TAP_SSH_KEY: ${{ secrets.HOMEBREW_TAP_SSH_KEY }}
+          HOMEBREW_NO_AUTO_UPDATE: 1
+        run: |
+          set -euo pipefail
+          test -n "$TAP_SSH_KEY" || { echo 'HOMEBREW_TAP_SSH_KEY is required'; exit 1; }
+          tap_key="$LINVELL_BUILD_DIR/private/homebrew-key"
+          tap_hosts="$LINVELL_BUILD_DIR/private/homebrew-known-hosts"
+          trap 'rm -f "$tap_key" "$tap_hosts"' EXIT
+          printf '%s\n' "$TAP_SSH_KEY" > "$tap_key"
+          chmod 600 "$tap_key"
+          gh api meta --jq '.ssh_keys[] | "github.com \(.)"' > "$tap_hosts"
+          export GIT_SSH_COMMAND="ssh -i $tap_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$tap_hosts"
+          tap_checkout="$HOME/dev/repos/homebrew-tap"
+          mkdir -p "$HOME/dev/repos"
+          git clone git@github.com:huluxiaohuowa/homebrew-tap.git "$tap_checkout"
+          python3 script/publish_homebrew.py --tag "$RELEASE_TAG" --output "$tap_checkout/Casks/linvell.rb"
+          brew style "$tap_checkout/Casks/linvell.rb"
+          git -C "$tap_checkout" config user.name 'github-actions[bot]'
+          git -C "$tap_checkout" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C "$tap_checkout" add Casks/linvell.rb
+          if ! git -C "$tap_checkout" diff --cached --quiet; then
+            git -C "$tap_checkout" commit -m "linvell $RELEASE_TAG"
+            git -C "$tap_checkout" push origin HEAD:main
+          fi
+          echo "Homebrew tap now provides Linvell $RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"
+

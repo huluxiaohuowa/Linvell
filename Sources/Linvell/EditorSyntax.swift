@@ -5,18 +5,22 @@ final class EditorSyntaxState {
     static let changed = Notification.Name("Linvell.SourceAnalysisChanged")
     private static let queue = DispatchQueue(label:"top.fuluwa.linvell.source-syntax",qos:.userInitiated)
     var analysis = SourceAnalysis(),version = -1
-    private var ticket: LanguageQueryTicket?
+    private(set) var ticket: LanguageQueryTicket?
+    private var pendingRevision: Int?
     func request(_ document: OpenDocument) {
-        guard version != document.buffer.revision else { return }
+        // Split panes share this state; keep an existing analysis of the same revision.
+        guard version != document.buffer.revision,pendingRevision != document.buffer.revision else { return }
         ticket?.cancel()
         let ticket = LanguageQueryTicket(); self.ticket = ticket
         let text = document.buffer.text,revision = document.buffer.revision,path = document.remote?.path ?? document.fileURL?.path ?? ""
+        pendingRevision = revision
         ticket.schedule { [weak self,weak document] in
             guard !ticket.cancelled else { return }
             let analysis = SourceSyntax.analyze(text,path:path,cancelled:{ ticket.cancelled })
             DispatchQueue.main.async {
                 guard let self,let document,!ticket.cancelled,document.buffer.revision == revision else { return }
                 self.analysis = analysis; self.version = revision
+                self.pendingRevision = nil; self.ticket = nil
                 NotificationCenter.default.post(name:Self.changed,object:document)
             }
         }

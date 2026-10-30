@@ -4,6 +4,31 @@ import XCTest
 @testable import LinvellCore
 
 final class SourceEditingTests: XCTestCase {
+    func testSplitPanesSharePendingSyntaxAndNewEditsReplaceIt() throws {
+        _ = NSApplication.shared
+        let document = OpenDocument(DocumentBuffer(text:"struct Before {}"))
+        let state = document.syntax
+        state.request(document)
+        let original = try XCTUnwrap(state.ticket)
+        for _ in 0..<100 { state.request(document) }
+        XCTAssertTrue(state.ticket === original)
+        XCTAssertFalse(original.cancelled)
+
+        document.buffer.update("struct After { let value = 1 }")
+        state.request(document)
+        let replacement = try XCTUnwrap(state.ticket)
+        XCTAssertFalse(replacement === original); XCTAssertTrue(original.cancelled)
+        state.request(document); XCTAssertTrue(state.ticket === replacement)
+        let deadline = Date().addingTimeInterval(5)
+        while state.version != document.buffer.revision,Date() < deadline {
+            RunLoop.current.run(until:Date().addingTimeInterval(0.01))
+        }
+        XCTAssertEqual(state.version,document.buffer.revision)
+        XCTAssertFalse(state.analysis.tokens.isEmpty)
+        XCTAssertNil(state.ticket)
+        state.request(document); XCTAssertNil(state.ticket)
+    }
+
     func testRelativeNumbersUseAbsoluteCurrentLineAndRealSourceDistances() {
         let old = UserDefaults.standard.object(forKey:"relativeLineNumbers")
         defer { UserDefaults.standard.set(old,forKey:"relativeLineNumbers") }

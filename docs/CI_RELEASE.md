@@ -19,3 +19,26 @@ The Actions Secret `APPLE_RELEASE_CONFIG` contains only `common.teamId`, `common
 ## Verification boundaries
 
 The runner executes native/core tests available without personal SSH configuration. Disposable SSH and physical display-cadence acceptance are local opt-in tests, recorded separately; they are not silently counted as CI passes. The release manifest records GitHub Actions as the build origin and links its run ID. A successful workflow must produce a signed, notarized public download before the release is considered complete.
+
+## Homebrew distribution
+
+Install using the Linvell-maintained tap:
+
+```sh
+brew install --cask huluxiaohuowa/tap/linvell
+brew upgrade --cask --greedy huluxiaohuowa/tap/linvell
+```
+
+The Homebrew step runs after the stable GitHub Release and its distribution artifacts have been published. `script/publish_homebrew.py` downloads the published Universal ZIP and `SHA256SUMS.txt`, checks the complete archive, and generates the Cask. It rejects drafts, prereleases, missing or duplicate checksums, archive mismatches and version downgrades. Repeating the same release is safe. The workflow checks Ruby style and pushes the Cask to `huluxiaohuowa/homebrew-tap`.
+
+`HOMEBREW_TAP_SSH_KEY` is a deploy key with write access only to that tap. It is independent of Apple credentials and the developer's personal GitHub login. The workflow materializes it temporarily under the protected build directory and removes it on exit. A failed Homebrew step leaves the already published GitHub Release available; rerun the Homebrew job or manually run `Publish Homebrew` with the existing stable tag to retry without bumping the application version.
+
+The app requires macOS **15.6**; Homebrew Casks express this as the Sequoia major release. Universal archives contain arm64 and x86_64 binaries. Normal uninstall keeps documents and application data; Homebrew's explicit `--zap` also removes the listed Linvell data directories.
+
+### Official Homebrew Cask submission
+
+The same generated `Casks/linvell.rb` can be submitted as `Casks/l/linvell.rb` in `Homebrew/homebrew-cask`; a third-party tap does not imply official inclusion. Before initial submission, run `brew style`, `brew audit --cask --online`, `brew audit --cask --new`, and an installation/uninstallation check. The default GitHub release URL supplies Homebrew livecheck.
+
+As checked on 2026-10-30, the repository is younger than 30 days and below Homebrew's normal self-submission notability thresholds. Official inclusion is pending eligibility or an explicitly justified maintainer exception, not an automated guarantee. See [package acceptance policy](https://docs.brew.sh/Package-Acceptance-Policy) and [acceptable casks](https://docs.brew.sh/Acceptable-Casks).
+
+Homebrew also requires the human contributor to review AI-assisted content before requesting review, disclose assistance in the PR, and personally answer maintainer questions. The initial submission must therefore follow the author's review. See [responsible AI usage](https://docs.brew.sh/Responsible-AI-Usage). Once accepted, official Homebrew updates remain subject to its review and autobump processes; the Linvell tap continues updating independently after every stable release.

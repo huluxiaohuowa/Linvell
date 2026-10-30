@@ -33,9 +33,10 @@ public enum RunTasks {
         return SSHRemote.quote(path)
     }
     public static func remoteCommand(directory: String,command: String) -> String {
-        "/bin/sh -lc "+SSHRemote.quote("cd -- "+directoryExpression(directory)+" && exec \"${SHELL:-/bin/sh}\" -lc "+SSHRemote.quote(command))
+        // Only the selected user shell should read login startup files.
+        "/bin/sh -c "+SSHRemote.quote("cd -- "+directoryExpression(directory)+" && exec \"${SHELL:-/bin/sh}\" -lc "+SSHRemote.quote(command))
     }
     public static func remoteShell(directory: String) -> String {
-        "/bin/sh -lc "+SSHRemote.quote("cd -- "+directoryExpression(directory)+" && exec \"${SHELL:-/bin/sh}\" -l")
+        "/bin/sh -c "+SSHRemote.quote("cd -- "+directoryExpression(directory)+" && exec \"${SHELL:-/bin/sh}\" -l")
     }
 }
