@@ -44,6 +44,16 @@ def signing_failure_reason(output):
     return next((reason for pattern,reason in reasons.items() if pattern in text), "Code signing failed; raw diagnostic retained only in protected storage")
 
 
+
+def build_failure_output(output, limit=64000):
+    text = output.decode(errors="replace")
+    # Keep early compiler/XCTest failures even when a long successful test tail
+    # would otherwise truncate the actual cause. Only used for credential-free builds.
+    failures = [line for line in text.splitlines() if re.search(r"\berror:|\bfailed\b|\bcaught error\b", line)]
+    summary = "\n".join(failures)[:16000]
+    return (summary + "\n\n" if summary else "") + text[-limit:]
+
+
 def run(args, **kwargs):
     result = subprocess.run(
         [str(a) for a in args],
@@ -59,7 +69,7 @@ def run(args, **kwargs):
         log.chmod(0o600)
         if os.environ.get("GITHUB_ACTIONS") == "true" and Path(args[0]).name in {"swift", "bash"}:
             # These build commands have no credential arguments; signing/notary output stays private.
-            print(result.stdout.decode(errors="replace")[-64000:], file=sys.stderr)
+            print(build_failure_output(result.stdout), file=sys.stderr)
         if os.environ.get("GITHUB_ACTIONS") == "true" and Path(args[0]).name == "codesign":
             print(signing_failure_reason(result.stdout),file=sys.stderr)
         raise SystemExit(

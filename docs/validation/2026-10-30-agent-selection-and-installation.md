@@ -23,3 +23,8 @@ The UI links to [macFUSE's official Getting Started guide](https://github.com/ma
 No standalone test Linvell app instances were opened. The installation view is rendered by an offscreen native test window that is closed during teardown. Physical SSHFS mounting remains unverified on this Mac because the dependencies are not installed.
 
 Final broad local regression run: 108 native/UI tests and 172 core tests, zero failures and two environment-dependent skips (physical display cadence and remote Git mutation without a disposable Git repository). The demonstrated selection matrix, failing baseline reproduction and missing-dependency actions are the acceptance evidence for this change; the overall count is not a substitute for those cases.
+
+
+## CI artifact isolation correction
+
+The first release CI run failed before publication. The installation snapshot test wrote to a task-specific build directory that happened to exist on the development Mac and was absent on the runner. The test now creates its destination, honors `LINVELL_UI_ARTIFACT_DIR`, and otherwise uses the standard build directory. A local rerun with a newly absent nested artifact directory passed. Build diagnostics now retain early compiler/XCTest errors ahead of the bounded log tail; the diagnostic regression and release-script checks passed. Signing/notarization tool output remains protected.

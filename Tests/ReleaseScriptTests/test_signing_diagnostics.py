@@ -15,6 +15,13 @@ class SigningDiagnosticsTests(unittest.TestCase):
             self.assertNotIn('private-path',reason)
         self.assertIn('intermediate',module.signing_failure_reason(b'unable to build chain'))
 
+    def test_early_test_failure_survives_a_long_successful_log_tail(self):
+        failure = "Fixture.swift:12: error: testSnapshot threw a missing-directory error"
+        output = (failure + "\n" + "success\n" * 12000 + "finished").encode()
+        diagnostic = module.build_failure_output(output)
+        self.assertIn(failure, diagnostic)
+        self.assertTrue(diagnostic.endswith("finished"))
+
     def test_apple_stages_are_named_without_credential_arguments(self):
         self.assertEqual(module.command_stage(['xcrun','stapler','staple','private-path']), 'Apple ticket staple')
         self.assertEqual(module.command_stage(['xcrun','notarytool','submit','private-path','--key','private-key']), 'Apple notarization submit')
