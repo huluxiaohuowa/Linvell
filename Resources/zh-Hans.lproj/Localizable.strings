@@ -906,3 +906,12 @@
 "No newer matching plugin version was found." = "未找到匹配的更新版本。";
 
 "Search plugins and sources" = "搜索插件与插件源";
+"HOMEBREW" = "HOMEBREW";
+"Copy Upgrade Command" = "复制升级命令";
+"Updates are managed by Homebrew. Run %@." = "更新由 Homebrew 管理。请运行 %@。";
+"Checking Homebrew…" = "正在检查 Homebrew…";
+"Homebrew offers %@. Run %@." = "Homebrew 提供 %@。请运行 %@。";
+"Homebrew has no newer version available." = "Homebrew 暂无可用的更新版本。";
+"Could not check Homebrew updates. %@" = "无法检查 Homebrew 更新。%@";
+"Use Homebrew to upgrade this installation. Linvell will not download or replace the app itself." = "此安装由 Homebrew 管理。请通过 Homebrew 升级，Linvell 不会自行下载或替换应用。";
+"Homebrew updates are checked every six hours. Run the upgrade command in Terminal to install a newer version." = "每六小时检查一次 Homebrew 更新。请在终端运行升级命令来安装新版本。";

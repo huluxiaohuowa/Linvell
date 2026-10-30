@@ -2,6 +2,7 @@ import AppKit
 import LinvellCore
 
 final class PreferencesController: NSWindowController {
+    let updates: UpdateManager
     weak var workspaceOwner: WorkspaceController?
     let detail = Surface(Theme.canvas)
     let navigation = Surface(Theme.panel)
@@ -9,8 +10,8 @@ final class PreferencesController: NSWindowController {
     var buttons: [NSButton] = []
     var statusLabel: NSTextField?
     var statusTimer: Timer?
-    init(owner: WorkspaceController? = nil) {
-        self.workspaceOwner = owner
+    init(owner: WorkspaceController? = nil,updates: UpdateManager = .shared) {
+        self.updates = updates; self.workspaceOwner = owner
         let window = NSWindow(contentRect:NSRect(x:0,y:0,width:900,height:650),styleMask:[.titled,.closable,.resizable,.miniaturizable],backing:.buffered,defer:false)
         window.title = L.text("Linvell Settings"); window.minSize = NSSize(width:780,height:610); window.center(); window.isReleasedWhenClosed = false
         window.appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua); window.backgroundColor = Theme.canvas
@@ -34,7 +35,7 @@ final class PreferencesController: NSWindowController {
         NotificationCenter.default.addObserver(self,selector:#selector(updateStatusChanged),name:UpdateManager.changed,object:nil)
         NotificationCenter.default.addObserver(self,selector:#selector(languageApplied),name:L.changed,object:nil)
         statusTimer = Timer.scheduledTimer(withTimeInterval:2,repeats:true) { [weak self] _ in
-            guard let self else { return }; self.statusLabel?.stringValue = self.category == 3 ? PreferencesSync.shared.status : UpdateManager.shared.status
+            guard let self else { return }; self.statusLabel?.stringValue = self.category == 3 ? PreferencesSync.shared.status : self.updates.status
         }
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -134,18 +135,26 @@ final class PreferencesController: NSWindowController {
                 button.identifier = .init(session.package.manifest.id); rows.append(button)
             }
         default:
-            let updates = UpdateManager.shared
-            rows.append(section("GITHUB RELEASES")); rows.append(Theme.label(L.format("Installed: %@",UpdateManager.currentVersion),size:14))
+            rows.append(section(updates.supportsSelfUpdates ? "GITHUB RELEASES" : "HOMEBREW")); rows.append(Theme.label(L.format("Installed: %@",UpdateManager.currentVersion),size:14))
             for (tag,title,value) in [(0,"Automatically check for updates",updates.automaticChecks),(1,"Automatically download verified updates",updates.automaticDownloads),(2,"Install downloaded updates when Linvell quits",updates.automaticInstall),(3,"Include preview releases",updates.includePreviews)] {
+                if !updates.supportsSelfUpdates && tag != 0 { continue }
                 let b = NSButton(checkboxWithTitle:L.text(title),target:self,action:#selector(updatePreferenceChanged(_:))); b.tag = tag; b.state = value ? .on : .off; b.font = .systemFont(ofSize:14); rows.append(b)
             }
             rows.append(section("STATUS")); let state = text(updates.status); statusLabel = state; rows.append(state)
             let check = Theme.actionButton("Check Now",target:self,action:#selector(checkUpdate)); check.isEnabled = !updates.busy
-            let download = Theme.actionButton("Download Update",target:self,action:#selector(downloadUpdate)); download.isEnabled = !updates.busy && updates.offer != nil
-            let install = Theme.actionButton("Install and Restart",target:self,action:#selector(installUpdate)); install.isEnabled = !updates.busy && updates.prepared != nil
-            rows.append(Theme.stack([check,download,install,NSView()]))
-            rows.append(text("Checks run every six hours. Downloads require a matching checksum and Linvell signing identity. Installation waits for normal quit, including unsaved-document prompts, and retains the previous app for recovery."))
-            rows.append(text("Update preferences apply to this Mac and are not synchronized through iCloud. Automatic download and installation are off by default."))
+            if let command = updates.installationSource.upgradeCommand {
+                let copy = Theme.actionButton("Copy Upgrade Command",target:self,action:#selector(copyUpgradeCommand))
+                rows.append(Theme.stack([check,copy,NSView()]))
+                let value = text(command); value.isSelectable = true; rows.append(value)
+                rows.append(text("Use Homebrew to upgrade this installation. Linvell will not download or replace the app itself."))
+                rows.append(text("Homebrew updates are checked every six hours. Run the upgrade command in Terminal to install a newer version."))
+            } else {
+                let download = Theme.actionButton("Download Update",target:self,action:#selector(downloadUpdate)); download.isEnabled = !updates.busy && updates.offer != nil
+                let install = Theme.actionButton("Install and Restart",target:self,action:#selector(installUpdate)); install.isEnabled = !updates.busy && updates.prepared != nil
+                rows.append(Theme.stack([check,download,install,NSView()]))
+                rows.append(text("Checks run every six hours. Downloads require a matching checksum and Linvell signing identity. Installation waits for normal quit, including unsaved-document prompts, and retains the previous app for recovery."))
+                rows.append(text("Update preferences apply to this Mac and are not synchronized through iCloud. Automatic download and installation are off by default."))
+            }
         }
         rows.append(NSView())
         let scroll = ResponsiveScrollView(); scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = false; scroll.borderType = .noBorder
@@ -194,11 +203,15 @@ final class PreferencesController: NSWindowController {
     }
     @objc private func updatePreferenceChanged(_ sender: NSButton) {
         let value = sender.state == .on
-        switch sender.tag { case 0: UpdateManager.shared.automaticChecks = value; case 1: UpdateManager.shared.automaticDownloads = value; case 2: UpdateManager.shared.automaticInstall = value; default: UpdateManager.shared.includePreviews = value }
+        switch sender.tag { case 0: updates.automaticChecks = value; case 1: updates.automaticDownloads = value; case 2: updates.automaticInstall = value; default: updates.includePreviews = value }
     }
-    @objc private func checkUpdate() { UpdateManager.shared.check() }
-    @objc private func downloadUpdate() { UpdateManager.shared.download() }
-    @objc private func installUpdate() { UpdateManager.shared.requestInstall() }
+    @objc private func copyUpgradeCommand() {
+        guard let command = updates.installationSource.upgradeCommand else { return }
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(command,forType:.string)
+    }
+    @objc private func checkUpdate() { updates.check() }
+    @objc private func downloadUpdate() { updates.download() }
+    @objc private func installUpdate() { updates.requestInstall() }
 }
 
 private final class SettingsDocument: NSView { override var isFlipped: Bool { true } }

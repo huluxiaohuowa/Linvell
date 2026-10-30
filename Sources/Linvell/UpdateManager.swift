@@ -5,6 +5,15 @@ import LinvellCore
 
 final class UpdateManager {
     static let shared = UpdateManager()
+    let installationSource: UpdateInstallationSource
+    var supportsSelfUpdates: Bool { installationSource.supportsSelfUpdates }
+    init(installationSource: UpdateInstallationSource = .detect()) {
+        self.installationSource = installationSource
+        if let command = installationSource.upgradeCommand {
+            statusKey = "Updates are managed by Homebrew. Run %@."
+            statusValues = [command]
+        }
+    }
     static let changed = Notification.Name("Linvell.UpdateStatusChanged")
     struct Prepared: Codable { let tag: String; let replacement: URL }
     private var statusKey = "Updates are delivered through GitHub Releases."
@@ -38,10 +47,10 @@ final class UpdateManager {
         get { UserDefaults.standard.object(forKey:"updateIncludePreviews") == nil ? !((ReleaseVersion(Self.currentVersion)?.prerelease.isEmpty) ?? true) : UserDefaults.standard.bool(forKey:"updateIncludePreviews") }
         set { UserDefaults.standard.set(newValue,forKey:"updateIncludePreviews"); offer = nil; notify() }
     }
-    var shouldInstallOnQuit: Bool { prepared != nil && (automaticInstall || installRequested) }
+    var shouldInstallOnQuit: Bool { supportsSelfUpdates && prepared != nil && (automaticInstall || installRequested) }
     private var directory: URL { FileManager.default.urls(for:.applicationSupportDirectory,in:.userDomainMask)[0].appendingPathComponent("Linvell/Updates",isDirectory:true) }
     func start() {
-        if let data = UserDefaults.standard.data(forKey:"preparedUpdate"),let value = try? JSONDecoder().decode(Prepared.self,from:data),
+        if supportsSelfUpdates,let data = UserDefaults.standard.data(forKey:"preparedUpdate"),let value = try? JSONDecoder().decode(Prepared.self,from:data),
            UpdateStaging.owns(candidate:value.replacement,in:directory),
            let next = ReleaseVersion(value.tag),let current = ReleaseVersion(Self.currentVersion),next > current,FileManager.default.fileExists(atPath:value.replacement.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("update.zip").path) {
             prepared = value; setStatus("%@ is ready to install.",value.tag)
@@ -65,6 +74,7 @@ final class UpdateManager {
     private func notify() { NotificationCenter.default.post(name:Self.changed,object:nil) }
     private func setStatus(_ key: String,_ values: CVarArg...) { statusKey = key; statusValues = values; notify() }
     func check() {
+        if !supportsSelfUpdates { checkHomebrew(); return }
         guard !busy else { return }; busy = true; setStatus("Checking GitHub Releases…")
         let previews = includePreviews
         Task { @MainActor in
@@ -80,7 +90,25 @@ final class UpdateManager {
             } catch { busy = false; setStatus("Could not check for updates. %@",error.localizedDescription) }
         }
     }
+    private func checkHomebrew() {
+        guard !busy,let command = installationSource.upgradeCommand else { return }
+        guard let endpoint = installationSource.metadataURL else {
+            setStatus("Updates are managed by Homebrew. Run %@.",command); return
+        }
+        busy = true; setStatus("Checking Homebrew…")
+        Task { @MainActor in
+            do {
+                let data = try await metadata(endpoint,limit:1024*1024)
+                guard let value = installationSource.availableVersion(in:data),let version = ReleaseVersion(value),let current = ReleaseVersion(Self.currentVersion) else { throw UpdateFailure.invalidResponse }
+                UserDefaults.standard.set(Date().timeIntervalSince1970,forKey:"updateLastChecked")
+                busy = false
+                if version > current { setStatus("Homebrew offers %@. Run %@.",value,command) }
+                else { setStatus("Homebrew has no newer version available.") }
+            } catch { busy = false; setStatus("Could not check Homebrew updates. %@",error.localizedDescription) }
+        }
+    }
     func download() {
+        guard supportsSelfUpdates else { setStatus("Updates are managed by Homebrew. Run %@.",installationSource.upgradeCommand ?? "brew upgrade --cask linvell"); return }
         guard !busy,let offer else { return }; busy = true; setStatus("Downloading %@…",offer.tag)
         Task { @MainActor in
             var downloadRoot: URL?
@@ -142,7 +170,7 @@ final class UpdateManager {
         }
     }
     func requestInstall() {
-        guard prepared != nil else { return }
+        guard supportsSelfUpdates,prepared != nil else { return }
         installRequested = true; NSApp.terminate(nil)
         // NSApplication may cancel termination when the user cancels a save/session dialog.
         installRequested = false
@@ -155,6 +183,7 @@ final class UpdateManager {
         return try Data(contentsOf:file)
     }
     func scheduleInstallation() throws {
+        guard supportsSelfUpdates else { throw UpdateFailure.notWritable }
         guard let prepared else { return }
         guard UpdateStaging.owns(candidate:prepared.replacement,in:directory) else { throw UpdateFailure.invalidArchive }
         let current = Bundle.main.bundleURL.resolvingSymlinksInPath()

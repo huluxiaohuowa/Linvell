@@ -16,7 +16,7 @@ Actual welcome screen with the built-in Linvell Light theme.
 brew install --cask huluxiaohuowa/tap/linvell
 ```
 
-Requires macOS 15.6 or later. The Linvell-maintained tap provides the signed, notarized Universal app and updates after stable GitHub Releases. Use `brew upgrade --cask --greedy huluxiaohuowa/tap/linvell` to include Linvell when checking upgrades. Official Homebrew Cask inclusion is pending; see [distribution details](docs/CI_RELEASE.md#homebrew-distribution).
+Requires macOS 15.6 or later. The Linvell-maintained tap provides the signed, notarized Universal app and updates after stable GitHub Releases. Use `brew upgrade --cask huluxiaohuowa/tap/linvell` to upgrade this installation. Official Homebrew Cask inclusion is pending; see [distribution details](docs/CI_RELEASE.md#homebrew-distribution).
 
 ## Run locally
 
@@ -33,7 +33,7 @@ The Codex Run action uses the same script. Build outputs are kept outside the re
 
 Open **Linvell → Settings** (`⌘,`) for appearance, editor, Vim and iCloud preferences. Built-in themes: Linvell Dark, Nord, Linvell Light and Solarized Light. Default editor text is 15 pt. Sidebar, split editor and terminal panels are resizable.
 
-The **Updates** category provides independent switches for automatic checks, downloads and installation on normal quit. Automatic downloads and installation are off by default. Updates come from GitHub Releases and require matching checksums and the Linvell signing identity.
+The **Updates** category provides independent switches for automatic checks, downloads and installation on normal quit. Automatic downloads and installation are off by default. Manual installations check GitHub Releases and require matching checksums and the Linvell signing identity. Homebrew installations check their tap (or the official Homebrew API), show the appropriate upgrade command, and leave installation to Homebrew.
 
 iCloud Drive can synchronize the preference allowlist in `Linvell/Preferences.json`: theme, font, text size, wrapping, line numbers, indentation and Vim mode. Preferences are merged per setting using their modification times. The sync switch and machine-specific layout stay local. Documents, recovery snapshots, project paths, terminal environment and credentials never enter this preference file. iCloud Drive must be available; actual delivery to another Mac is managed by iCloud and needs cross-device verification.
 

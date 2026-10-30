@@ -44,7 +44,6 @@ def render_cask(version, digest):
   desc "Native text and code editor"
   homepage "https://linvell.fuluwa.top/"
 
-  auto_updates true
   depends_on macos: :sequoia
 
   app "Linvell.app"

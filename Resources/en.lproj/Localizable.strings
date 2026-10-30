@@ -906,3 +906,12 @@
 "No newer matching plugin version was found." = "No newer matching plugin version was found.";
 
 "Search plugins and sources" = "Search plugins and sources";
+"HOMEBREW" = "HOMEBREW";
+"Copy Upgrade Command" = "Copy Upgrade Command";
+"Updates are managed by Homebrew. Run %@." = "Updates are managed by Homebrew. Run %@.";
+"Checking Homebrew…" = "Checking Homebrew…";
+"Homebrew offers %@. Run %@." = "Homebrew offers %@. Run %@.";
+"Homebrew has no newer version available." = "Homebrew has no newer version available.";
+"Could not check Homebrew updates. %@" = "Could not check Homebrew updates. %@";
+"Use Homebrew to upgrade this installation. Linvell will not download or replace the app itself." = "Use Homebrew to upgrade this installation. Linvell will not download or replace the app itself.";
+"Homebrew updates are checked every six hours. Run the upgrade command in Terminal to install a newer version." = "Homebrew updates are checked every six hours. Run the upgrade command in Terminal to install a newer version.";

@@ -15,6 +15,7 @@ class HomebrewTests(unittest.TestCase):
         self.assertIn('sha256 "' + "a" * 64 + '"', cask)
         self.assertIn('v#{version}/Linvell-#{version}-universal.zip', cask)
         self.assertIn('app "Linvell.app"', cask)
+        self.assertNotIn("auto_updates true", cask)
 
     def test_rejects_prerelease_and_injected_inputs(self):
         for value in ("0.2.1-beta", "v0.2.1", '0.2.1"', "../1", "0.2"):

@@ -26,7 +26,7 @@ Install using the Linvell-maintained tap:
 
 ```sh
 brew install --cask huluxiaohuowa/tap/linvell
-brew upgrade --cask --greedy huluxiaohuowa/tap/linvell
+brew upgrade --cask huluxiaohuowa/tap/linvell
 ```
 
 The Homebrew step runs after the stable GitHub Release and its distribution artifacts have been published. `script/publish_homebrew.py` downloads the published Universal ZIP and `SHA256SUMS.txt`, checks the complete archive, and generates the Cask. It rejects drafts, prereleases, missing or duplicate checksums, archive mismatches and version downgrades. Repeating the same release is safe. The workflow checks Ruby style and pushes the Cask to `huluxiaohuowa/homebrew-tap`.
@@ -42,3 +42,14 @@ The same generated `Casks/linvell.rb` can be submitted as `Casks/l/linvell.rb` i
 As checked on 2026-10-30, the repository is younger than 30 days and below Homebrew's normal self-submission notability thresholds. Official inclusion is pending eligibility or an explicitly justified maintainer exception, not an automated guarantee. See [package acceptance policy](https://docs.brew.sh/Package-Acceptance-Policy) and [acceptable casks](https://docs.brew.sh/Acceptable-Casks).
 
 Homebrew also requires the human contributor to review AI-assisted content before requesting review, disclose assistance in the PR, and personally answer maintainer questions. The initial submission must therefore follow the author's review. See [responsible AI usage](https://docs.brew.sh/Responsible-AI-Usage). Once accepted, official Homebrew updates remain subject to its review and autobump processes; the Linvell tap continues updating independently after every stable release.
+
+### Installation-aware updates
+
+The running app matches its actual bundle against the Linvell artifact links in Homebrew's Caskroom and reads the installation receipt's tap. Merely having Homebrew installed does not change a manual app's source; custom app directories and Caskroom symlinks are supported. Standard Apple Silicon/Intel prefixes and an explicit `HOMEBREW_PREFIX` are checked.
+
+- Manual installation: GitHub Releases, checksum/signature validation, and the existing optional in-app installation flow.
+- `huluxiaohuowa/tap`: read the published Cask version and show `brew upgrade --cask huluxiaohuowa/tap/linvell`.
+- Future `homebrew/cask` installation: read the official Cask API and show `brew upgrade --cask linvell`.
+- Unknown tap or damaged receipt: keep the app under Homebrew management and show its upgrade command; do not silently fall back to in-app replacement or an untrusted update endpoint.
+
+Homebrew installations hide in-app download/install/preview controls and block all in-app installation entry points, even when old self-update preferences remain enabled. The Cask no longer declares `auto_updates`, so normal `brew upgrade` includes it. Linvell never runs the displayed shell command itself. Official-channel parsing is fixture-tested until the project is officially accepted.
