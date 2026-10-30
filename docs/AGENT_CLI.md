@@ -14,6 +14,20 @@ Available in Linvell 0.2.4; concurrent sessions and corrected DSH titles are add
 6. 终端中的文件链接按住 Command 点击，在当前 Linvell 工作区打开；普通路径可选中后点击 **打开选中文件**，支持相对路径及 `文件:行:列` 的行号定位。图片文件使用现有图片预览；支持 CLI 输出的 iTerm2、Kitty 和 Sixel 终端图片协议。远程路径沿所属会话的 SSH 连接或挂载映射打开。
 7. Agent 保存的历史、压缩记录、分支、项目指令及其他上下文由该 agent 恢复。Linvell 不把不同产品的聊天记录拼成一个新会话，也不创建自己的 agent 引擎。
 
+## 执行位置与安装引导（0.2.7）
+
+切换 Agent 或 **本机／SSH 主机** 时，主界面同步切换到该组合上次选中的终端；没有已打开会话时显示空状态，原会话继续在后台运行。从顶部已打开会话菜单选择时，左侧 Agent 和执行位置也同步更新，菜单中标明本机或 SSH 主机名。
+
+**新建会话** 不再因为缺少配置而无说明地变灰：未选择 CLI 时展开对应设置，DSH 未填写任务时给出说明并聚焦任务输入。本机 Agent 操作远程项目时，先连接该项目的实时挂载，再启动 CLI。
+
+本机模式的主界面提供 SSHFS/macFUSE 安装检测、复制 Homebrew 命令、官方安装指引、重新检测和连接项目入口。当前 [Homebrew SSHFS Cask](https://formulae.brew.sh/cask/sshfs-mac) 的安装命令为：
+
+```sh
+brew install --cask sshfs-mac
+```
+
+该 Cask 依赖 macFUSE。也可按 [macFUSE 官方安装说明](https://github.com/macfuse/macfuse/wiki/Getting-Started) 安装所需组件，依照系统提示处理所选后端的授权或重启，然后返回 Linvell 重新检测并连接项目。Linvell 不代替用户执行系统安装或授权。检测到安装文件不代表挂载已经可用，启动前仍验证实际挂载的主机、远程目录、挂载点和可写性。**在 SSH 主机上运行远程 CLI 不需要本机安装这些组件。**
+
 ## 项目切换（0.2.6）
 
 工作台按“项目目录＋SSH 主机”隔离。打开 SSH 项目后，左侧会话列表和 CLI 设置切换到该远程项目，并显示 **本机／SSH 主机** 执行位置选择；新的远程工作台默认选择 SSH。选择本机时，需要先配置该远程目录的有效 SSHFS 挂载，再运行本机 CLI。

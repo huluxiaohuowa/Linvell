@@ -957,3 +957,36 @@
 "The running CLIs will stop. Saved sessions remain in the agent’s own storage." = "The running CLIs will stop. Saved sessions remain in the agent’s own storage.";
 
 "Agent execution location" = "Agent execution location";
+
+"No open session for this agent and location" = "No open session for this agent and location";
+
+"No open session for this agent and location. Create a session or select one from the list." = "No open session for this agent and location. Create a session or select one from the list.";
+
+"Enter a DSH task, then create or resume a session." = "Enter a DSH task, then create or resume a session.";
+
+
+"Choose an agent CLI in Agent Settings, then create a session." = "Choose an agent CLI in Agent Settings, then create a session.";
+
+"Mount required" = "Mount required";
+
+"Local agents need SSHFS and compatible macOS filesystem support to access this SSH project. Running an agent on the SSH host does not require them." = "Local agents need SSHFS and compatible macOS filesystem support to access this SSH project. Running an agent on the SSH host does not require them.";
+
+"Install the prerequisites, follow any system authorization or restart prompts, then recheck and connect the project mount." = "Install the prerequisites, follow any system authorization or restart prompts, then recheck and connect the project mount.";
+
+"Copy Homebrew Install Command" = "Copy Homebrew Install Command";
+
+"Open macFUSE Installation Guide" = "Open macFUSE Installation Guide";
+
+"Recheck Installation" = "Recheck Installation";
+
+"SSHFS: not found" = "SSHFS: not found";
+
+"SSHFS: installed" = "SSHFS: installed";
+
+"macFUSE: installation detected" = "macFUSE: installation detected";
+
+"macFUSE: installation not detected" = "macFUSE: installation not detected";
+
+"Connect Project" = "Connect Project";
+
+"Connect this SSH project before starting a local agent." = "Connect this SSH project before starting a local agent.";

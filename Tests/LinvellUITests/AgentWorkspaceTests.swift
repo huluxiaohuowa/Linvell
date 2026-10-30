@@ -60,7 +60,7 @@ final class AgentWorkspaceTests: XCTestCase {
         _ = NSApplication.shared
         let view = AgentWorkspace(project:"/fixture/project",remote:try SSHRemote(host:"fixture-host"),autoLoad:false)
         defer { view.removeFromSuperview() }
-        XCTAssertTrue(view.usesSSH); XCTAssertFalse(view.newSession.isEnabled)
+        XCTAssertTrue(view.usesSSH); XCTAssertTrue(view.newSession.isEnabled)
         view.location.selectedSegment = 0
         view.path.stringValue = "/usr/bin/true"
         view.startNew()
@@ -112,7 +112,7 @@ extension AgentWorkspaceTests {
         let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("dev/build/linvell/agent-test-fixtures/multi-"+UUID().uuidString)
         try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
         let cli = root.appendingPathComponent("agent")
-        try Data("#!/bin/sh\ntrap '' INT\nprintf 'ready\\n'\nsleep 0.3\nprintf 'background output\\n'\nwhile :; do sleep 1; done\n".utf8).write(to:cli)
+        try Data("#!/bin/sh\nif [ \"$1\" = app-server ]; then exit 0; fi\ntrap '' INT\nprintf 'ready\\n'\nsleep 0.3\nprintf 'background output\\n'\nwhile :; do sleep 1; done\n".utf8).write(to:cli)
         try FileManager.default.setAttributes([.posixPermissions:0o700],ofItemAtPath:cli.path)
         let view = AgentWorkspace(project:root.path,remote:nil,autoLoad:false)
         let defaults = UserDefaults.standard
