@@ -1,3 +1,7 @@
+# Plugin P6 — installation and management (source preview)
+
+New on main after 0.2.0: native ZIP/HTTPS/catalog installation, installed/catalog/source tabs, persistent enablement and startup restore, explicit updates, rollback, uninstall and local data cleanup. [Format and limits](plugins/management.md); [acceptance](verification/plugins-management.md). The published 0.2.0 app does not include this manager.
+
 # Plugin P4/P5 — 0.2.0
 
 Implemented manifest LSP language providers, native task terminals, DAP launch controls, bounded logs and SSH workspace plugin runtimes. The SDK is independently buildable on Linux. Validation and limits: [P4/P5](verification/plugins-p4-p5.md). Released as [0.2.0](https://github.com/huluxiaohuowa/Linvell/releases/tag/v0.2.0): Universal Developer ID signed, Apple notarized, stapled and Gatekeeper accepted. The installed application was not replaced.

@@ -55,7 +55,8 @@ final class PluginEditingTests: XCTestCase {
         XCTAssertThrowsError(try workspace.installPlugin(package("dev.reserved",key:"cmd+c"),persistence:store))
         XCTAssertEqual(workspace.pluginSessions.count,1)
         workspace.stopPlugins()
-        XCTAssertEqual(bar.items.first?.submenu?.items.count,2)
+        XCTAssertEqual(bar.items.first?.submenu?.items.count,3)
+        XCTAssertEqual(bar.items.first?.submenu?.items.first?.title,L.text("Manage Plugins…"))
         XCTAssertTrue(workspace.pluginSessions.isEmpty)
     }
 

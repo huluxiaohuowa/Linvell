@@ -86,7 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for workspace in workspaces { workspace.relocalize() }
     }
     @discardableResult @objc func newWorkspace() -> WorkspaceController {
-        let controller = WorkspaceController(); workspaces.append(controller)
+        let controller = WorkspaceController(managedAutoload:true); workspaces.append(controller)
         controller.showWindow(nil); controller.window?.makeKeyAndOrderFront(nil)
         return controller
     }

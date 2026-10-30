@@ -17,6 +17,10 @@ final class FileNode: NSObject {
 final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutlineViewDataSource, NSOutlineViewDelegate, NSSearchFieldDelegate {
     var documents: [OpenDocument] = []
     var pluginSessions: [String:PluginSession] = [:]
+    let installedPluginStore: PluginStore
+    let managedPluginAutoload: Bool
+    var managedPluginIDs = Set<String>()
+    var managedPluginLoad = UUID()
     var pluginDocumentVersions: [UUID:Int] = [:]
     var pluginViewValues: [String:PluginViewUpdate] = [:]
     var pluginDataViews: [String:PluginDataView] = [:]
@@ -85,7 +89,8 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     var runWorkspaceView: RunWorkspace?
     var gitWorkspaceView: GitWorkspace?
 
-    init() {
+    init(pluginStore: PluginStore = .shared,managedAutoload: Bool = false) {
+        self.installedPluginStore = pluginStore;self.managedPluginAutoload = managedAutoload
         let support = FileManager.default.urls(for:.applicationSupportDirectory,in:.userDomainMask).first!.appendingPathComponent("Linvell/Recovery",isDirectory:true)
         recovery = RecoveryStore(directory:support)
         let window = NSWindow(contentRect:NSRect(x:0,y:0,width:1320,height:860),styleMask:[.titled,.closable,.miniaturizable,.resizable,.fullSizeContentView],backing:.buffered,defer:false)
@@ -96,6 +101,9 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         window.minSize = NSSize(width:800,height:540); window.delegate = self
         window.setFrameAutosaveName("Linvell.Workspace"); window.center()
         buildUI(); showWelcome()
+        NotificationCenter.default.addObserver(self,selector:#selector(managedPluginsChanged(_:)),name:PluginStore.changed,object:nil)
+        NotificationCenter.default.addObserver(self,selector:#selector(pauseManagedPlugin(_:)),name:PluginStore.willChange,object:nil)
+        DispatchQueue.main.async { [weak self] in self?.syncManagedPlugins() }
         languageServices.didCreateSession = { [weak self] session,language,root,remote in
             self?.observeDiagnostics(session,snapshot:EditorCodeSnapshot(id:UUID(),uri:"",path:"",text:"",version:0,language:language,root:root,remote:remote))
         }
@@ -356,7 +364,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         latestOpenRequest = nil
         remoteConnection = nil; remoteBrowser = nil
         if pluginWorkspace?.identityKey != PluginWorkspace(root:url.path).identityKey { stopPlugins(); resetLanguageServices() }
-        root = FileNode(url.resolvingSymlinksInPath()); projectTitle.stringValue = url.lastPathComponent
+        root = FileNode(url.resolvingSymlinksInPath()); syncManagedPlugins(); projectTitle.stringValue = url.lastPathComponent
         outline.reloadData(); UserDefaults.standard.set(url.path,forKey:"lastProject")
         WorkspaceSession.save(.local(path:url.path))
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
@@ -529,7 +537,8 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         terminal.terminate()
     }
     func windowWillClose(_ notification: Notification) {
-        stopPlugins()
+        stopPlugins(); managedPluginLoad = UUID()
+        pluginWindows.removeValue(forKey:"manager")?.close()
         picker?.dismiss(); picker = nil
         window?.undoManager?.removeAllActions(withTarget:self)
         completionPanel?.dismiss(); hoverPopover?.close(); languageServices.stop()

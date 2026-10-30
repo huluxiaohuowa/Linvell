@@ -10,8 +10,9 @@ let package = Package(
         .package(url:"https://github.com/JohnSundell/Ink.git",revision:"bcc9f219900a62c4210e6db726035d7f03ae757b")
     ],
     targets: [
+        .systemLibrary(name:"CZlib"),
         .target(name:"LinvellPluginKit",exclude:["Package.swift"]),
-        .target(name: "LinvellCore",dependencies:["LinvellPluginKit"]),
+        .target(name: "LinvellCore",dependencies:["LinvellPluginKit","CZlib"]),
         .executableTarget(name: "Linvell", dependencies: ["LinvellCore", .product(name: "SwiftTerm", package: "SwiftTerm"),.product(name:"Ink",package:"Ink")]),
         .executableTarget(name:"LinvellUpdater",dependencies:["LinvellCore"]),
         .testTarget(name: "LinvellCoreTests", dependencies: ["LinvellCore"]),

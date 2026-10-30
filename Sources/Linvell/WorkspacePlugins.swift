@@ -22,6 +22,7 @@ extension WorkspaceController {
         }
     }
     @objc func stopPlugins() {
+        managedPluginLoad = UUID()
         let sessions = Array(pluginSessions.values); pluginSessions.removeAll()
         sessions.forEach { $0.stop(); clearPluginUI($0) }; PluginMenus.refresh()
         refreshPluginProviders()

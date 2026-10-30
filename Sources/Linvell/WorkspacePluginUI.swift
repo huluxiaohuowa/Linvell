@@ -61,9 +61,11 @@ extension WorkspaceController {
     }
     func selectPluginTheme(_ id: String,session: PluginSession) {
         guard pluginSessions[session.package.manifest.id] === session,let theme = session.package.manifest.themes?.first(where:{ $0.id == id }) else { return }
+        saveManagedTheme(id,session:session)
         Theme.pluginTheme = (session.sessionID,theme); NotificationCenter.default.post(name:PreferencesSync.didApply,object:nil)
     }
-    func selectPluginIcons(_ session: PluginSession) {
+    func selectPluginIcons(_ session: PluginSession,persist: Bool = true) {
+        if persist,managedPluginIDs.contains(session.package.manifest.id) { let store = installedPluginStore; DispatchQueue.global(qos:.utility).async { try? store.selectIcons(plugin:session.package.manifest.id) } }
         var images: [String:NSImage] = [:]
         for icon in session.package.manifest.icons ?? [] {
             if let image = pluginIcon(icon.id,session:session) { for ext in icon.fileExtensions ?? [] { images[ext] = image } }

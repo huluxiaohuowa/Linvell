@@ -1,4 +1,5 @@
 import AppKit
+import LinvellCore
 
 final class PreferencesController: NSWindowController {
     weak var workspaceOwner: WorkspaceController?
@@ -125,6 +126,7 @@ final class PreferencesController: NSWindowController {
             rows.append(section("STAYS ON THIS MAC"))
             rows.append(text("Documents, recovery snapshots, project paths, terminal environment and credentials. iCloud Drive must be enabled in macOS System Settings."))
         case 5:
+            rows.append(Theme.actionButton("Manage Plugins…",target:self,action:#selector(managePlugins)))
             let sessions = workspaceOwner?.pluginSessions.values.sorted { $0.package.manifest.name < $1.package.manifest.name } ?? []
             if sessions.isEmpty { rows.append(text("Load a plugin to configure its native settings.")) }
             for session in sessions where !(session.package.manifest.settings ?? []).isEmpty {
@@ -160,10 +162,11 @@ final class PreferencesController: NSWindowController {
         let b = NSButton(checkboxWithTitle:L.text(title),target:self,action:#selector(checkChanged(_:))); b.identifier = NSUserInterfaceItemIdentifier(key)
         b.state = PreferencesSync.value(key) == "true" ? .on : .off; b.font = .systemFont(ofSize:14); return b
     }
+    @objc private func managePlugins() { workspaceOwner?.showPluginManager() }
     @objc private func openPluginSettings(_ sender: NSButton) {
         if let id = sender.identifier?.rawValue,let session = workspaceOwner?.pluginSessions[id] { workspaceOwner?.openPluginSettings(session) }
     }
-    @objc private func themeSelected(_ sender: NSButton) { Theme.profile = Theme.Profile.allCases[sender.tag]; PreferencesSync.shared.changed() }
+    @objc private func themeSelected(_ sender: NSButton) { let store = workspaceOwner?.installedPluginStore ?? .shared; DispatchQueue.global(qos:.utility).async { try? store.selectTheme(plugin:nil,id:nil) }; Theme.profile = Theme.Profile.allCases[sender.tag]; PreferencesSync.shared.changed() }
     @objc private func popupChanged(_ sender: NSPopUpButton) {
         guard let key = sender.identifier?.rawValue,let title = sender.titleOfSelectedItem else { return }
         let value = (sender.selectedItem?.representedObject as? String) ?? title

@@ -58,7 +58,7 @@ extension WorkspaceController {
         browser.onOpen = { [weak self] in self?.openRemote($0,connection:connection) }
         browser.onRootLoaded = { [weak self,weak browser] path in
             guard let self,self.remoteBrowser === browser else { return }
-            self.remoteDirectory = path
+            self.remoteDirectory = path; self.syncManagedPlugins()
             self.projectTitle.stringValue = URL(fileURLWithPath:path).lastPathComponent+" · SSH"
             WorkspaceSession.save(.ssh(host:connection.host,path:path))
         }
@@ -71,7 +71,7 @@ extension WorkspaceController {
         let picker = RemoteFolderPicker(connection:connection,path:remoteDirectory,owner:window); remoteFolderPicker = picker
         picker.onChoose = { [weak self] path in
             guard let self,self.remoteConnection?.host == connection.host else { return }
-            self.resetLanguageServices()
+            self.stopPlugins(); self.resetLanguageServices()
             self.remoteDirectory = path; self.sidebar.subviews.forEach { $0.removeFromSuperview() }
             self.setupRemoteSidebar(connection); self.sidebar.isHidden = false; self.body.adjustSubviews(); self.selectActivity(0)
         }

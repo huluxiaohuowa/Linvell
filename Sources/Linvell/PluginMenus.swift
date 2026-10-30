@@ -14,6 +14,7 @@ final class PluginMenus: NSObject, NSMenuItemValidation {
     static func refresh(workspace: WorkspaceController? = nil) {
         guard let root = NSApp.mainMenu?.items.first(where:{ $0.identifier == menuID })?.submenu else { return }
         root.removeAllItems()
+        let manage = NSMenuItem(title:L.text("Manage Plugins…"),action:#selector(managePlugins),keyEquivalent:"");manage.target = shared;root.addItem(manage)
         let load = NSMenuItem(title:L.text("Load Development Plugin…"),action:#selector(loadPlugin),keyEquivalent:""); load.target = shared; root.addItem(load)
         let stop = NSMenuItem(title:L.text("Stop Plugins"),action:#selector(stopPlugins),keyEquivalent:""); stop.target = shared; root.addItem(stop)
         guard let workspace = workspace ?? activeWorkspace else { return }
@@ -82,6 +83,7 @@ final class PluginMenus: NSObject, NSMenuItemValidation {
         for (name,flag) in [("cmd",NSEvent.ModifierFlags.command),("ctrl",.control),("option",.option),("shift",.shift)] where value.modifiers.contains(name) { mask.insert(flag) }
         return mask
     }
+    @objc private func managePlugins() { Self.activeWorkspace?.showPluginManager() }
     @objc private func loadPlugin() { Self.activeWorkspace?.loadDevelopmentPlugin() }
     @objc private func stopPlugins() { Self.activeWorkspace?.stopPlugins() }
     @objc private func run(_ item: NSMenuItem) {

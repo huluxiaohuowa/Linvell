@@ -31,6 +31,8 @@ iCloud Drive can synchronize the preference allowlist in `Linvell/Preferences.js
 
 ## Plugin development
 
+New on `main` after 0.2.0: [native plugin installation and management](docs/plugins/management.md), including ZIP/HTTPS/catalog installation, startup restoration, enable/disable, explicit updates, rollback and uninstall/data cleanup. This manager requires a source build; the published 0.2.0 application does not yet include it.
+
 Linvell 0.2.0 includes the P1–P5 plugin APIs: an independent Swift process SDK, document events, commands/menus/shortcuts, versioned edits, layered configuration/state, native views and resources, LSP/task/DAP programs, logs and SSH workspace execution. Start with [the bilingual plugin guide](https://linvell.fuluwa.top/plugins.html), [`Examples/HelloPlugin`](Examples/HelloPlugin) or [`Examples/ToolPlugin`](Examples/ToolPlugin). Code plugins have the user account’s OS access; manifest permissions gate editor APIs, not a security sandbox. See [P4/P5 verification and limits](docs/verification/plugins-p4-p5.md). The standalone SDK is `Sources/LinvellPluginKit`; Linux builds produce plugin programs, while Linvell remains a macOS app.
 
 ## Remote development, running and Git

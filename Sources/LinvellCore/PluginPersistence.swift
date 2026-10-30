@@ -85,6 +85,7 @@ public final class PluginPersistence {
             guard bytes.count <= 256*1024 else { throw PluginError.invalidState }; try write(bytes,to:file)
         }
     }
+    public func removeLocalData(pluginID: String) throws { try locked { let folder = try pluginFolder(pluginID);try FileManager.default.removeItem(at:folder) } }
     private func stateURL(folder: URL,workspace: PluginWorkspace) -> URL {
         let key = SHA256.hash(data:Data(workspace.identityKey.utf8)).map { String(format:"%02x",$0) }.joined()
         return folder.appendingPathComponent("workspace-"+key+".json")
