@@ -58,7 +58,7 @@ Linvell 0.2.0 includes the P1–P5 plugin APIs: an independent Swift process SDK
 
 ## Remote development, running and Git
 
-Linvell 0.2.5 includes [existing agent CLI integration](docs/AGENT_CLI.md) for Codex, OpenCode, Pi, Claude Code and DeepSeek Harness, with concurrent sessions, live provider switching, native terminal resume, in-workspace file/image opening, SSH execution, and local-agent access to SSH projects through an optional existing SSHFS installation. Shared desktop/CLI stores are supported; cloud-only sessions need the provider's handoff. No agent runtime is bundled.
+Linvell includes [existing agent CLI integration](docs/AGENT_CLI.md) for Codex, OpenCode, Pi, Claude Code and DeepSeek Harness, with concurrent sessions, live provider switching, native terminal resume, in-workspace file/image opening, SSH execution, and local-agent access to SSH projects through optional, user-installed Mutagen synchronization. Shared desktop/CLI stores are supported; cloud-only sessions need the provider's handoff. No agent runtime is bundled.
 
 Read the bilingual [usage guide](https://linvell.fuluwa.top/guide.html) for SSH workspaces, local/remote run and web preview, Git Graph, VS Code-style shortcuts and normal/Vim multi-selection editing. Guide source is maintained in [linvell-web](https://github.com/huluxiaohuowa/linvell-web/tree/main/docs).
 

@@ -102,14 +102,11 @@ for line in sys.stdin:
         let found = AgentCLI.discover(home:root,applicationDirectories:[root]).filter { $0.source == "Codex.app" }
         XCTAssertEqual(found.count,1); XCTAssertTrue(AgentCLI.sameProject(try XCTUnwrap(found.first).path,cli.path))
     }
-    func testMappingsRejectCopiesAndWrongHostsAndMapOnlyDescendants() throws {
-        XCTAssertTrue(AgentPathMapping.matchesMount(source:"user@example:/work/project",mount:"/Volumes/project",host:"example",remoteRoot:"/work/project",localRoot:"/Volumes/project"))
-        XCTAssertFalse(AgentPathMapping.matchesMount(source:"other:/work/project",mount:"/Volumes/project",host:"example",remoteRoot:"/work/project",localRoot:"/Volumes/project"))
-        XCTAssertFalse(AgentPathMapping.matchesMount(source:"example:/work/project-other",mount:"/Volumes/project",host:"example",remoteRoot:"/work/project",localRoot:"/Volumes/project"))
-        let mapping = AgentPathMapping(host:"example",remoteRoot:"/work/project",localRoot:"/Volumes/project")
+    func testSyncMappingsRejectUnregisteredCopiesAndMapOnlyDescendants() throws {
+        let mapping = AgentSyncMapping(host:"example",remoteRoot:"/work/project",localRoot:"/Volumes/project")
         XCTAssertEqual(mapping.remotePath(for:"/Volumes/project/src/a.swift"),"/work/project/src/a.swift")
         XCTAssertNil(mapping.remotePath(for:"/Volumes/project/../secret"))
-        XCTAssertThrowsError(try AgentPathMapping(host:"example",remoteRoot:"/work/project",localRoot:fixture().path).validate())
+        XCTAssertThrowsError(try AgentSyncMapping(host:"example",remoteRoot:"/work/project",localRoot:fixture().path).validate())
     }
     func testRemoteProbeMatchesLocalParsingWithoutInstallingServer() throws {
         let root = try fixture(),store = root.appendingPathComponent("agent/sessions"),project = root.appendingPathComponent("project ' with spaces")

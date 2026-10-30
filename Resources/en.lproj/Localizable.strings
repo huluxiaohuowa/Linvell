@@ -926,18 +926,13 @@
 "New Session" = "New Session";
 "Resume Session" = "Resume Session";
 "Choose CLI…" = "Choose CLI…";
-"Mount SSH Folder…" = "Mount SSH Folder…";
-"Choose Mount…" = "Choose Mount…";
 "Project agent sessions" = "Project agent sessions";
 "Sessions come from the selected machine and agent home. Shared CLI/desktop sessions can resume; cloud-only sessions need the provider’s handoff. Context is restored by the agent itself." = "Sessions come from the selected machine and agent home. Shared CLI/desktop sessions can resume; cloud-only sessions need the provider’s handoff. Context is restored by the agent itself.";
-"Mount the SSH project to use a local agent." = "Mount the SSH project to use a local agent.";
 "Loading agent sessions…" = "Loading agent sessions…";
 "%d project sessions" = "%d project sessions";
 "Choose the agent executable or its desktop application." = "Choose the agent executable or its desktop application.";
 "No supported CLI was found in this app. Choose its CLI executable directly." = "No supported CLI was found in this app. Choose its CLI executable directly.";
 "Choose an executable CLI file." = "Choose an executable CLI file.";
-"Choose the SSHFS mount of this remote project." = "Choose the SSHFS mount of this remote project.";
-"Connecting project mount…" = "Connecting project mount…";
 "Stop this agent session?" = "Stop this agent session?";
 "The running CLI will stop. Saved sessions remain in the agent’s own storage." = "The running CLI will stop. Saved sessions remain in the agent’s own storage.";
 
@@ -967,26 +962,35 @@
 
 "Choose an agent CLI in Agent Settings, then create a session." = "Choose an agent CLI in Agent Settings, then create a session.";
 
-"Mount required" = "Mount required";
 
-"Local agents need SSHFS and compatible macOS filesystem support to access this SSH project. Running an agent on the SSH host does not require them." = "Local agents need SSHFS and compatible macOS filesystem support to access this SSH project. Running an agent on the SSH host does not require them.";
 
-"Install the prerequisites, follow any system authorization or restart prompts, then recheck and connect the project mount." = "Install the prerequisites, follow any system authorization or restart prompts, then recheck and connect the project mount.";
 
 "Copy Homebrew Install Command" = "Copy Homebrew Install Command";
 
-"Open macFUSE Installation Guide" = "Open macFUSE Installation Guide";
 
 "Recheck Installation" = "Recheck Installation";
 
-"SSHFS: not found" = "SSHFS: not found";
 
-"SSHFS: installed" = "SSHFS: installed";
 
-"macFUSE: installation detected" = "macFUSE: installation detected";
 
-"macFUSE: installation not detected" = "macFUSE: installation not detected";
 
 "Connect Project" = "Connect Project";
 
 "Connect this SSH project before starting a local agent." = "Connect this SSH project before starting a local agent.";
+"Mutagen is optional. Install it only to let a local agent edit this SSH project through a synchronized local copy. Agents running on the SSH host do not need it." = "Mutagen is optional. Install it only to let a local agent edit this SSH project through a synchronized local copy. Agents running on the SSH host do not need it.";
+"No filesystem driver or startup security change is required. Linvell manages its own synchronization process without registering a login item. Changes synchronize both ways; conflicts require review. Build and test commands need SSH to run remotely." = "No filesystem driver or startup security change is required. Linvell manages its own synchronization process without registering a login item. Changes synchronize both ways; conflicts require review. Build and test commands need SSH to run remotely.";
+"Mutagen Documentation" = "Mutagen Documentation";
+"Connect with Mutagen" = "Connect with Mutagen";
+"✓ Mutagen installed — local agents can edit remote code" = "✓ Mutagen installed — local agents can edit remote code";
+"Mutagen not installed — optional for local agents on SSH projects" = "Mutagen not installed — optional for local agents on SSH projects";
+"Synchronization required" = "Synchronization required";
+"Connect with Mutagen to use a local agent on this SSH project." = "Connect with Mutagen to use a local agent on this SSH project.";
+"Synchronizing SSH project…" = "Synchronizing SSH project…";
+"Mutagen stopped — no local agent needs synchronization" = "Mutagen stopped — no local agent needs synchronization";
+"Mutagen stopped — unsynchronized changes remain in the local copy" = "Mutagen stopped — unsynchronized changes remain in the local copy";
+"Mutagen: %d conflicts — changes need review" = "Mutagen: %d conflicts — changes need review";
+"Mutagen: synchronized" = "Mutagen: synchronized";
+"Mutagen: synchronizing or reconnecting…" = "Mutagen: synchronizing or reconnecting…";
+"Changes synchronize in both directions. Conflicts require review. Build and test commands still run locally unless explicitly sent over SSH." = "Changes synchronize in both directions. Conflicts require review. Build and test commands still run locally unless explicitly sent over SSH.";
+"Review Sync Conflicts…" = "Review Sync Conflicts…";
+"Project root" = "Project root";

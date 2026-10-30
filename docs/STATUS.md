@@ -1,3 +1,5 @@
+Mutagen integration (pending release): optional CLI discovery, copyable `brew install mutagen-io/mutagen/mutagen`, green availability and separate synchronization status. Local agents on SSH projects use two-way-safe replicas instead of filesystem mounts. Linvell starts an isolated synchronization process only on demand and stops it when no local session needs it. No Mutagen binary, filesystem driver or login item is bundled.
+
 # Linvell 0.2.7 — published (2026-10-30)
 
 [0.2.7](https://github.com/huluxiaohuowa/Linvell/releases/tag/v0.2.7) synchronizes provider/local/SSH selection with the actual displayed Agent terminal and restores the last selected session for each combination. Empty combinations show setup guidance while other processes continue running. The open-session menu synchronizes the sidebar controls and identifies the execution host. DSH task and CLI prerequisites are explicit; local SSH-project mode includes installation detection, Homebrew command copying, official macFUSE instructions, recheck and project connection actions.
@@ -18,7 +20,7 @@ Acceptance includes a failing 0.2.6 baseline reproduction and passing revised re
 
 # Existing agent CLIs — 0.2.4 baseline (2026-10-30)
 
-Native selection and session resume for Codex, OpenCode, Pi, Claude Code and DeepSeek Harness, including saved session titles, CLI/desktop shared stores, SSH execution and optional SSHFS mappings for local agents on SSH projects. Open text files and expanded directories update after agent edits while the same CLI process and terminal survive file browsing; dirty buffers retain conflict protection. [Usage, acceptance and limits](AGENT_CLI.md). Included in Linvell 0.2.4, with selection in the left Agents sidebar and execution in the main workspace. Live Codex metadata and local native UI were checked; full provider authentication/context and live SSHFS acceptance remain unverified.
+Native selection and session resume for Codex, OpenCode, Pi, Claude Code and DeepSeek Harness, including saved session titles, CLI/desktop shared stores, SSH execution and optional Mutagen replicas for local agents on SSH projects. Open text files and expanded directories update after agent edits while the same CLI process and terminal survive file browsing; dirty buffers retain conflict protection. [Usage, acceptance and limits](AGENT_CLI.md). Included in Linvell 0.2.4, with selection in the left Agents sidebar and execution in the main workspace. Live Codex metadata and local native UI were checked; full provider authentication/context and live SSHFS acceptance remain unverified.
 
 # Plugin P6 — installation and management (source preview)
 

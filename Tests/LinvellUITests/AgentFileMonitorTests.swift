@@ -4,6 +4,59 @@ import AppKit
 @testable import LinvellCore
 
 final class AgentFileMonitorTests: XCTestCase {
+    func testLiveMutagenChangesRefreshRemoteEditorAndProtectUnsavedManualChanges() throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let executable = env["LINVELL_MUTAGEN_TEST_EXECUTABLE"],let host = env["LINVELL_MUTAGEN_TEST_HOST"],let base = env["LINVELL_MUTAGEN_TEST_ROOT"] else { throw XCTSkip("Optional Mutagen and disposable SSH fixture required") }
+        _ = NSApplication.shared
+        let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("dev/build/lvedit/"+UUID().uuidString.prefix(8))
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+        var environment = AgentCLI.environment
+        environment["PATH"] = (executable as NSString).deletingLastPathComponent+":"+(environment["PATH"] ?? "")
+        let service = AgentSyncService(root:root.appendingPathComponent("sync"),environment:environment),client = UUID()
+        let directory = base+"/editor-"+UUID().uuidString,connection = try SSHRemote(host:host)
+        let q = SSHRemote.quote(directory)
+        func ssh(_ script: String) throws {
+            let result = try ToolCommand.run(URL(fileURLWithPath:"/usr/bin/ssh"),arguments:["-o","BatchMode=yes","--",host,"/bin/sh -c "+SSHRemote.quote(script)],directory:nil,timeout:20)
+            guard result.succeeded else { throw GitError.command(result.output) }
+        }
+        let workspace = WorkspaceController(); workspace.recoveryTimer?.invalidate()
+        let oldAutoSave = UserDefaults.standard.object(forKey:"autoSave")
+        defer {
+            UserDefaults.standard.set(oldAutoSave,forKey:"autoSave")
+            workspace.agentFileMonitor?.stop(); workspace.window?.orderOut(nil)
+            service.release(client:client); try? ssh("rm -rf -- "+q); try? FileManager.default.removeItem(at:root)
+        }
+        try ssh("mkdir -p "+q+"; printf before > "+q+"/source.txt")
+        let mapping = try service.prepare(remote:connection,directory:directory,client:client)
+        let reply = try connection.request("read",path:directory+"/source.txt")
+        let remote = try RemoteDocument(connection:connection,path:directory+"/source.txt",digest:XCTUnwrap(reply.digest),data:XCTUnwrap(Data(base64Encoded:XCTUnwrap(reply.content))),cacheRoot:root)
+        let document = OpenDocument(try DocumentBuffer(url:remote.localURL)); document.remote = remote
+        workspace.remoteConnection = connection; workspace.remoteDirectory = directory; workspace.activate(document)
+        workspace.agentFileMonitor = AgentFileMonitor(workspace:workspace)
+        func waitUntil(_ predicate: () -> Bool) -> Bool {
+            let deadline = Date().addingTimeInterval(15)
+            while !predicate(),Date() < deadline { RunLoop.current.run(until:Date().addingTimeInterval(0.03)) }; return predicate()
+        }
+        let localFile = URL(fileURLWithPath:mapping.localRoot).appendingPathComponent("source.txt")
+        try Data("agent-first".utf8).write(to:localFile,options:.atomic); try service.flush(mapping)
+        XCTAssertTrue(waitUntil { document.buffer.text == "agent-first" })
+        XCTAssertEqual(document.storage.string,"agent-first"); XCTAssertFalse(document.buffer.isModified)
+        try remote.save(Data("manual-saved".utf8)); try service.flush(mapping)
+        XCTAssertEqual(try String(contentsOf:localFile,encoding:.utf8),"manual-saved")
+        XCTAssertTrue(waitUntil { document.buffer.text == "manual-saved" })
+        document.storage.replaceCharacters(in:NSRange(location:0,length:document.storage.length),with:"my unsaved edit")
+        document.buffer.update("my unsaved edit")
+        try Data("agent-second".utf8).write(to:localFile,options:.atomic); try service.flush(mapping)
+        XCTAssertTrue(waitUntil { document.externalChange })
+        XCTAssertEqual(document.buffer.text,"my unsaved edit"); XCTAssertEqual(document.storage.string,"my unsaved edit")
+        XCTAssertTrue(document.buffer.isModified)
+        UserDefaults.standard.set("true",forKey:"autoSave")
+        workspace.scheduleAutoSave(document)
+        XCTAssertNil(workspace.autoSaveWork[document.buffer.id],"Known external conflicts must suspend automatic saves even if the user keeps editing")
+        XCTAssertThrowsError(try remote.save(Data(document.buffer.text.utf8)),"A stale manual save must not overwrite the agent's newer remote content")
+        let latest = try connection.request("read",path:remote.path)
+        XCTAssertEqual(String(data:try XCTUnwrap(Data(base64Encoded:try XCTUnwrap(latest.content))),encoding:.utf8),"agent-second")
+    }
     func testAgentEditsRefreshFilesWhileBrowsingKeepsOriginalProcess() throws {
         _ = NSApplication.shared
         let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("dev/build/linvell/agent-test-fixtures/live-"+UUID().uuidString)

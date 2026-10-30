@@ -25,19 +25,29 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
     let scope = Theme.label("",size:12,color:Theme.secondary)
     let mappingLabel = Theme.label("",size:11,color:Theme.secondary)
     let mappingRow = NSStackView()
-    let refresh = NSButton(),newSession = NSButton(),resume = NSButton(),stop = NSButton(),browse = NSButton(),mount = NSButton(),chooseMount = NSButton()
+    let refresh = NSButton(),newSession = NSButton(),resume = NSButton(),stop = NSButton(),browse = NSButton(),connectSync = NSButton()
     var installations: [AgentInstallation] = []
     var sessions: [AgentSession] = []
     var filtered: [AgentSession] = []
-    var mapping: AgentPathMapping?
+    var mapping: AgentSyncMapping?
     var terminal: LocalProcessTerminalView? { activeRuntime?.terminal }
     private(set) var generation = UUID()
     private var loading = false
-    private var mounting = false
+    private var syncing = false
     private var selectionMessage: String?
     private struct Channel: Hashable { let kind: AgentKind; let host: String? }
     private var lastActive: [Channel:AgentRuntime] = [:]
-    let mountGuide = AgentMountGuide()
+    let syncGuide = AgentSyncGuide()
+    private let syncService: AgentSyncService
+    private let syncClient = UUID()
+    private var syncTimer: Timer?
+    private var checkingSync = false
+    private var closed = false
+    private static let syncQueue = DispatchQueue(label:"top.fuluwa.linvell.agent-sync",qos:.userInitiated)
+    let syncStatus = NSTextField(labelWithString: "")
+    let syncAvailability = NSTextField(labelWithString: "")
+    let reviewConflicts = NSButton()
+    private var conflictPaths: [String] = []
     private let emptyState = NSView()
     private let emptyMessage = Theme.label("",size:14,color:Theme.secondary)
     private var selectedChannel: Channel { Channel(kind:kind,host:usesSSH ? remote?.host : nil) }
@@ -47,10 +57,10 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
     var running: Bool { runtimes.contains { $0.terminal.process.running } }
     private var executionDirectory: String? { usesSSH || remote == nil ? project : mapping?.localRoot }
     private var settingsKey: String { "agentCLI."+(usesSSH ? remote!.host : "local")+"."+kind.rawValue }
-    private var mappingKey: String { "agentMapping."+(remote?.host ?? "")+":"+project }
+    private var mappingKey: String { "agentSyncMapping."+(remote?.host ?? "")+":"+project }
 
-    init(project: String,remote: SSHRemote?,autoLoad: Bool = true) {
-        self.project = project; self.remote = remote
+    init(project: String,remote: SSHRemote?,autoLoad: Bool = true,syncService: AgentSyncService = .shared) {
+        self.project = project; self.remote = remote; self.syncService = syncService
         super.init(frame:NSRect(x:0,y:0,width:800,height:600))
         wantsLayer = true; layer?.backgroundColor = Theme.canvas.cgColor
         appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua)
@@ -66,20 +76,25 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         path.setAccessibilityLabel(L.text("Agent CLI executable path"))
         agentHome.placeholderString = L.text("Agent home (optional)"); agentHome.delegate = self
         scope.lineBreakMode = .byTruncatingMiddle; mappingLabel.lineBreakMode = .byTruncatingMiddle
+        syncStatus.font = .systemFont(ofSize:12); syncStatus.maximumNumberOfLines = 0; syncStatus.lineBreakMode = .byWordWrapping
+        syncStatus.setContentCompressionResistancePriority(.defaultLow,for:.horizontal)
+        syncAvailability.font = .systemFont(ofSize:12); syncAvailability.maximumNumberOfLines = 0; syncAvailability.lineBreakMode = .byWordWrapping
+        syncAvailability.setContentCompressionResistancePriority(.defaultLow,for:.horizontal)
         agentHome.toolTip = L.text("Use the same agent home as your CLI or desktop app. Leave empty for the default.")
         search.placeholderString = L.text("Search sessions"); search.delegate = self
         historyStatus.maximumNumberOfLines = 3; historyStatus.lineBreakMode = .byWordWrapping; historyStatus.isHidden = true
         task.placeholderString = L.text("DSH task — each run continues the selected session for one task"); task.delegate = self
         func button(_ button: NSButton,_ title: String,_ action: Selector) { button.title = L.text(title); button.target = self; button.action = action; button.bezelStyle = .rounded }
         button(refresh,"Refresh",#selector(reload)); button(newSession,"New Session",#selector(startNew)); button(resume,"Resume Session",#selector(resumeSelected)); button(stop,"Stop",#selector(stopAgent))
-        button(browse,"Choose CLI…",#selector(chooseCLI)); button(mount,"Mount SSH Folder…",#selector(mountProject)); button(chooseMount,"Choose Mount…",#selector(selectMount))
+        button(browse,"Choose CLI…",#selector(chooseCLI)); button(connectSync,"Connect with Mutagen",#selector(connectProject))
+        button(reviewConflicts,"Review Sync Conflicts…",#selector(showSyncConflicts)); reviewConflicts.isHidden = true
         let column = NSTableColumn(identifier:NSUserInterfaceItemIdentifier("agentSessions")); table.addTableColumn(column); table.headerView = nil
         table.delegate = self; table.dataSource = self; table.rowHeight = 54; table.backgroundColor = Theme.panel
         table.target = self; table.doubleAction = #selector(resumeSelected); table.setAccessibilityLabel(L.text("Project agent sessions"))
         let scroll = ResponsiveScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true
         scroll.heightAnchor.constraint(greaterThanOrEqualToConstant:180).isActive = true
         mappingRow.orientation = .vertical; mappingRow.alignment = .leading; mappingRow.spacing = 8
-        [mappingLabel,mount,chooseMount].forEach { mappingRow.addArrangedSubview($0) }
+        [syncAvailability,syncStatus,reviewConflicts,mappingLabel,connectSync].forEach { mappingRow.addArrangedSubview($0) }
         path.setContentCompressionResistancePriority(.defaultLow,for:.horizontal)
         path.lineBreakMode = .byTruncatingMiddle
         let heading = Theme.stack([Theme.label("AGENTS",size:11,weight:.semibold),NSView(),refresh],spacing:8)
@@ -104,11 +119,11 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         let mainHeading = Theme.stack([openSessions,NSView(),openFile,stop])
         Theme.pin(Theme.stack([mainHeading,scope,status,terminalHost],orientation:.vertical,spacing:12),in:self,inset:20)
         emptyMessage.maximumNumberOfLines = 0; emptyMessage.lineBreakMode = .byWordWrapping
-        let emptyContent = Theme.stack([emptyMessage,mountGuide],orientation:.vertical,spacing:20)
+        let emptyContent = Theme.stack([emptyMessage,syncGuide],orientation:.vertical,spacing:20)
         emptyContent.translatesAutoresizingMaskIntoConstraints = false; emptyState.addSubview(emptyContent)
         NSLayoutConstraint.activate([emptyContent.topAnchor.constraint(equalTo:emptyState.topAnchor,constant:24),emptyContent.leadingAnchor.constraint(equalTo:emptyState.leadingAnchor,constant:24),emptyContent.trailingAnchor.constraint(equalTo:emptyState.trailingAnchor,constant:-24)])
-        mountGuide.onConnect = { [weak self] in self?.mountProject() }
-        mountGuide.onRecheck = { [weak self] in self?.selectionMessage = nil; self?.reload(); self?.updateControls() }
+        syncGuide.onConnect = { [weak self] in self?.connectProject() }
+        syncGuide.onRecheck = { [weak self] in self?.selectionMessage = nil; self?.reload(); self?.updateControls() }
         terminalHost.heightAnchor.constraint(greaterThanOrEqualToConstant:160).isActive = true
         restoreSettings(); display(nil); if autoLoad { reload() } else { updateControls() }
     }
@@ -134,7 +149,7 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
     func controlTextDidEndEditing(_ notification: Notification) { if notification.object as? NSSearchField !== search,notification.object as? NSTextField !== task { saveSettings(); reload() } }
     @objc private func toggleSettings() { configurationDetails.isHidden = settingsToggle.state != .on }
     private func restoreSettings() {
-        if mapping == nil,let data = UserDefaults.standard.data(forKey:mappingKey) { mapping = try? JSONDecoder().decode(AgentPathMapping.self,from:data) }
+        if mapping == nil,let data = UserDefaults.standard.data(forKey:mappingKey) { mapping = try? JSONDecoder().decode(AgentSyncMapping.self,from:data) }
         path.stringValue = UserDefaults.standard.string(forKey:settingsKey+".path") ?? ""
         agentHome.stringValue = UserDefaults.standard.string(forKey:settingsKey+".home") ?? ""
         agentHome.isHidden = kind.homeVariable == nil
@@ -165,18 +180,23 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         path.stringValue = installations[installationsPicker.indexOfSelectedItem].path; saveSettings(); generation = UUID(); loading = false; reload()
     }
     private func updateControls() {
-        [kindPicker,installationsPicker,location,path,agentHome,task,browse,mount,chooseMount].forEach { $0.isEnabled = true }
-        mount.isEnabled = !mounting; chooseMount.isEnabled = !mounting; mountGuide.connect.isEnabled = !mounting
+        [kindPicker,installationsPicker,location,path,agentHome,task,browse,connectSync].forEach { $0.isEnabled = true }
+        connectSync.isEnabled = !syncing; syncGuide.connect.isEnabled = !syncing
         refresh.isEnabled = !loading
-        newSession.isEnabled = !(mounting && !usesSSH); newSession.toolTip = launchHint
-        resume.isEnabled = !(mounting && !usesSSH) && filtered.indices.contains(table.selectedRow); stop.isEnabled = terminal?.process.running == true; openFile.isEnabled = terminal != nil
-        browse.isHidden = usesSSH; mount.isHidden = remote == nil || usesSSH; chooseMount.isHidden = mount.isHidden
+        newSession.isEnabled = !(syncing && !usesSSH); newSession.toolTip = launchHint
+        resume.isEnabled = !(syncing && !usesSSH) && filtered.indices.contains(table.selectedRow); stop.isEnabled = terminal?.process.running == true; openFile.isEnabled = terminal != nil
+        browse.isHidden = usesSSH; connectSync.isHidden = remote == nil || usesSSH
         mappingRow.isHidden = remote == nil || usesSSH
-        mountGuide.isHidden = remote == nil || usesSSH
-        scope.stringValue = activeRuntime.map { ($0.remote?.host ?? L.text("This Mac"))+" · "+$0.directory } ?? ((usesSSH ? remote!.host : L.text("This Mac"))+" · "+(executionDirectory ?? (L.text("Mount required")+" · "+project)))
-        mappingLabel.stringValue = remote != nil && !usesSSH ? (mapping?.localRoot ?? L.text("Mount the SSH project to use a local agent.")) : ""
-        emptyMessage.stringValue = mounting && !usesSSH ? L.text("Connecting project mount…") : (selectionMessage ?? launchHint)
-        if mounting && !usesSSH { status.stringValue = L.text("Connecting project mount…") }
+        syncGuide.isHidden = remote == nil || usesSSH
+        scope.stringValue = activeRuntime.map { ($0.remote?.host ?? L.text("This Mac"))+" · "+$0.directory } ?? ((usesSSH ? remote!.host : L.text("This Mac"))+" · "+(executionDirectory ?? (L.text("Synchronization required")+" · "+project)))
+        let available = syncService.support.executable != nil
+        syncAvailability.textColor = available ? .systemGreen : .secondaryLabelColor
+        syncAvailability.stringValue = L.text(available ? "✓ Mutagen installed — local agents can edit remote code" : "Mutagen not installed — optional for local agents on SSH projects")
+        syncGuide.update(support:syncService.support)
+        syncStatus.isHidden = syncStatus.stringValue.isEmpty
+        mappingLabel.stringValue = remote != nil && !usesSSH ? (mapping?.localRoot ?? L.text("Connect with Mutagen to use a local agent on this SSH project.")) : ""
+        emptyMessage.stringValue = syncing && !usesSSH ? L.text("Synchronizing SSH project…") : (selectionMessage ?? launchHint)
+        if syncing && !usesSSH { status.stringValue = L.text("Synchronizing SSH project…") }
     }
     @objc func reload() {
         // Reopening the same window shares its pending CLI/session discovery.
@@ -245,29 +265,35 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         }
         saveSettings(); generation = UUID(); loading = false; reload()
     }
-    @objc private func selectMount() {
-        guard let remote else { return }
-        let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.message = L.text("Choose the SSHFS mount of this remote project.")
-        guard panel.runModal() == .OK,let url = panel.url else { return }
-        let mapping = AgentPathMapping(host:remote.host,remoteRoot:project,localRoot:url.path)
-        performMapping { try mapping.validate(); return mapping }
+    @objc private func connectProject() {
+        guard let remote else { return }; let project = project,client = syncClient,service = syncService
+        performMapping { try service.prepare(remote:remote,directory:project,client:client) }
     }
-    @objc private func mountProject() {
-        guard let remote else { return }; let project = project
-        performMapping { try AgentPathMapping.mount(remote:remote,directory:project) }
-    }
-    private func performMapping(_ work: @escaping () throws -> AgentPathMapping,completion: (() -> Void)? = nil) {
-        guard !mounting else { return }; mounting = true
+    private func performMapping(_ work: @escaping () throws -> AgentSyncMapping,completion: (() -> Void)? = nil) {
+        guard !syncing else { return }; syncing = true
         let origin = selectedChannel
-        status.stringValue = L.text("Connecting project mount…"); updateControls()
-        DispatchQueue.global(qos:.userInitiated).async { [weak self] in
+        let target = remote.map { syncService.mapping(remote:$0,directory:project) },service = syncService
+        status.stringValue = L.text("Synchronizing SSH project…"); updateControls()
+        Self.syncQueue.async { [weak self] in
             let result = Result { try work() }
+            let failureState: AgentSyncService.Snapshot?
+            if case .failure = result,let target { failureState = try? service.snapshot(target) } else { failureState = nil }
             DispatchQueue.main.async {
-                guard let self else { return }; self.mounting = false
+                guard let self,!self.closed else { return }; self.syncing = false
                 switch result {
-                case .success(let mapping): self.mapping = mapping; UserDefaults.standard.set(try? JSONEncoder().encode(mapping),forKey:self.mappingKey); self.selectionMessage = nil; self.generation = UUID(); self.loading = false; self.reload(); completion?()
+                case .success(let mapping):
+                    self.mapping = mapping; UserDefaults.standard.set(try? JSONEncoder().encode(mapping),forKey:self.mappingKey)
+                    self.selectionMessage = nil; self.generation = UUID(); self.loading = false; self.reload()
+                    self.startSyncMonitoring(); completion?(); self.stopIdleSync()
                 case .failure(let error):
-                    if self.selectedChannel == origin { self.selectionMessage = error.localizedDescription; self.status.stringValue = error.localizedDescription }; self.updateControls()
+                    if let state = failureState,state.conflicts > 0,let target {
+                        self.mapping = target; self.conflictPaths = state.conflictPaths
+                        self.reviewConflicts.isHidden = state.conflictPaths.isEmpty
+                        self.syncStatus.textColor = .systemOrange
+                        self.syncStatus.stringValue = L.format("Mutagen: %d conflicts — changes need review",state.conflicts)+" · "+state.conflictPaths.prefix(3).joined(separator:", ")
+                        self.syncStatus.isHidden = false
+                    }
+                    if self.selectedChannel == origin { self.selectionMessage = error.localizedDescription; self.status.stringValue = error.localizedDescription }; self.updateControls(); self.stopIdleSync()
                 }
             }
         }
@@ -280,7 +306,8 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         let context = AgentRuntime.Context(kind:kind,host:usesSSH ? remote?.host : nil,executable:executable,home:home)
         return runtimes.first { $0.context == context && $0.sessionID == session.id && $0.terminal.process.running }
     }
-    func start(session: AgentSession?) {
+    func start(session: AgentSession?) { start(session:session,synchronized:false) }
+    private func start(session: AgentSession?,synchronized: Bool) {
         if let session,let existing = matchingRuntime(session) { activate(existing); return }
         selectionMessage = nil
         if kind == .dsh,task.stringValue.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty {
@@ -291,13 +318,14 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
             selectionMessage = L.text("Choose an agent CLI in Agent Settings, then create a session.")
             showSettings(); status.stringValue = selectionMessage!; updateControls(); onStart?(); window?.makeFirstResponder(path); return
         }
-        if let remote,!usesSSH,mapping == nil {
+        if let remote,!usesSSH,!synchronized {
             let expectedKind = kind,expectedPath = path.stringValue,expectedHome = agentHome.stringValue,expectedTask = task.stringValue
-            performMapping({ try AgentPathMapping.mount(remote:remote,directory:self.project) }) { [weak self] in
+            let project = project,client = syncClient,service = syncService
+            performMapping({ try service.prepare(remote:remote,directory:project,client:client) }) { [weak self] in
                 guard let self,!self.usesSSH,self.kind == expectedKind,self.path.stringValue == expectedPath,
                       self.agentHome.stringValue == expectedHome,self.task.stringValue == expectedTask,
                       self.window != nil,self.configurationView.window != nil else { return }
-                self.start(session:session)
+                self.start(session:session,synchronized:true)
             }
             onStart?(); return
         }
@@ -423,7 +451,69 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         let pid = terminal.process.shellPid
         if pid > 0,getpgid(pid) == pid,pid != getpgrp() { kill(-pid,SIGHUP) }; terminal.terminate()
     }
-    func shutdown() { for runtime in runtimes { Self.terminate(runtime.terminal) } }
+    func shutdown() {
+        guard !closed else { return }; closed = true
+        syncTimer?.invalidate(); syncTimer = nil
+        for runtime in runtimes { Self.terminate(runtime.terminal) }
+        Self.syncQueue.sync { syncService.release(client:syncClient) }
+    }
+    private func startSyncMonitoring() {
+        syncTimer?.invalidate()
+        syncTimer = Timer.scheduledTimer(withTimeInterval:3,repeats:true) { [weak self] _ in self?.checkSync() }
+        checkSync()
+    }
+    private func stopIdleSync() {
+        guard !syncing,!runtimes.contains(where:{ $0.mapping != nil && $0.terminal.process.running }) else { return }
+        syncTimer?.invalidate(); syncTimer = nil
+        let client = syncClient,service = syncService
+        Self.syncQueue.async { [weak self] in
+            let problem = service.suspend(client:client)
+            DispatchQueue.main.async {
+                guard let self,!self.closed,self.syncTimer == nil else { return }
+                self.syncStatus.textColor = problem == nil ? .secondaryLabelColor : .systemOrange
+                self.syncStatus.stringValue = L.text(problem == nil ? "Mutagen stopped — no local agent needs synchronization" : "Mutagen stopped — unsynchronized changes remain in the local copy")
+                self.syncStatus.toolTip = problem
+                self.syncStatus.isHidden = false
+            }
+        }
+    }
+    private func checkSync() {
+        guard !closed,!checkingSync,let mapping else { return }; checkingSync = true
+        let service = syncService
+        Self.syncQueue.async { [weak self] in
+            let result = Result { try service.snapshot(mapping) }
+            DispatchQueue.main.async {
+                guard let self,!self.closed else { return }; self.checkingSync = false
+                guard self.syncTimer != nil else { return }
+                switch result {
+                case .success(let state):
+                    self.conflictPaths = state.conflictPaths; self.reviewConflicts.isHidden = state.conflictPaths.isEmpty
+                    self.syncStatus.textColor = state.conflicts > 0 || state.problem != nil ? .systemOrange : (state.ready ? .systemGreen : .secondaryLabelColor)
+                    self.syncStatus.stringValue = state.conflicts > 0 ? L.format("Mutagen: %d conflicts — changes need review",state.conflicts) : (state.problem ?? L.text(state.ready ? "Mutagen: synchronized" : "Mutagen: synchronizing or reconnecting…"))
+                    self.syncStatus.toolTip = L.text("Changes synchronize in both directions. Conflicts require review. Build and test commands still run locally unless explicitly sent over SSH.")
+                    if !state.conflictPaths.isEmpty { self.syncStatus.stringValue += " · "+state.conflictPaths.prefix(3).joined(separator:", "); self.syncStatus.toolTip = state.conflictPaths.joined(separator:"\n") }
+                case .failure(let error): self.syncStatus.textColor = .systemOrange; self.syncStatus.stringValue = error.localizedDescription
+                }
+                self.syncStatus.isHidden = false
+            }
+        }
+    }
+    @objc private func showSyncConflicts() {
+        if conflictPaths.count == 1 { reviewConflict(conflictPaths[0]); return }
+        let menu = NSMenu()
+        for path in conflictPaths {
+            let item = NSMenuItem(title:path.isEmpty ? L.text("Project root") : path,action:#selector(openSyncConflict(_:)),keyEquivalent:"")
+            item.target = self; item.representedObject = path; menu.addItem(item)
+        }
+        menu.popUp(positioning:nil,at:NSPoint(x:0,y:reviewConflicts.bounds.height),in:reviewConflicts)
+    }
+    @objc private func openSyncConflict(_ item: NSMenuItem) { if let path = item.representedObject as? String { reviewConflict(path) } }
+    func reviewConflict(_ path: String) {
+        guard let mapping,let remote,!path.isEmpty,!path.hasPrefix("/") else { return }
+        let local = URL(fileURLWithPath:mapping.localRoot).appendingPathComponent(path).standardizedFileURL.path
+        guard let target = mapping.remotePath(for:local) else { return }
+        onOpenFile?(local,nil,nil); onOpenFile?(target,remote,nil)
+    }
     func sizeChanged(source: LocalProcessTerminalView,newCols: Int,newRows: Int) {}
     func setTerminalTitle(source: LocalProcessTerminalView,title: String) {
         guard let runtime = runtimes.first(where:{ $0.terminal === source }),!title.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,runtime.title != String(title.prefix(160)) else { return }
@@ -436,7 +526,7 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
     }
     func processTerminated(source: TerminalView,exitCode: Int32?) {
         guard let runtime = runtimes.first(where:{ $0.terminal === source }) else { return }
-        runtime.exitCode = exitCode ?? -1; updateRuntimeControls()
+        runtime.exitCode = exitCode ?? -1; updateRuntimeControls(); stopIdleSync()
     }
 }
 

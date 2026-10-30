@@ -13,13 +13,13 @@ final class AgentRuntime {
     let context: Context
     let sessionID: String?
     let remote: SSHRemote?
-    let mapping: AgentPathMapping?
+    let mapping: AgentSyncMapping?
     let terminal: LocalProcessTerminalView
     let links: AgentTerminalDelegate
     var directory: String
     var title: String
     var exitCode: Int32?
-    init(context: Context,session: AgentSession?,directory: String,remote: SSHRemote?,mapping: AgentPathMapping?,terminal: LocalProcessTerminalView) {
+    init(context: Context,session: AgentSession?,directory: String,remote: SSHRemote?,mapping: AgentSyncMapping?,terminal: LocalProcessTerminalView) {
         self.context = context; sessionID = session?.id; self.directory = directory; self.remote = remote; self.mapping = mapping
         title = session?.title ?? L.text("New Session"); self.terminal = terminal
         links = AgentTerminalDelegate(terminal); terminal.terminalDelegate = links

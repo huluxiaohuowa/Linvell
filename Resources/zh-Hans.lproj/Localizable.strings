@@ -926,18 +926,13 @@
 "New Session" = "新建会话";
 "Resume Session" = "继续会话";
 "Choose CLI…" = "选择 CLI…";
-"Mount SSH Folder…" = "挂载 SSH 目录…";
-"Choose Mount…" = "选择挂载目录…";
 "Project agent sessions" = "项目 Agent 会话";
 "Sessions come from the selected machine and agent home. Shared CLI/desktop sessions can resume; cloud-only sessions need the provider’s handoff. Context is restored by the agent itself." = "会话来自所选机器和 Agent 主目录。CLI 与桌面版共享的会话可以继续；仅存于云端的会话需要通过服务商转交。上下文由 Agent 自行恢复。";
-"Mount the SSH project to use a local agent." = "挂载 SSH 项目后即可使用本机 Agent。";
 "Loading agent sessions…" = "正在加载 Agent 会话…";
 "%d project sessions" = "%d 个项目会话";
 "Choose the agent executable or its desktop application." = "选择 Agent 可执行文件或其桌面程序。";
 "No supported CLI was found in this app. Choose its CLI executable directly." = "此程序中未找到支持的 CLI，请直接选择 CLI 可执行文件。";
 "Choose an executable CLI file." = "请选择可执行的 CLI 文件。";
-"Choose the SSHFS mount of this remote project." = "请选择此远程项目的 SSHFS 挂载目录。";
-"Connecting project mount…" = "正在连接项目挂载…";
 "Stop this agent session?" = "停止此 Agent 会话？";
 "The running CLI will stop. Saved sessions remain in the agent’s own storage." = "将停止正在运行的 CLI，已保存的会话仍保留在 Agent 自己的存储中。";
 
@@ -967,26 +962,35 @@
 
 "Choose an agent CLI in Agent Settings, then create a session." = "请先在 Agent 设置中选择 CLI，再新建会话。";
 
-"Mount required" = "需要挂载远程目录";
 
-"Local agents need SSHFS and compatible macOS filesystem support to access this SSH project. Running an agent on the SSH host does not require them." = "本机 Agent 访问此 SSH 项目，需要 SSHFS 及兼容的 macOS 文件系统支持；在 SSH 主机上运行 Agent 则不需要。";
 
-"Install the prerequisites, follow any system authorization or restart prompts, then recheck and connect the project mount." = "安装所需组件后，按系统提示完成授权或重启，再点击“重新检测安装”并连接项目挂载。";
 
 "Copy Homebrew Install Command" = "复制 Homebrew 安装命令";
 
-"Open macFUSE Installation Guide" = "打开 macFUSE 安装指引";
 
 "Recheck Installation" = "重新检测安装";
 
-"SSHFS: not found" = "SSHFS：未找到";
 
-"SSHFS: installed" = "SSHFS：已安装";
 
-"macFUSE: installation detected" = "macFUSE：已检测到安装";
 
-"macFUSE: installation not detected" = "macFUSE：未检测到安装";
 
 "Connect Project" = "连接项目";
 
 "Connect this SSH project before starting a local agent." = "启动本机 Agent 前，请先连接此 SSH 项目。";
+"Mutagen is optional. Install it only to let a local agent edit this SSH project through a synchronized local copy. Agents running on the SSH host do not need it." = "Mutagen 是可选依赖。仅当需要本机 Agent 通过同步副本开发此 SSH 项目时安装；在 SSH 主机上运行 Agent 不需要安装。";
+"No filesystem driver or startup security change is required. Linvell manages its own synchronization process without registering a login item. Changes synchronize both ways; conflicts require review. Build and test commands need SSH to run remotely." = "无需文件系统驱动或修改启动安全设置。Linvell 按需管理同步进程，不注册开机启动项。文件双向同步，冲突需处理；编译和测试命令需要通过 SSH 在远程运行。";
+"Mutagen Documentation" = "Mutagen 文档";
+"Connect with Mutagen" = "使用 Mutagen 连接";
+"✓ Mutagen installed — local agents can edit remote code" = "✓ 已安装 Mutagen — 可使用本机 Agent 修改远程代码";
+"Mutagen not installed — optional for local agents on SSH projects" = "未安装 Mutagen — 仅本机 Agent 开发远程项目时需要";
+"Synchronization required" = "需要同步远程项目";
+"Connect with Mutagen to use a local agent on this SSH project." = "使用 Mutagen 连接后，即可通过本机 Agent 开发此 SSH 项目。";
+"Synchronizing SSH project…" = "正在同步 SSH 项目…";
+"Mutagen stopped — no local agent needs synchronization" = "Mutagen 已停止 — 当前无本机 Agent 需要同步";
+"Mutagen stopped — unsynchronized changes remain in the local copy" = "Mutagen 已停止 — 本机副本中仍有未同步的改动";
+"Mutagen: %d conflicts — changes need review" = "Mutagen：%d 处冲突 — 需要处理";
+"Mutagen: synchronized" = "Mutagen：已同步";
+"Mutagen: synchronizing or reconnecting…" = "Mutagen：正在同步或重连…";
+"Changes synchronize in both directions. Conflicts require review. Build and test commands still run locally unless explicitly sent over SSH." = "文件双向同步，冲突需要处理。编译和测试命令默认仍在本机运行，需要明确通过 SSH 执行远程命令。";
+"Review Sync Conflicts…" = "查看同步冲突…";
+"Project root" = "项目根目录";

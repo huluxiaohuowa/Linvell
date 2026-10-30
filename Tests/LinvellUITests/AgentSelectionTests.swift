@@ -49,8 +49,8 @@ final class AgentSelectionTests: XCTestCase {
         } }
         let previous = keys.map { UserDefaults.standard.object(forKey:$0) }
         defer { view.shutdown(); for (key,value) in zip(keys,previous) { UserDefaults.standard.set(value,forKey:key) }; try? FileManager.default.removeItem(at:root) }
-        // Existing local runtimes can be reattached even when their old mount is
-        // absent. New local creation still follows the real mount prerequisite.
+        // Existing local runtimes can be reattached even when their old sync connection is
+        // absent. New local creation still follows the real synchronization prerequisite.
         for kind in kinds {
             for ssh in [false,true] {
                 let cli = ssh ? remoteRoot+"/fixture-running-agent" : "/bin/cat"
@@ -94,6 +94,19 @@ final class AgentSelectionTests: XCTestCase {
 }
 
 extension AgentSelectionTests {
+    func testConflictReviewOpensBothVersionsInCurrentWorkspaceAndRejectsEscapes() throws {
+        _ = NSApplication.shared
+        let view = AgentWorkspace(project:"/remote/project",remote:try SSHRemote(host:"fixture-review"),autoLoad:false)
+        defer { view.shutdown() }
+        view.mapping = AgentSyncMapping(host:"fixture-review",remoteRoot:"/remote/project",localRoot:"/private/local-replica")
+        var opened: [(String,String?)] = []
+        view.onOpenFile = { path,remote,_ in opened.append((path,remote?.host)) }
+        view.reviewConflict("src/file.swift")
+        XCTAssertEqual(opened.map(\.0),["/private/local-replica/src/file.swift","/remote/project/src/file.swift"])
+        XCTAssertNil(opened[0].1); XCTAssertEqual(opened[1].1,"fixture-review")
+        view.reviewConflict("../../outside"); view.reviewConflict("/absolute"); view.reviewConflict("")
+        XCTAssertEqual(opened.count,2)
+    }
     func testLocalSSHSetupHasVisibleInstallInstructionsAndActionableNewSession() throws {
         _ = NSApplication.shared
         let view = AgentWorkspace(project:"/remote/setup-project",remote:try SSHRemote(host:"fixture-setup-host"),autoLoad:false)
@@ -101,9 +114,9 @@ extension AgentSelectionTests {
         view.location.selectedSegment = 0; view.selectionChanged()
         view.path.stringValue = "/bin/cat"
         XCTAssertTrue(view.newSession.isEnabled)
-        XCTAssertFalse(view.mountGuide.isHidden)
-        XCTAssertTrue(view.mountGuide.isDescendant(of:view.terminalHost))
-        XCTAssertFalse(view.mount.isHidden); XCTAssertFalse(view.chooseMount.isHidden)
+        XCTAssertFalse(view.syncGuide.isHidden)
+        XCTAssertTrue(view.syncGuide.isDescendant(of:view.terminalHost))
+        XCTAssertFalse(view.connectSync.isHidden)
         let preview = NSView(frame:NSRect(x:0,y:0,width:1280,height:860))
         view.frame = NSRect(x:320,y:0,width:960,height:860)
         view.configurationView.frame = NSRect(x:0,y:0,width:320,height:860)
@@ -113,25 +126,38 @@ extension AgentSelectionTests {
         window.contentView = preview; window.setFrameOrigin(NSPoint(x:-10000,y:-10000)); window.orderFrontRegardless()
         defer { window.close() }
         preview.layoutSubtreeIfNeeded(); window.displayIfNeeded()
-        XCTAssertTrue(view.bounds.contains(view.mountGuide.convert(view.mountGuide.bounds,to:view)))
+        XCTAssertTrue(view.bounds.contains(view.syncGuide.convert(view.syncGuide.bounds,to:view)))
         let bitmap = try XCTUnwrap(preview.bitmapImageRepForCachingDisplay(in:preview.bounds))
         preview.cacheDisplay(in:preview.bounds,to:bitmap)
         let artifactRoot = URL(fileURLWithPath:ProcessInfo.processInfo.environment["LINVELL_UI_ARTIFACT_DIR"] ?? (NSHomeDirectory()+"/dev/build/linvell/agent-ui"))
         try FileManager.default.createDirectory(at:artifactRoot,withIntermediateDirectories:true)
         let png = try XCTUnwrap(bitmap.representation(using:.png,properties:[:]))
         try png.write(to:artifactRoot.appendingPathComponent("agent-install-guide.png"))
-        XCTAssertEqual(AgentMountSupport.installCommand,"brew install --cask sshfs-mac")
-        XCTAssertEqual(AgentMountSupport.installationGuide.host,"github.com")
-        XCTAssertTrue(view.mountGuide.instructions.isEnabled); XCTAssertTrue(view.mountGuide.copy.isEnabled)
-        view.mountGuide.recheck.performClick(nil)
-        XCTAssertTrue(view.mountGuide.availability.stringValue.contains("SSHFS"))
-        if AgentMountSupport.detect().sshfs == nil {
+        let supportRoot = artifactRoot.appendingPathComponent("mutagen-support-"+UUID().uuidString)
+        try FileManager.default.createDirectory(at:supportRoot,withIntermediateDirectories:true)
+        defer { try? FileManager.default.removeItem(at:supportRoot) }
+        let cli = supportRoot.appendingPathComponent("mutagen")
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to:cli)
+        try FileManager.default.setAttributes([.posixPermissions:0o700],ofItemAtPath:cli.path)
+        view.syncGuide.update(support:AgentSyncSupport.detect(environment:["PATH":supportRoot.path]))
+        XCTAssertEqual(view.syncGuide.availability.textColor,NSColor.systemGreen)
+        XCTAssertTrue(view.syncGuide.availability.stringValue.contains("local agents can edit remote code"))
+        XCTAssertTrue(view.syncGuide.command.isHidden); XCTAssertTrue(view.syncGuide.copy.isHidden)
+        view.syncGuide.update(support:AgentSyncSupport.detect(environment:["PATH":""]))
+        XCTAssertFalse(view.syncGuide.command.isHidden); XCTAssertFalse(view.syncGuide.copy.isHidden)
+        XCTAssertNotEqual(view.syncGuide.availability.textColor,NSColor.systemGreen)
+        XCTAssertEqual(AgentSyncSupport.installCommand,"brew install mutagen-io/mutagen/mutagen")
+        XCTAssertEqual(AgentSyncSupport.installationGuide.host,"mutagen.io")
+        XCTAssertTrue(view.syncGuide.instructions.isEnabled); XCTAssertTrue(view.syncGuide.copy.isEnabled)
+        view.syncGuide.recheck.performClick(nil)
+        XCTAssertTrue(view.syncGuide.availability.stringValue.contains("Mutagen"))
+        if AgentSyncSupport.detect().executable == nil {
             view.newSession.performClick(nil)
             let deadline = Date().addingTimeInterval(3)
             while !view.newSession.isEnabled,Date() < deadline { pump(0.02) }
             XCTAssertTrue(view.newSession.isEnabled)
             XCTAssertNil(view.terminal); XCTAssertTrue(view.runtimes.isEmpty)
-            XCTAssertTrue(view.status.stringValue.contains("SSHFS"),"Missing installation must be explained instead of a silent disabled button.")
+            XCTAssertTrue(view.status.stringValue.contains("Mutagen"),"Missing installation must be explained instead of a silent disabled button.")
         }
     }
 }
