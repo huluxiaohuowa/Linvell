@@ -18,6 +18,7 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
     private(set) var runtimes: [AgentRuntime] = []
     private(set) var activeRuntime: AgentRuntime?
     let project: String
+    var isolatesProject = false
     let remote: SSHRemote?
     let kindPicker = NSPopUpButton(),installationsPicker = NSPopUpButton()
     let location = NSSegmentedControl(labels:[L.text("This Mac"),L.text("SSH Host")],trackingMode:.selectOne,target:nil,action:nil)
@@ -70,6 +71,7 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
 
     init(project: String,remote: SSHRemote?,autoLoad: Bool = true,syncService: AgentSyncService = .shared) {
         self.project = project; self.remote = remote; self.syncService = syncService
+        isolatesProject = remote == nil && AgentTaskStore().task(at:project) != nil
         super.init(frame:NSRect(x:0,y:0,width:800,height:600))
         wantsLayer = true; layer?.backgroundColor = Theme.canvas.cgColor
         appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua)
@@ -280,7 +282,7 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         guard !rebuildingRows else { return }; rebuildingRows = true; defer { rebuildingRows = false }
         let selectedID = id ?? (filtered.indices.contains(table.selectedRow) ? filtered[table.selectedRow].id : nil)
         let query = search.stringValue
-        var entries = sessions; runtimeRows = [:]
+        var entries = sessions.filter { !isolatesProject || $0.cwd == project }; runtimeRows = [:]
         for runtime in runtimes where channel(of:runtime) == selectedChannel {
             let key = runtime.sessionID ?? "linvell-open:"+runtime.id.uuidString
             if runtimeRows[key] != nil,runtime !== activeRuntime { continue }
@@ -359,6 +361,9 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
     }
     func start(session: AgentSession?) { start(session:session,synchronized:false) }
     private func start(session: AgentSession?,synchronized: Bool) {
+        guard !isolatesProject || session == nil || session?.cwd == project else {
+            status.stringValue = L.text("Open the session's own task workspace to resume it."); return
+        }
         if let session,let existing = runtimeRows[session.id],existing.terminal.process.running || existing.sessionID == nil { activate(existing); return }
         if let session,let existing = matchingRuntime(session) { activate(existing); return }
         if kind == .dsh,let startingDSH { activate(startingDSH); return }

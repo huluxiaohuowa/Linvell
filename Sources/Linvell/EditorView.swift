@@ -52,6 +52,7 @@ final class EditorTextView: NSTextView {
     }
     var codeDismiss: (() -> Void)?
     var codeAction: ((String,Int?) -> Void)?
+    var reviewAction: (() -> Void)?
     var completionKey: ((NSEvent) -> Bool)?
     var codeHoverDismiss: (() -> Void)?
     var hoverGeneration = UUID()
@@ -184,8 +185,10 @@ final class EditorTextView: NSTextView {
         for (title,selector) in [("Go to Definition",#selector(codeDefinition)),("Find All References",#selector(codeReferences)),("Rename Symbol…",#selector(codeRename))] {
             let item = NSMenuItem(title:L.text(title),action:selector,keyEquivalent:""); item.target = self; menu.addItem(item)
         }
+        let review = NSMenuItem(title:L.text("Add Review Comment…"),action:#selector(addReviewComment),keyEquivalent:""); review.target = self; menu.addItem(review)
         return menu
     }
+    @objc func addReviewComment() { reviewAction?() }
     @objc private func codeDefinition() { codeAction?("definition",nil) }
     @objc private func codeReferences() { codeAction?("references",nil) }
     @objc private func codeRename() { codeAction?("rename",nil) }

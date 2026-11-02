@@ -11,6 +11,9 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate {
     var changes: [GitChange] = [],commits: [GitCommit] = []
     var graph: [GitGraphRow] = []
     var onOpen: ((URL) -> Void)?
+    var onReview: ((ReviewComment) -> Void)?
+    private var reviewChange: GitChange?
+    private var reviewStaged = false
     var onOpenRepository: ((GitRepository) -> Void)?
     let pages = NSView()
     var mainPage: NSView?
@@ -46,7 +49,8 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate {
         let refresh = button("Refresh",#selector(reload)),stage = button("Stage",#selector(stageSelected)),unstage = button("Unstage",#selector(unstageSelected)),commit = button("Commit",#selector(commitStaged)),open = button("Open File",#selector(openSelected))
         let branches = button("Branches…",#selector(branches)),fetch = button("Fetch",#selector(fetch)),pull = button("Pull",#selector(pull)),push = button("Push",#selector(push))
         let bar = Theme.stack([Theme.label("Source Control",size:20,weight:.semibold),NSView(),refresh],spacing:12)
-        let operations = Theme.stack([side,stage,unstage,open,NSView()],spacing:8)
+        let review = button("Add Review Comment…",#selector(addReviewComment))
+        let operations = Theme.stack([side,stage,unstage,open,review,NSView()],spacing:8)
         let network = Theme.stack([caption,NSView(),fetch,pull,push],spacing:8)
         let commitBar = Theme.stack([message,commit],spacing:12)
         changesControls = operations; commitControls = commitBar
@@ -210,6 +214,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate {
         }
     }
     @objc func selectionChanged() {
+        reviewChange = nil
         guard mode.selectedSegment < 2 else { return }
         let row = table.selectedRow,history = mode.selectedSegment == 1
         guard row >= 0,row < (history ? commits.count : changes.count) else { return }
@@ -241,12 +246,18 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate {
                     else if line.hasPrefix("@@") { rendered.addAttribute(.foregroundColor,value:Theme.accent,range:range) }
                 }
                 self.diff.textStorage?.setAttributedString(rendered)
+                self.reviewChange = change; self.reviewStaged = staged
                 self.diff.minSize = self.diff.enclosingScrollView?.contentSize ?? .zero
                 self.diff.sizeToFit(); self.diff.scrollRangeToVisible(NSRange(location:0,length:0))
             }
         }
     }
     private var selectedChange: GitChange? { mode.selectedSegment == 0 && changes.indices.contains(table.selectedRow) ? changes[table.selectedRow] : nil }
+    @objc func addReviewComment() {
+        guard mode.selectedSegment == 0,let change = reviewChange else { return }
+        do { onReview?(try ReviewComment.diff(path:change.path,originalPath:change.originalPath,text:diff.string,range:diff.selectedRange(),staged:reviewStaged,untracked:change.index == "?")) }
+        catch { caption.stringValue = L.text(error.localizedDescription) }
+    }
     @objc private func applySelectedHunk() {
         guard hunks.indices.contains(hunkPicker.indexOfSelectedItem) else { return }
         let hunk = hunks[hunkPicker.indexOfSelectedItem],repo = repository,unstage = side.selectedSegment == 1

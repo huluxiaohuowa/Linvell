@@ -73,6 +73,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     var agentWorkspace: AgentWorkspace?
     var agentWorkspaces: [AgentWorkspace] = []
     var agentFileMonitor: AgentFileMonitor?
+    var reviewPanel: ReviewCommentsPanel?
     var recoveryTimer: Timer?
     var commandPanel: NSPanel?
     let recovery: RecoveryStore
@@ -136,7 +137,8 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
             Theme.button("folder.badge.plus",help:"Open Folder…",target:self,action:#selector(openFolder)),
             Theme.button("rectangle.split.2x1",help:"Split Editor",target:self,action:#selector(toggleSplit)),
             Theme.button("terminal",help:"Toggle Terminal",target:self,action:#selector(toggleTerminal)),
-            Theme.button("sparkles",help:"Agents",target:self,action:#selector(showAgents))
+            Theme.button("sparkles",help:"Agents",target:self,action:#selector(showAgents)),
+            Theme.button("square.stack.3d.up",help:"Task Workspaces…",target:self,action:#selector(showAgentTasks))
         ])
         heading.translatesAutoresizingMaskIntoConstraints = false; header.addSubview(heading)
         command.widthAnchor.constraint(equalTo:header.widthAnchor,multiplier:0.35).isActive = true
@@ -295,6 +297,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
             if let remote = repository.remote { self?.openRemote(url.path,connection:remote) }
             else { self?.open(url) }
         }
+        git.onReview = { [weak self] comment in self?.composeReview(comment) }
         git.onOpenRepository = { [weak self] repo in
             guard let self else { return }
             if let remote = repo.remote {
@@ -378,6 +381,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         remoteConnection = nil; remoteBrowser = nil
         if pluginWorkspace?.identityKey != PluginWorkspace(root:url.path).identityKey { stopPlugins(); resetLanguageServices() }
         root = FileNode(url.resolvingSymlinksInPath()); syncManagedPlugins(); projectTitle.stringValue = url.lastPathComponent
+        if let task = AgentTaskStore().task(at:root!.url.path) { projectTitle.stringValue = task.title }
         outline.reloadData(); UserDefaults.standard.set(url.path,forKey:"lastProject")
         WorkspaceSession.save(.local(path:url.path))
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
@@ -448,6 +452,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         pane.onChange = { [weak self] in self?.updateStatus(); self?.updateTabTitles() }
         pane.onTextChanged = { [weak self] in self?.markdownView?.render(document.buffer.text); self?.scheduleAutoSave(document); self?.languageDocumentChanged(document); self?.synchronizePluginDocuments() }
         pane.textView.exCommand = { [weak self] prefix in self?.showEx(prefix) }
+        pane.textView.reviewAction = { [weak self,weak pane] in if let pane { self?.addEditorReview(pane) } }
         configureLanguageEditor(pane)
         panes.append(pane); return pane
     }
@@ -805,6 +810,9 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         var options: [PickerOption] = []
         for (title,selector) in [("New File",#selector(newFile)),("Open Folder…",#selector(openFolder)),("Connect to SSH Host…",#selector(connectSSH)),("Go to Definition",#selector(definitionCommand)),("Find All References",#selector(findReferences)),("Rename Symbol…",#selector(renameSymbol)),("Language Tools…",#selector(showLanguageTools)),("Go Back",#selector(goBack)),("Go Forward",#selector(goForward)),("Source Control",#selector(gitWorkspace)),("Git Commit Graph",#selector(gitWorkspace)),("Run & Preview",#selector(runWorkspace)),("Find in File",#selector(find)),("Toggle Vim Mode",#selector(toggleVim)),("Split Editor",#selector(toggleSplit)),("Toggle Terminal",#selector(toggleTerminal)),("Agents",#selector(showAgents)),("Increase Font Size",#selector(increaseFont)),("Decrease Font Size",#selector(decreaseFont))] {
             options.append(PickerOption(title:title,detail:"Linvell command",invoke:{ [weak self] in self?.perform(selector) }))
+        }
+        for (title,action) in [("New Task Workspace…",#selector(newAgentTask)),("Task Workspaces…",#selector(showAgentTasks)),("Add Review Comment…",#selector(addCurrentReview)),("Review Comments…",#selector(showReviewComments))] {
+            options.append(PickerOption(title:L.text(title),detail:"Linvell",invoke:{ [weak self] in self?.perform(action) }))
         }
         options.append(PickerOption(title:L.text("Preferences: Theme and Font"),detail:"Appearance",invoke:{ [weak self] in self?.showSettings() }))
         options.append(PickerOption(title:L.text("Load Development Plugin…"),detail:"Linvell",invoke:{ [weak self] in self?.loadDevelopmentPlugin() }))

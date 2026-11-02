@@ -56,6 +56,12 @@ Linvell 0.2.3 and later include [native plugin installation and management](docs
 
 Linvell 0.2.0 includes the P1–P5 plugin APIs: an independent Swift process SDK, document events, commands/menus/shortcuts, versioned edits, layered configuration/state, native views and resources, LSP/task/DAP programs, logs and SSH workspace execution. Start with [the bilingual plugin guide](https://linvell.fuluwa.top/plugins.html), [`Examples/HelloPlugin`](Examples/HelloPlugin) or [`Examples/ToolPlugin`](Examples/ToolPlugin). Code plugins have the user account’s OS access; manifest permissions gate editor APIs, not a security sandbox. See [P4/P5 verification and limits](docs/verification/plugins-p4-p5.md). The standalone SDK is `Sources/LinvellPluginKit`; Linux builds produce plugin programs, while Linvell remains a macOS app.
 
+## Task workspaces and agent review
+
+Create an isolated task branch/worktree from **Project → New Task Workspace…**. Each task opens its own native window with files, terminals and agents in the task directory. Add review comments to selected code or working/staged diffs, then preview and paste the collected feedback into a chosen agent as an unsubmitted draft. See [task and review usage](docs/AGENT_CLI.md#task-workspaces-and-review-comments--任务工作区与审查批注0211).
+
+通过 **项目 → 新建任务工作区…** 创建独立分支与 worktree；任务窗口中的文件、终端与 Agent 使用同一目录。可对代码或未暂存／已暂存 diff 添加审查批注，汇总预览后粘贴给指定 Agent，作为待提交草稿。
+
 ## Remote development, running and Git
 
 Linvell includes [existing agent CLI integration](docs/AGENT_CLI.md) for Codex, OpenCode, Pi, Claude Code and DeepSeek Harness, with concurrent sessions, live provider switching, native terminal resume, in-workspace file/image opening, SSH execution, and local-agent access to SSH projects through optional, user-installed Mutagen synchronization. Shared desktop/CLI stores are supported; cloud-only sessions need the provider's handoff. No agent runtime is bundled.
