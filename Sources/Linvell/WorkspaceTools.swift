@@ -27,14 +27,24 @@ struct PickerOption {
     let title: String
     let detail: String
     let fileURL: URL?
+    let reorderID: String?
     let invoke: () -> Void
-    init(title: String,detail: String,fileURL: URL? = nil,invoke: @escaping () -> Void) { self.title = title; self.detail = detail; self.fileURL = fileURL; self.invoke = invoke }
+    init(title: String,detail: String,fileURL: URL? = nil,reorderID: String? = nil,invoke: @escaping () -> Void) { self.title = title; self.detail = detail; self.fileURL = fileURL; self.reorderID = reorderID; self.invoke = invoke }
 }
 
 final class QuickPicker: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
     let input = NSSearchField()
     let table = ResponsiveTableView()
-    let options: [PickerOption]
+    private(set) var options: [PickerOption]
+    private let reorderType = NSPasteboard.PasteboardType("com.linvell.repository-order")
+    var onReorder: (([String]) -> Void)? {
+        didSet {
+            if onReorder != nil {
+                table.registerForDraggedTypes([reorderType])
+                table.setDraggingSourceOperationMask(.move,forLocal:true)
+            }
+        }
+    }
     var onDismiss: (() -> Void)?
     var onQuery: ((String,@escaping ([PickerOption]) -> Void) -> Void)? { didSet { controlTextDidChange(Notification(name:NSControl.textDidChangeNotification)) } }
     private var queryWork: DispatchWorkItem?
@@ -67,6 +77,36 @@ final class QuickPicker: NSWindowController, NSTableViewDataSource, NSTableViewD
         let stack = NSStackView(views:[title,detail]); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 3
         if let url = result.fileURL { return Theme.stack([FileIcon.view(for:url),stack],spacing:10) }
         return stack
+    }
+    func tableView(_ tableView: NSTableView,pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
+        guard onReorder != nil,input.stringValue.isEmpty,results.indices.contains(row),let id = results[row].reorderID else { return nil }
+        let item = NSPasteboardItem()
+        item.setString(id,forType:reorderType)
+        return item
+    }
+    func tableView(_ tableView: NSTableView,validateDrop info: NSDraggingInfo,proposedRow row: Int,
+                   proposedDropOperation operation: NSTableView.DropOperation) -> NSDragOperation {
+        guard onReorder != nil,input.stringValue.isEmpty,info.draggingSource as? NSTableView === table,
+              row > 0,row <= results.count,
+              (row == results.count || results[row].reorderID != nil),
+              results[row-1].reorderID != nil || row < results.count else { return [] }
+        table.setDropRow(row,dropOperation:.above)
+        return .move
+    }
+    func tableView(_ tableView: NSTableView,acceptDrop info: NSDraggingInfo,row: Int,
+                   dropOperation: NSTableView.DropOperation) -> Bool {
+        guard let id = info.draggingPasteboard.string(forType:reorderType),row >= 0,row <= results.count else { return false }
+        return moveRepository(id,before:row < results.count ? results[row].reorderID : nil)
+    }
+    func moveRepository(_ id: String,before target: String?) -> Bool {
+        guard onReorder != nil,let source = options.firstIndex(where:{ $0.reorderID == id }) else { return false }
+        if target == id { return true }
+        let option = options.remove(at:source)
+        let destination = target.flatMap { id in options.firstIndex(where:{ $0.reorderID == id }) } ?? options.count
+        options.insert(option,at:min(destination,options.count))
+        onReorder?(options.compactMap(\.reorderID))
+        controlTextDidChange(Notification(name:NSControl.textDidChangeNotification))
+        return true
     }
     func controlTextDidChange(_ notification: Notification) {
         let query = input.stringValue

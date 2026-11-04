@@ -114,6 +114,8 @@ final class GitLayoutTests: XCTestCase {
         XCTAssertEqual(view.mode.selectedSegment,0)
         waitForDiff("+working content")
         XCTAssertEqual(view.table.numberOfRows,2)
+        XCTAssertEqual(view.otherChanges.numberOfRows,1)
+        XCTAssertFalse(view.otherChanges.isHiddenOrHasHiddenAncestor)
         view.side.selectedSegment = 1
         view.side.sendAction(view.side.action,to:view.side.target)
         waitForDiff("+staged content")
@@ -152,5 +154,50 @@ final class GitLayoutTests: XCTestCase {
         XCTAssertEqual(view.table.numberOfRows,1)
         let cell = try XCTUnwrap(view.tableView(view.table,viewFor:view.table.tableColumns.first,row:0))
         XCTAssertTrue(cell.accessibilityLabel()?.contains("Saved subject") == true)
+    }
+    func testWrapAndCommitSnippetsAreAvailableFromGitControls() throws {
+        _ = NSApplication.shared
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+        defer { try? FileManager.default.removeItem(at:root) }
+        let repo = GitRepository(root:root)
+        _ = try repo.run(["init","-b","main"])
+        let defaults = UserDefaults.standard
+        let oldWrap = defaults.object(forKey:"git.wrapDiff"),oldSnippets = defaults.object(forKey:"git.commitSnippets")
+        defer { defaults.set(oldWrap,forKey:"git.wrapDiff"); defaults.set(oldSnippets,forKey:"git.commitSnippets") }
+        defaults.set(false,forKey:"git.wrapDiff")
+        defaults.set(["Review ready"],forKey:"git.commitSnippets")
+        let view = GitWorkspace(repository:repo)
+        let window = NSWindow(contentRect:NSRect(x:0,y:0,width:1200,height:700),styleMask:[.titled],backing:.buffered,defer:false)
+        window.contentView = view
+        defer { view.gitPicker?.dismiss(); window.orderOut(nil); window.contentView = nil }
+        func button(_ view: NSView,title: String) -> NSButton? {
+            if let button = view as? NSButton,button.title == L.text(title) { return button }
+            return view.subviews.lazy.compactMap { button($0,title:title) }.first
+        }
+        let wrap = try XCTUnwrap(button(view,title:"Wrap Lines"))
+        wrap.sendAction(wrap.action,to:wrap.target)
+        XCTAssertTrue(view.diff.textContainer?.widthTracksTextView == true)
+        XCTAssertFalse(view.diff.enclosingScrollView?.hasHorizontalScroller == true)
+
+        view.browseTools()
+        let tools = try XCTUnwrap(view.gitPicker)
+        let snippets = try XCTUnwrap(tools.options.first { $0.title == L.text("Commit Snippets…") })
+        tools.dismiss()
+        snippets.invoke()
+        let picker = try XCTUnwrap(view.gitPicker)
+        let insert = try XCTUnwrap(picker.options.first { $0.title == "Review ready" })
+        picker.dismiss()
+        insert.invoke()
+        XCTAssertEqual(view.message.stringValue,"Review ready")
+    }
+    func testInlineHighlightUsesUTF16OffsetsWithoutChangingPatch() throws {
+        let source = "@@ -1 +1 @@\n-let café = 12\n+let café = 13\n"
+        let patch = NSMutableAttributedString(string:source)
+        InlineDiff.highlight(patch,removed:.systemRed,added:.systemGreen)
+        XCTAssertEqual(patch.string,source)
+        let range = (source as NSString).range(of:"13")
+        XCTAssertNotNil(patch.attribute(.backgroundColor,at:NSMaxRange(range)-1,effectiveRange:nil))
+        XCTAssertNil(patch.attribute(.backgroundColor,at:(source as NSString).range(of:"café").location,effectiveRange:nil))
     }
 }

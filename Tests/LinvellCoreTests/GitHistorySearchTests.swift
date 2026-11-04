@@ -42,4 +42,21 @@ final class GitHistorySearchTests: XCTestCase {
         XCTAssertTrue(Set(first.commits.map(\.hash)).isDisjoint(with:next.commits.map(\.hash)))
         XCTAssertThrowsError(try repo.searchHistory("unused",isCancelled:{ true }))
     }
+    func testIndexReusesBatchesAcrossQueriesOnSSHTransport() throws {
+        let remote = try SSHRemote(host:"git-fixture.invalid")
+        var calls = 0
+        let repo = GitRepository(directory:"/fixture/repo",remote:remote) { directory,args,input,_ in
+            XCTAssertEqual(directory,"/fixture/repo")
+            XCTAssertEqual(args.first,"log")
+            XCTAssertTrue(args.contains("--all"))
+            XCTAssertNil(input)
+            calls += 1
+            let hash = String(repeating:"a",count:40)
+            return [hash,"","Fixture","fixture@example.invalid","2026-11-04","Subject","","Searchable body",""].joined(separator:"\0")
+        }
+        let index = GitHistoryIndex()
+        XCTAssertEqual(try repo.searchHistory("searchable",index:index).commits.count,1)
+        XCTAssertEqual(try repo.searchHistory("fixture@example",index:index).commits.count,1)
+        XCTAssertEqual(calls,1)
+    }
 }

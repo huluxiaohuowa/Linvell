@@ -31,6 +31,17 @@ final class GitSplitDiff: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    func setWrap(_ wrap: Bool) {
+        for (text,scroll) in [(oldText,oldScroll),(newText,newScroll)] {
+            text.isHorizontallyResizable = !wrap
+            text.autoresizingMask = wrap ? .width : []
+            text.textContainer?.widthTracksTextView = wrap
+            text.textContainer?.containerSize = NSSize(width:wrap ? max(1,scroll.contentSize.width-16) : 100000,height:CGFloat.greatestFiniteMagnitude)
+            if wrap { text.setFrameSize(NSSize(width:scroll.contentSize.width,height:text.frame.height)) }
+            scroll.hasHorizontalScroller = !wrap
+        }
+    }
+
     func render(_ patch: NSAttributedString) {
         let left = NSMutableAttributedString(),right = NSMutableAttributedString()
         var removed: [NSRange] = [],added: [NSRange] = []

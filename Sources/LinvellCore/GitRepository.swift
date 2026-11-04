@@ -76,10 +76,23 @@ public struct GitRepository {
         if path.hasSuffix("\n") { path.removeLast() }
         var resolved = self; resolved.directory = path; return resolved
     }
+    public var journalScope: String { (remote?.host ?? "local")+"\0"+directory }
     public func run(_ arguments: [String],timeout: TimeInterval = 30,input: Data? = nil) throws -> String {
-        if let executor { return try executor(directory,arguments,input,timeout) }
+        let started = Date()
+        var succeeded = false
+        let safeCommands: Set<String> = ["add","branch","checkout","clone","commit","diff","fetch","log","merge","pull","push","restore","show","stash","status","switch","tag","worktree"]
+        let command = arguments.first.flatMap { safeCommands.contains($0) ? $0 : nil } ?? "operation"
+        defer {
+            GitCommandJournal.shared.append(.init(date:started,command:command,elapsed:Date().timeIntervalSince(started),succeeded:succeeded),scope:journalScope)
+        }
+        if let executor {
+            let value = try executor(directory,arguments,input,timeout)
+            succeeded = true
+            return value
+        }
         let result = try ToolCommand.run(URL(fileURLWithPath:"/usr/bin/git"),arguments:Self.arguments(directory:directory,arguments:arguments),directory:root,timeout:timeout,input:input,trimOutput:false,maximumOutputBytes:16*1024*1024)
         guard result.succeeded else { throw GitError.command(result.timedOut ? "Git operation timed out." : result.output) }
+        succeeded = true
         return result.output
     }
     static func arguments(directory: String,arguments: [String]) -> [String] {
@@ -186,10 +199,11 @@ public struct GitRepository {
             .trimmingCharacters(in:.whitespacesAndNewlines)
     }
 
-    public func history(allRefs: Bool = true,limit: Int = 150,offset: Int = 0,includeMessage: Bool = false) throws -> [GitCommit] {
+    public func history(allRefs: Bool = true,limit: Int = 150,offset: Int = 0,includeMessage: Bool = false,path: String? = nil) throws -> [GitCommit] {
         let scope = allRefs ? ["--all"] : ["HEAD"]
         let format = "%H%x00%P%x00%an%x00%ae%x00%ad%x00%s%x00%D%x00"+(includeMessage ? "%B%x00" : "")
-        let text = try run(["log","-n",String(limit),"--skip="+String(offset)]+scope+["--topo-order","--date=iso-strict","--format="+format])
+        let paths = try path.map { ["--",try checked($0)] } ?? []
+        let text = try run(["log","-n",String(limit),"--skip="+String(offset)]+scope+["--topo-order","--date=iso-strict","--format="+format]+paths)
         let fields = includeMessage ? 8 : 7
         let parts = text.split(separator:"\0",omittingEmptySubsequences:false).map(String.init)
         return stride(from:0,to:max(0,parts.count-fields),by:fields).compactMap { i in
@@ -198,8 +212,8 @@ public struct GitRepository {
             return GitCommit(hash:hash,parents:parts[i+1].split(separator:" ").map(String.init),author:parts[i+2],email:parts[i+3],date:parts[i+4],subject:parts[i+5],message:includeMessage ? parts[i+7] : parts[i+5],refs:parts[i+6])
         }
     }
-    public func commitDiff(_ hash: String) throws -> String {
+    public func commitDiff(_ hash: String,path: String? = nil) throws -> String {
         guard [40,64].contains(hash.count),hash.allSatisfy(\.isHexDigit) else { throw GitError.invalidPath }
-        return try run(["show","--first-parent","--format=","--stat","--patch","--no-ext-diff","--no-textconv",hash,"--"])
+        return try run(["show","--first-parent","--format=","--stat","--patch","--no-ext-diff","--no-textconv",hash,"--"] + (try path.map { [try checked($0)] } ?? []))
     }
 }

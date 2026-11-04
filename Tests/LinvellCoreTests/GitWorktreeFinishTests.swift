@@ -63,6 +63,7 @@ final class GitWorktreeFinishTests: XCTestCase {
         let pending = try XCTUnwrap(repo.finishWorktree(entry,into:"integration"))
         XCTAssertEqual(try pending.conflicts().map(\.path),["shared.txt"])
         XCTAssertThrowsError(try pending.complete())
+        XCTAssertThrowsError(try pending.markResolved("shared.txt"))
         let versions = try pending.versions("shared.txt")
         XCTAssertEqual(versions.current,"current\n")
         XCTAssertEqual(versions.incoming,"incoming\n")
@@ -80,5 +81,30 @@ final class GitWorktreeFinishTests: XCTestCase {
         XCTAssertEqual(try repo.run(["rev-parse","refs/heads/feature"]),sourceHead)
         XCTAssertFalse(FileManager.default.fileExists(atPath:sourcePath.path))
         XCTAssertEqual(try target.run(["rev-list","--parents","-1","HEAD"]).split(whereSeparator:\.isWhitespace).count,3)
+    }
+    func testMergedCleanupRechecksHeadAndKeepsIgnoredFiles() throws {
+        let fixture = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let root = fixture.appendingPathComponent("repo")
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+        defer { try? FileManager.default.removeItem(at:fixture) }
+        let repo = GitRepository(root:root)
+        _ = try repo.run(["init","-b","main"])
+        _ = try repo.run(["config","user.name","Fixture"])
+        _ = try repo.run(["config","user.email","fixture@example.invalid"])
+        _ = try repo.run(["config","commit.gpgsign","false"])
+        try "local.cache\n".write(to:root.appendingPathComponent(".gitignore"),atomically:true,encoding:.utf8)
+        _ = try repo.run(["add",".gitignore"]); try repo.commit("Initial")
+        let cleanPath = fixture.appendingPathComponent("clean")
+        let ignoredPath = fixture.appendingPathComponent("ignored")
+        _ = try repo.run(["worktree","add","-b","clean","--",cleanPath.path])
+        _ = try repo.run(["worktree","add","-b","ignored","--",ignoredPath.path])
+        try "fixture\n".write(to:ignoredPath.appendingPathComponent("local.cache"),atomically:true,encoding:.utf8)
+        let candidates = try repo.mergedWorktrees(into:"main")
+        XCTAssertEqual(candidates.map(\.branch),["clean"])
+        let entry = try XCTUnwrap(candidates.first)
+        XCTAssertThrowsError(try repo.removeMergedWorktree(entry,into:"main",expectedHead:"invalid"))
+        try repo.removeMergedWorktree(entry,into:"main",expectedHead:repo.worktreeHead(entry))
+        XCTAssertFalse(FileManager.default.fileExists(atPath:cleanPath.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath:ignoredPath.appendingPathComponent("local.cache").path))
     }
 }

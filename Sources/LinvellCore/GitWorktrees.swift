@@ -117,6 +117,13 @@ public struct GitWorktreeMerge {
         guard try conflicts().contains(where:{ $0.path == path }) else {
             throw GitError.command("This file no longer has a merge conflict.")
         }
+        let diff = try destination.run(["diff","--ours","--no-ext-diff","--no-textconv","--",path])
+        let hasMarkers = diff.split(whereSeparator:\.isNewline).contains { line in
+            guard line.hasPrefix("+") else { return false }
+            let content = line.dropFirst()
+            return content.hasPrefix("<<<<<<< ") || content.hasPrefix(">>>>>>> ") || content == "======="
+        }
+        guard !hasMarkers else { throw GitError.command("Remove conflict markers before marking this file resolved.") }
         _ = try destination.run(["add","--",path])
     }
 
@@ -127,7 +134,7 @@ public struct GitWorktreeMerge {
 
     public func complete() throws {
         try requirePending()
-        guard try conflicts().isEmpty else { throw GitError.command("Resolve all conflicts before continuing.") }
+        guard try conflicts().isEmpty,try destination.run(["diff","--name-only","-z"]).isEmpty else { throw GitError.command("Resolve all conflicts before continuing.") }
         _ = try destination.run(["-c","core.editor=true","merge","--continue"],timeout:120)
         try removeSource()
     }
@@ -152,4 +159,37 @@ public struct GitWorktreeMerge {
     private func requirePending() throws {
         guard pending else { throw GitError.command("The pending merge no longer matches this worktree.") }
     }
+}
+
+extension GitRepository {
+    public func worktreeState(_ entry: GitWorktreeEntry) throws -> String {
+        let repo = atWorktree(entry.path)
+        let changes = try repo.changes()
+        if changes.contains(where:\.conflicted) { return "Conflicts" }
+        if ["MERGE_HEAD","REBASE_HEAD","CHERRY_PICK_HEAD","REVERT_HEAD","BISECT_HEAD"].contains(where:{ (try? repo.revision($0)) != nil }) { return "In Progress" }
+        if !changes.isEmpty { return "Uncommitted Changes" }
+        return "Clean"
+    }
+
+    public func mergedWorktrees(into target: String) throws -> [GitWorktreeEntry] {
+        let ref = "refs/heads/"+target
+        _ = try revision(ref)
+        return try worktrees().dropFirst().filter { entry in
+            guard entry.path != directory,entry.branch != target,!entry.branch.isEmpty,!entry.locked,!entry.prunable else { return false }
+            let source = atWorktree(entry.path)
+            guard let head = try? source.revision("HEAD"),
+                  (try? source.run(["status","--porcelain=v1","--untracked-files=all","--ignored=matching"])) == "" else { return false }
+            return (try? run(["merge-base","--is-ancestor",head,ref])) != nil
+        }
+    }
+
+    public func removeMergedWorktree(_ entry: GitWorktreeEntry,into target: String,expectedHead: String) throws {
+        guard try mergedWorktrees(into:target).contains(where:{ $0.path == entry.path && $0.branch == entry.branch }),
+              try atWorktree(entry.path).revision("HEAD") == expectedHead else {
+            throw GitError.command("This worktree changed after the cleanup preview.")
+        }
+        _ = try run(["worktree","remove","--",entry.path],timeout:60)
+    }
+
+    public func worktreeHead(_ entry: GitWorktreeEntry) throws -> String { try atWorktree(entry.path).revision("HEAD") }
 }
