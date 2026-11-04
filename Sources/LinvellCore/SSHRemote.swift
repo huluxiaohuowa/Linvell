@@ -92,10 +92,11 @@ public struct SSHRemote {
     public func transportArguments(command: String) -> [String] {
         ["-T","-o","BatchMode=yes","-o","ConnectTimeout=10","-o","ServerAliveInterval=10","-o","ServerAliveCountMax=2"]+Self.multiplexOptions+["--",host,command]
     }
-    public func request(_ operation: String,path: String,content: Data? = nil,digest: String? = nil) throws -> RemoteReply {
+    public func request(_ operation: String,path: String,content: Data? = nil,digest: String? = nil,repositoryRoot: String? = nil) throws -> RemoteReply {
         var request: [String:String] = ["operation":operation,"path":path]
         if let content { request["content"] = content.base64EncodedString() }
         if let digest { request["digest"] = digest }
+        if let repositoryRoot { request["repositoryRoot"] = repositoryRoot }
         let result = try ToolCommand.run(URL(fileURLWithPath:"/usr/bin/ssh"),arguments:transportArguments(command:"python3 -c "+Self.quote(Self.agent)),directory:nil,timeout:45,input:try JSONSerialization.data(withJSONObject:request),maximumOutputBytes:32*1024*1024)
         guard result.succeeded else { throw GitError.command(result.timedOut ? "SSH operation timed out." : result.output) }
         guard let line = result.output.components(separatedBy:.newlines).last(where:{ $0.hasPrefix("LINVELL_JSON:") }) else { throw GitError.command("The remote host needs Python 3 to browse and edit files. Open its SSH terminal to check authentication and Python availability.") }
@@ -262,6 +263,14 @@ try:
     elif op=='create':
         with open(path,'xb') as f: pass
         reply=dict(path=path,digest=digest(b''))
+    elif op=='review-read':
+        root=os.path.realpath(req['repositoryRoot'])
+        resolved=os.path.realpath(path)
+        if os.path.commonpath([root,resolved])!=root or os.path.islink(path) or not os.path.isfile(resolved):
+            raise ValueError('The Git path is invalid.')
+        with open(resolved,'rb') as f: data=f.read(1024*1024+1)
+        if len(data)>1024*1024: raise ValueError('File too large for a preview.')
+        reply=dict(path=resolved,content=base64.b64encode(data).decode())
     elif op=='read':
         path=os.path.realpath(path)
         if os.path.getsize(path)>16*1024*1024: raise ValueError('Remote editor limit: 16 MiB per file.')

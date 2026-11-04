@@ -3,12 +3,14 @@ import Foundation
 /// Session diagnostics omit arguments and output, which may contain credentials or file contents.
 public final class GitCommandJournal: @unchecked Sendable {
     public struct Entry {
+        public let operation: UUID?
         public let date: Date
         public let command: String
         public let elapsed: TimeInterval
         public let succeeded: Bool
     }
 
+    @TaskLocal public static var operation: UUID?
     public static let shared = GitCommandJournal()
     private let lock = NSLock()
     private var records: [String:[Entry]] = [:]

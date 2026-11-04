@@ -136,6 +136,11 @@ extension WorkspaceController {
     @objc func showGitReferences() { withGitWorkspace { $0.browseReferences() } }
     @objc func showGitWorktrees() { withGitWorkspace { $0.browseWorktrees() } }
     @objc func showGitTools() { withGitWorkspace { $0.browseTools() } }
+    @objc func reviewRepositoryFiles() { withGitWorkspace { $0.openRepositoryReview() } }
+    @objc func reviewGitChanges() { withGitWorkspace { $0.openChangesReview() } }
+    @objc func showGitJournal() { withGitWorkspace { $0.openGitJournal() } }
+    @objc func fetchGitRepository() { withGitWorkspace { $0.fetchRepository() } }
+    @objc func openGitSettings() { withGitWorkspace { $0.showGitSettings() } }
     @objc func jumpToGitHead() { withGitWorkspace { $0.jumpToHead() } }
 
 

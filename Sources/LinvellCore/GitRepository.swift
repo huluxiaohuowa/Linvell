@@ -83,7 +83,7 @@ public struct GitRepository {
         let safeCommands: Set<String> = ["add","branch","checkout","clone","commit","diff","fetch","log","merge","pull","push","restore","show","stash","status","switch","tag","worktree"]
         let command = arguments.first.flatMap { safeCommands.contains($0) ? $0 : nil } ?? "operation"
         defer {
-            GitCommandJournal.shared.append(.init(date:started,command:command,elapsed:Date().timeIntervalSince(started),succeeded:succeeded),scope:journalScope)
+            GitCommandJournal.shared.append(.init(operation:GitCommandJournal.operation,date:started,command:command,elapsed:Date().timeIntervalSince(started),succeeded:succeeded),scope:journalScope)
         }
         if let executor {
             let value = try executor(directory,arguments,input,timeout)
@@ -116,7 +116,7 @@ public struct GitRepository {
         }
         return changes
     }
-    private func checked(_ path: String) throws -> String {
+    func checked(_ path: String) throws -> String {
         guard !path.isEmpty,!path.hasPrefix("/"),!path.utf8.contains(0),!path.components(separatedBy:"/").contains("..") else { throw GitError.invalidPath }
         return path
     }

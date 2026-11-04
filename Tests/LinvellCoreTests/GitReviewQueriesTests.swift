@@ -38,4 +38,24 @@ final class GitReviewQueriesTests: XCTestCase {
         XCTAssertFalse(diff.contains("other.txt"))
         XCTAssertEqual(GitCommandJournal.shared.entries(for:repo.journalScope).first?.command,"show")
     }
+    func testReviewPreviewAndFailedJournalEntry() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+        defer { try? FileManager.default.removeItem(at:root) }
+        let repo = GitRepository(root:root)
+        _ = try repo.run(["init","-b","main"])
+        let file = root.appendingPathComponent("file.txt")
+        try "source preview\n".write(to:file,atomically:true,encoding:.utf8)
+        try FileManager.default.createSymbolicLink(at:root.appendingPathComponent("link"),withDestinationURL:file)
+        XCTAssertEqual(try repo.reviewFiles(),["file.txt","link"])
+        XCTAssertEqual(try repo.workingFilePreview("file.txt"),"source preview\n")
+        XCTAssertThrowsError(try repo.workingFilePreview("link"))
+        XCTAssertThrowsError(try repo.workingFilePreview("../file.txt"))
+        let operation = UUID()
+        XCTAssertThrowsError(try GitCommandJournal.$operation.withValue(operation) { try repo.run(["show","missing"]) })
+        let entry = try XCTUnwrap(GitCommandJournal.shared.entries(for:repo.journalScope).first)
+        XCTAssertEqual(entry.operation,operation)
+        XCTAssertEqual(entry.command,"show")
+        XCTAssertFalse(entry.succeeded)
+    }
 }

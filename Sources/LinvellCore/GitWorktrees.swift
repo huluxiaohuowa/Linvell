@@ -171,24 +171,76 @@ extension GitRepository {
         return "Clean"
     }
 
-    public func mergedWorktrees(into target: String) throws -> [GitWorktreeEntry] {
+    public struct CleanupCandidate {
+        public let entry: GitWorktreeEntry
+        public let head: String
+        public let ignored: [String]
+        public let ancestor: Bool
+    }
+
+    public func cleanupCandidates(into target: String) throws -> [CleanupCandidate] {
         let ref = "refs/heads/"+target
-        _ = try revision(ref)
-        return try worktrees().dropFirst().filter { entry in
-            guard entry.path != directory,entry.branch != target,!entry.branch.isEmpty,!entry.locked,!entry.prunable else { return false }
+        let targetHead = try revision(ref)
+        return try worktrees().dropFirst().compactMap { entry in
+            guard entry.path != directory,entry.branch != target,!entry.branch.isEmpty,!entry.locked,!entry.prunable else { return nil }
             let source = atWorktree(entry.path)
             guard let head = try? source.revision("HEAD"),
-                  (try? source.run(["status","--porcelain=v1","--untracked-files=all","--ignored=matching"])) == "" else { return false }
-            return (try? run(["merge-base","--is-ancestor",head,ref])) != nil
+                  (try? source.worktreeState(entry)) == "Clean",
+                  let ignored = try? source.run(["ls-files","-z","--others","--ignored","--exclude-standard"]) else { return nil }
+            let ancestor = (try? run(["merge-base","--is-ancestor",head,targetHead])) != nil
+            guard ancestor || contentMerged(head,into:targetHead) else { return nil }
+            return CleanupCandidate(entry:entry,head:head,ignored:ignored.split(separator:"\0").map(String.init),ancestor:ancestor)
         }
     }
 
+    // Adapted from FoldGit WorktreeIntegrationCheck.contentMerged, copyright (c) 2026 dufu, MIT.
+    private func contentMerged(_ head: String,into target: String) -> Bool {
+        guard let merged = try? run(["merge-tree","--write-tree","--no-messages",target,head]),
+              let tree = try? revision(target+"^{tree}") else { return false }
+        return merged.trimmingCharacters(in:.whitespacesAndNewlines) == tree
+    }
+
+    public func mergedWorktrees(into target: String) throws -> [GitWorktreeEntry] {
+        try cleanupCandidates(into:target).filter { $0.ignored.isEmpty }.map(\.entry)
+    }
+
     public func removeMergedWorktree(_ entry: GitWorktreeEntry,into target: String,expectedHead: String) throws {
-        guard try mergedWorktrees(into:target).contains(where:{ $0.path == entry.path && $0.branch == entry.branch }),
-              try atWorktree(entry.path).revision("HEAD") == expectedHead else {
+        guard let candidate = try cleanupCandidates(into:target).first(where:{
+            $0.entry.path == entry.path && $0.entry.branch == entry.branch && $0.head == expectedHead && $0.ignored.isEmpty
+        }) else { throw GitError.command("This worktree changed after the cleanup preview.") }
+        try removeCleanupCandidate(candidate,into:target,deleteBranch:false)
+    }
+
+    public func removeCleanupCandidate(_ candidate: CleanupCandidate,into target: String,deleteBranch: Bool) throws {
+        guard let live = try cleanupCandidates(into:target).first(where:{
+            $0.entry.path == candidate.entry.path && $0.entry.branch == candidate.entry.branch && $0.head == candidate.head
+        }),Set(live.ignored).isSubset(of:Set(candidate.ignored)) else {
             throw GitError.command("This worktree changed after the cleanup preview.")
         }
-        _ = try run(["worktree","remove","--",entry.path],timeout:60)
+        _ = try run(["worktree","remove","--",live.entry.path],timeout:60)
+        if deleteBranch,live.ancestor,
+           (try? revision("refs/heads/"+live.entry.branch)) == live.head,
+           (try? run(["merge-base","--is-ancestor",live.head,"refs/heads/"+target])) != nil {
+            // Git checks the merged state and any other checkout. Never force branch deletion.
+            _ = try run(["branch","-d","--",live.entry.branch])
+        }
+    }
+
+    public func worktreeDetail(_ entry: GitWorktreeEntry,against target: String) throws -> String {
+        let repo = atWorktree(entry.path)
+        let changes = try repo.changes()
+        let staged = changes.filter(\.staged).count
+        let unstaged = changes.filter { $0.unstaged && $0.index != "?" }.count
+        let untracked = changes.filter { $0.index == "?" }.count
+        let conflicts = changes.filter(\.conflicted).count
+        var counts: [String] = ["Staged: \(staged)","Unstaged: \(unstaged)","Untracked: \(untracked)","Conflicts: \(conflicts)"]
+        let comparison = target.isEmpty ? nil : try? repo.run(["rev-list","--left-right","--count","refs/heads/"+target+"...HEAD"])
+        let sides = comparison?.split(whereSeparator:\.isWhitespace) ?? []
+        if sides.count == 2 {
+            counts.append("Ahead: "+String(sides[1]))
+            counts.append("Behind: "+String(sides[0]))
+        }
+        return counts.joined(separator:" · ")
     }
 
     public func worktreeHead(_ entry: GitWorktreeEntry) throws -> String { try atWorktree(entry.path).revision("HEAD") }

@@ -266,6 +266,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item(git,"Branches and Tags",#selector(WorkspaceController.showGitReferences),route:true)
         item(git,"Worktrees",#selector(WorkspaceController.showGitWorktrees),route:true)
         item(git,"Jump to HEAD",#selector(WorkspaceController.jumpToGitHead),"h",[.command,.option,.shift],route:true)
+        item(git,"Repository Review…",#selector(WorkspaceController.reviewRepositoryFiles),"r",[.command,.option],route:true)
+        item(git,"Review Changed Files…",#selector(WorkspaceController.reviewGitChanges),"d",[.command,.option],route:true)
+        item(git,"Git Command Log…",#selector(WorkspaceController.showGitJournal),"l",[.command,.option],route:true)
+        item(git,"Fetch",#selector(WorkspaceController.fetchGitRepository),"f",[.command,.option],route:true)
+        item(git,"Git Settings…",#selector(WorkspaceController.openGitSettings),route:true)
         item(git,"Git Tools…",#selector(WorkspaceController.showGitTools),route:true)
         let win = menu("Window"); NSApp.windowsMenu = win
         item(win,"Minimize",#selector(NSWindow.performMiniaturize(_:)),"m")

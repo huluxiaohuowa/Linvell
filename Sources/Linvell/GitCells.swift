@@ -45,7 +45,12 @@ final class GitHistoryCell: NSTableCellView {
         super.init(frame:.zero); clipsToBounds = true
         let graph = row.map { GitGraphView($0) as NSView } ?? NSView()
         let title = Theme.label(commit.subject,size:13,weight:.medium)
-        let detail = Theme.label(String(commit.hash.prefix(8))+" · "+commit.author+" · "+String(commit.date.prefix(10))+(commit.refs.isEmpty ? "" : " · "+commit.refs),size:11,color:Theme.secondary)
+        var date = String(commit.date.prefix(10))
+        if UserDefaults.standard.bool(forKey:"git.relativeCommitTimes"),
+           let timestamp = ISO8601DateFormatter().date(from:commit.date) {
+            date = RelativeDateTimeFormatter().localizedString(for:timestamp,relativeTo:Date())
+        }
+        let detail = Theme.label(String(commit.hash.prefix(8))+" · "+commit.author+" · "+date+(commit.refs.isEmpty ? "" : " · "+commit.refs),size:11,color:Theme.secondary)
         for label in [title,detail] { label.maximumNumberOfLines = 1; label.usesSingleLineMode = true; label.lineBreakMode = .byTruncatingTail }
         for view in [graph,title,detail] { view.translatesAutoresizingMaskIntoConstraints = false; addSubview(view) }
         NSLayoutConstraint.activate([

@@ -30,3 +30,36 @@ extension GitRepository {
         }
     }
 }
+
+extension GitRepository {
+    public func reviewFiles() throws -> [String] {
+        let output = try run(["ls-files","-z","--cached","--others","--exclude-standard"])
+        return Set(output.split(separator:"\0").map(String.init)).sorted()
+    }
+
+    public func workingFilePreview(_ path: String) throws -> String {
+        let file = root.appendingPathComponent(try checked(path))
+        let data: Data
+        if let remote {
+            let reply = try remote.request("review-read",path:file.path,repositoryRoot:directory)
+            guard let encoded = reply.content,let decoded = Data(base64Encoded:encoded) else {
+                throw GitError.command("The remote response is incomplete.")
+            }
+            data = decoded
+        } else {
+            let values = try file.resourceValues(forKeys:[.isRegularFileKey,.isSymbolicLinkKey])
+            guard values.isRegularFile == true,values.isSymbolicLink != true,
+                  file.resolvingSymlinksInPath().path.hasPrefix(root.resolvingSymlinksInPath().path+"/") else {
+                throw GitError.invalidPath
+            }
+            let handle = try FileHandle(forReadingFrom:file)
+            defer { try? handle.close() }
+            data = try handle.read(upToCount:1_048_577) ?? Data()
+        }
+        guard data.count <= 1_048_576 else { throw GitError.command("File too large for a preview.") }
+        guard !data.contains(0),let text = String(data:data,encoding:.utf8) else {
+            throw GitError.command("Binary file")
+        }
+        return text
+    }
+}
