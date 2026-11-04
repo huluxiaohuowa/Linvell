@@ -314,6 +314,24 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
                 self.openTaskWorkspace(path)?.gitWorkspace()
             }
         }
+        git.onOpenMergeFile = { [weak self] destination,path in
+            guard let self else { return }
+            let file = destination.root.appendingPathComponent(path)
+            if let remote = destination.remote {
+                if self.remoteConnection?.host == remote.host,self.remoteDirectory == destination.directory {
+                    self.openRemote(file.path,connection:remote)
+                } else if let target = (NSApp.delegate as? AppDelegate)?.newWorkspace() {
+                    target.connectToSSH(remote.host,folder:destination.directory)
+                    if target.remoteConnection?.host == remote.host,target.remoteDirectory == destination.directory {
+                        target.openRemote(file.path,connection:remote)
+                    }
+                }
+            } else if self.root?.url.path == destination.directory {
+                self.open(file)
+            } else {
+                self.openTaskWorkspace(destination.directory)?.open(file)
+            }
+        }
         git.onCanRemoveWorktree = { path in
             let open = (NSApp.delegate as? AppDelegate)?.workspaces.contains { workspace in
                 if let host = repository.remote?.host {
@@ -730,7 +748,10 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         terminal.installColors(colors.map { value in SwiftTerm.Color(red:UInt16((value>>16)&255)*257,green:UInt16((value>>8)&255)*257,blue:UInt16(value&255)*257) })
     }
 
-    @objc func find() { activePane?.textView.performFindPanelAction(menuItem(tag:Int(NSFindPanelAction.showFindPanel.rawValue))) }
+    @objc func find() {
+        if let git = gitWorkspaceView,editors.arrangedSubviews.first === git { git.focusHistorySearch() }
+        else { activePane?.textView.performFindPanelAction(menuItem(tag:Int(NSFindPanelAction.showFindPanel.rawValue))) }
+    }
     private func menuItem(tag: Int) -> NSMenuItem { let item = NSMenuItem(); item.tag = tag; return item }
     @objc func selectNextOccurrence() {
         guard let v = activePane?.textView else { return }

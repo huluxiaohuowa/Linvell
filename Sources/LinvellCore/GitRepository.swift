@@ -17,6 +17,7 @@ public struct GitCommit {
     public let email: String
     public let date: String
     public let subject: String
+    public let message: String
     public let refs: String
 }
 public struct GitHunk {
@@ -59,6 +60,12 @@ public struct GitRepository {
         executor = { try remote.git($1,directory:$0,input:$2,timeout:$3) }
     }
     init(directory: String,remote: SSHRemote?,executor: @escaping Executor) { self.directory = directory; self.remote = remote; self.executor = executor }
+    func atWorktree(_ path: String) -> GitRepository {
+        var copy = self
+        copy.directory = path
+        return copy
+    }
+
     public func childRepository(_ path: String) throws -> GitRepository {
         let path = try checked(path)
         guard path != ".",!path.split(separator:"/").contains(".git") else { throw GitError.invalidPath }
@@ -132,6 +139,17 @@ public struct GitRepository {
         if (try? run(["rev-parse","--verify","HEAD"])) != nil { _ = try run(["restore","--staged","--"]+paths) }
         else { _ = try run(["rm","--cached","--ignore-unmatch","--"]+paths) }
     }
+    public func unstageAll() throws {
+        guard try !changes().contains(where:\.conflicted) else {
+            throw GitError.command("Resolve all conflicts before unstaging.")
+        }
+        if (try? run(["rev-parse","--verify","HEAD"])) != nil {
+            _ = try run(["restore","--staged","--","."])
+        } else {
+            _ = try run(["read-tree","--empty"])
+        }
+    }
+
     public func commit(_ message: String) throws {
         guard !message.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { throw GitError.emptyMessage }
         _ = try run(["commit","-m",message],timeout:120)
@@ -168,14 +186,16 @@ public struct GitRepository {
             .trimmingCharacters(in:.whitespacesAndNewlines)
     }
 
-    public func history(allRefs: Bool = true,limit: Int = 150) throws -> [GitCommit] {
+    public func history(allRefs: Bool = true,limit: Int = 150,offset: Int = 0,includeMessage: Bool = false) throws -> [GitCommit] {
         let scope = allRefs ? ["--all"] : ["HEAD"]
-        let text = try run(["log","-n",String(limit)]+scope+["--topo-order","--date=iso-strict","--format=%H%x00%P%x00%an%x00%ae%x00%ad%x00%s%x00%D%x00"])
+        let format = "%H%x00%P%x00%an%x00%ae%x00%ad%x00%s%x00%D%x00"+(includeMessage ? "%B%x00" : "")
+        let text = try run(["log","-n",String(limit),"--skip="+String(offset)]+scope+["--topo-order","--date=iso-strict","--format="+format])
+        let fields = includeMessage ? 8 : 7
         let parts = text.split(separator:"\0",omittingEmptySubsequences:false).map(String.init)
-        return stride(from:0,to:max(0,parts.count-7),by:7).compactMap { i in
+        return stride(from:0,to:max(0,parts.count-fields),by:fields).compactMap { i in
             let hash = parts[i].trimmingCharacters(in:.whitespacesAndNewlines)
             guard hash.count == 40 || hash.count == 64 else { return nil }
-            return GitCommit(hash:hash,parents:parts[i+1].split(separator:" ").map(String.init),author:parts[i+2],email:parts[i+3],date:parts[i+4],subject:parts[i+5],refs:parts[i+6])
+            return GitCommit(hash:hash,parents:parts[i+1].split(separator:" ").map(String.init),author:parts[i+2],email:parts[i+3],date:parts[i+4],subject:parts[i+5],message:includeMessage ? parts[i+7] : parts[i+5],refs:parts[i+6])
         }
     }
     public func commitDiff(_ hash: String) throws -> String {

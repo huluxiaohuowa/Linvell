@@ -99,7 +99,7 @@ extension GitWorkspace {
                 options.append(operationOption("Move Worktree",path:entry.path))
                 options.append(operationOption("Remove Clean Worktree",path:entry.path))
                 if !entry.branch.isEmpty {
-                    options.append(PickerOption(title:L.text("Finish Worktree…"),detail:L.text("Fast-forward the current branch and remove the clean worktree")) { [weak self] in self?.finishWorktree(entry) })
+                    options.append(PickerOption(title:L.text("Finish Worktree…"),detail:L.text("Merge into a selected branch and remove the clean worktree")) { [weak self] in self?.finishWorktree(entry) })
                 }
             }
             options.append(operationOption(entry.locked ? "Unlock Worktree" : "Lock Worktree",path:entry.path))

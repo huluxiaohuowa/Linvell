@@ -120,4 +120,37 @@ final class GitLayoutTests: XCTestCase {
         XCTAssertEqual(view.table.numberOfRows,1)
         XCTAssertFalse(view.diff.string.contains("working content"))
     }
+    func testHistorySearchSelectsWholeRepositoryResults() throws {
+        _ = NSApplication.shared
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+        defer { try? FileManager.default.removeItem(at:root) }
+        let repo = GitRepository(root:root)
+        _ = try repo.run(["init","-b","main"])
+        _ = try repo.run(["config","user.name","Fixture"])
+        _ = try repo.run(["config","user.email","fixture@example.invalid"])
+        _ = try repo.run(["config","commit.gpgsign","false"])
+        _ = try repo.run(["commit","--allow-empty","-m","Saved subject","-m","旧版完整说明"])
+        _ = try repo.run(["switch","--orphan","other"])
+        _ = try repo.run(["commit","--allow-empty","-m","Current branch"])
+        let view = GitWorkspace(repository:repo)
+        view.focusHistorySearch()
+        func searchField(in parent: NSView) -> NSSearchField? {
+            if let field = parent as? NSSearchField,
+               field.placeholderString == L.text("Search hash, author, email, message or reference") { return field }
+            return parent.subviews.lazy.compactMap { searchField(in:$0) }.first
+        }
+        let search = try XCTUnwrap(searchField(in:view))
+        for query in ["query to cancel","旧版完整说明"] {
+            search.stringValue = query
+            view.controlTextDidChange(Notification(name:NSControl.textDidChangeNotification,object:search))
+        }
+        let deadline = Date().addingTimeInterval(5)
+        while view.table.numberOfRows != 1,Date() < deadline {
+            RunLoop.current.run(until:Date().addingTimeInterval(0.02))
+        }
+        XCTAssertEqual(view.table.numberOfRows,1)
+        let cell = try XCTUnwrap(view.tableView(view.table,viewFor:view.table.tableColumns.first,row:0))
+        XCTAssertTrue(cell.accessibilityLabel()?.contains("Saved subject") == true)
+    }
 }
