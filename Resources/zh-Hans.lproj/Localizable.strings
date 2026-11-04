@@ -1041,3 +1041,6 @@
 "The review selection is no longer available." = "审查选区已失效。";
 "Select at most 200 lines (64 KB) for one review comment." = "每条审查批注最多选择 200 行（64 KB）。";
 "Open the session's own task workspace to resume it." = "请打开此会话所属的任务工作区，再恢复会话。";
+"No commits yet" = "暂无提交";
+"No staged changes" = "没有已暂存的改动";
+"No working tree changes" = "工作区没有改动";

@@ -1041,3 +1041,6 @@
 "The review selection is no longer available." = "The review selection is no longer available.";
 "Select at most 200 lines (64 KB) for one review comment." = "Select at most 200 lines (64 KB) for one review comment.";
 "Open the session's own task workspace to resume it." = "Open the session's own task workspace to resume it.";
+"No commits yet" = "No commits yet";
+"No staged changes" = "No staged changes";
+"No working tree changes" = "No working tree changes";

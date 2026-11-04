@@ -61,13 +61,55 @@ final class GitLayoutTests: XCTestCase {
         for row in 0..<view.changes.count {
             let cell = try XCTUnwrap(view.table.view(atColumn:0,row:row,makeIfNecessary:true) as? GitFileCell)
             cell.layoutSubtreeIfNeeded()
-            for label in [cell.name,cell.path,cell.badge] { XCTAssertTrue(cell.bounds.contains(label.frame)) }
+            let clip = try XCTUnwrap(view.table.enclosingScrollView?.contentView)
+            for label in [cell.name,cell.path,cell.badge] {
+                XCTAssertTrue(cell.bounds.contains(label.frame))
+                XCTAssertLessThanOrEqual(cell.convert(label.frame,to:clip).maxX,clip.bounds.maxX)
+            }
         }
         if let path = ProcessInfo.processInfo.environment["LINVELL_SNAPSHOT_DIR"] {
             let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in:view.bounds))
             view.cacheDisplay(in:view.bounds,to:bitmap)
             try XCTUnwrap(bitmap.representation(using:.png,properties:[:])).write(to:URL(fileURLWithPath:path).appendingPathComponent("git-changes-"+profile.rawValue+".png"))
         }
+
+        view.side.selectedSegment = 1
+        view.side.sendAction(view.side.action,to:view.side.target)
+        XCTAssertEqual(view.table.numberOfRows,0)
+        XCTAssertTrue(view.diff.string.isEmpty)
+        view.side.selectedSegment = 0
+        view.side.sendAction(view.side.action,to:view.side.target)
+        XCTAssertEqual(view.table.numberOfRows,2)
         }
+    }
+
+    func testPartiallyStagedFileUsesSelectedDiff() throws {
+        _ = NSApplication.shared
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+        defer { try? FileManager.default.removeItem(at:root) }
+        let repo = GitRepository(root:root)
+        _ = try repo.run(["init","-b","main"])
+        let file = root.appendingPathComponent("source.swift")
+        try "staged content\n".write(to:file,atomically:true,encoding:.utf8)
+        try repo.stage(try XCTUnwrap(repo.changes().first))
+        try "working content\n".write(to:file,atomically:true,encoding:.utf8)
+        try "untracked content\n".write(to:root.appendingPathComponent("z.txt"),atomically:true,encoding:.utf8)
+        let view = GitWorkspace(repository:repo)
+        func waitForDiff(_ line: String) {
+            let deadline = Date().addingTimeInterval(5)
+            while !view.diff.string.contains(line),Date() < deadline {
+                RunLoop.current.run(until:Date().addingTimeInterval(0.05))
+            }
+            XCTAssertTrue(view.diff.string.contains(line))
+        }
+        XCTAssertEqual(view.mode.selectedSegment,0)
+        waitForDiff("+working content")
+        XCTAssertEqual(view.table.numberOfRows,2)
+        view.side.selectedSegment = 1
+        view.side.sendAction(view.side.action,to:view.side.target)
+        waitForDiff("+staged content")
+        XCTAssertEqual(view.table.numberOfRows,1)
+        XCTAssertFalse(view.diff.string.contains("working content"))
     }
 }

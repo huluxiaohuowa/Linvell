@@ -5,16 +5,17 @@ final class GitFileCell: NSTableCellView {
     let name = Theme.label("",size:13,weight:.medium)
     let path = Theme.label("",size:11,color:Theme.secondary)
     let badge = NSTextField(labelWithString:"")
-    init(change: GitChange) {
+    init(change: GitChange,staged: Bool = false) {
         super.init(frame:.zero); clipsToBounds = true
         let icon = FileIcon.view(for:URL(fileURLWithPath:change.path))
         name.stringValue = URL(fileURLWithPath:change.path).lastPathComponent; path.stringValue = change.path
+        let code = staged ? change.index : change.worktree
         let status: String,color: NSColor
         if change.conflicted { status = "Conflict"; color = .systemRed }
         else if change.index == "?" { status = "Untracked"; color = .systemTeal }
-        else if change.index == "R" || change.worktree == "R" { status = "Renamed"; color = .systemBlue }
-        else if change.index == "D" || change.worktree == "D" { status = "Deleted"; color = .systemRed }
-        else if change.index == "A" { status = "Added"; color = .systemGreen }
+        else if code == "R" { status = "Renamed"; color = .systemBlue }
+        else if code == "D" { status = "Deleted"; color = .systemRed }
+        else if code == "A" { status = "Added"; color = .systemGreen }
         else { status = "Modified"; color = .systemOrange }
         badge.stringValue = L.text(status); badge.font = .systemFont(ofSize:10,weight:.semibold); badge.textColor = color
         badge.wantsLayer = true; badge.layer?.backgroundColor = color.withAlphaComponent(0.13).cgColor; badge.layer?.cornerRadius = 4

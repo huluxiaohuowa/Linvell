@@ -34,12 +34,27 @@ final class TaskReviewTests: XCTestCase {
         XCTAssertNotEqual(selection.location,NSNotFound); view.diff.setSelectedRange(selection); view.addReviewComment()
         XCTAssertEqual(captured?.lines.first?.new,1); XCTAssertNil(captured?.lines.first?.old)
         XCTAssertEqual(captured?.source,"Index → working tree snapshot"); XCTAssertEqual(captured?.path,"a.swift")
-        _ = try repo.run(["add","."]); view.side.selectedSegment = 1; view.selectionChanged()
-        let stagedDeadline = Date().addingTimeInterval(5)
-        while captured?.source != "HEAD → index snapshot",Date() < stagedDeadline {
-            RunLoop.current.run(until:Date().addingTimeInterval(0.02))
-            view.diff.setSelectedRange((view.diff.string as NSString).range(of:"-original")); view.addReviewComment()
+        func stageAllButton(in parent: NSView) -> NSButton? {
+            if let button = parent as? NSButton,button.title == L.text("Stage All") { return button }
+            return parent.subviews.lazy.compactMap { stageAllButton(in:$0) }.first
         }
+        let stageAll = try XCTUnwrap(stageAllButton(in:view))
+        XCTAssertTrue(stageAll.isEnabled)
+        stageAll.performClick(nil)
+        let refreshDeadline = Date().addingTimeInterval(5)
+        while !view.changes.contains(where:\.staged),Date() < refreshDeadline {
+            RunLoop.current.run(until:Date().addingTimeInterval(0.02))
+        }
+        XCTAssertTrue(view.changes.contains(where:\.staged))
+        XCTAssertEqual(view.table.numberOfRows,0)
+        view.side.selectedSegment = 1; view.side.sendAction(view.side.action,to:view.side.target)
+        let stagedDeadline = Date().addingTimeInterval(5)
+        while !view.diff.string.contains("-original"),Date() < stagedDeadline {
+            RunLoop.current.run(until:Date().addingTimeInterval(0.02))
+        }
+        let stagedSelection = (view.diff.string as NSString).range(of:"-original")
+        XCTAssertNotEqual(stagedSelection.location,NSNotFound)
+        view.diff.setSelectedRange(stagedSelection); view.addReviewComment()
         XCTAssertEqual(captured?.source,"HEAD → index snapshot"); XCTAssertEqual(captured?.lines.first?.old,1); XCTAssertNil(captured?.lines.first?.new)
     }
     func testReviewDraftGoesOnlyToSelectedLiveSessionInExactWorktreeWithoutSubmitting() throws {
