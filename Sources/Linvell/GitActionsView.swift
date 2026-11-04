@@ -46,10 +46,13 @@ final class GitActionsView: NSView, NSTextFieldDelegate, LocalProcessTerminalVie
         output.backgroundColor = Theme.canvas; output.textColor = Theme.foreground
         terminal?.nativeBackgroundColor = Theme.canvas; terminal?.nativeForegroundColor = Theme.foreground
     }
-    func selectOperation(_ title: String,path: String? = nil) {
+    func selectOperation(_ title: String,path: String? = nil,values: [String:String] = [:]) {
         pathHint = path
         if let index = GitOperation.all.firstIndex(where:{ $0.title == title }) { operations.selectItem(at:index); operationChanged() }
-        if let path,let field = fields.first(where:{ $0.0 == "Path" })?.1 { field.stringValue = path; updateArguments() }
+        for (name,field) in fields {
+            if let value = values[name] { field.stringValue = value }
+        }
+        updateArguments()
     }
     @objc func operationChanged() {
         parameters.arrangedSubviews.forEach { $0.removeFromSuperview() }; fields.removeAll()

@@ -297,6 +297,34 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
             if let remote = repository.remote { self?.openRemote(url.path,connection:remote) }
             else { self?.open(url) }
         }
+        git.onRepositories = { [weak self] in self?.browseGitRepositories() }
+        git.onNewTask = { [weak self] in self?.newAgentTask() }
+        git.onOpenTerminal = { [weak self] in
+            guard let self else { return }
+            if self.terminalHost?.isHidden != false { self.toggleTerminal() }
+            else if let terminal = self.terminal { self.window?.makeFirstResponder(terminal) }
+        }
+        git.onOpenWorktree = { [weak self] path in
+            guard let self else { return }
+            if let remote = repository.remote {
+                let target = (NSApp.delegate as? AppDelegate)?.newWorkspace() ?? self
+                target.connectToSSH(remote.host,folder:path)
+                if target.remoteConnection?.host == remote.host,target.remoteDirectory == path { target.gitWorkspace() }
+            } else {
+                self.openTaskWorkspace(path)?.gitWorkspace()
+            }
+        }
+        git.onCanRemoveWorktree = { path in
+            let open = (NSApp.delegate as? AppDelegate)?.workspaces.contains { workspace in
+                if let host = repository.remote?.host {
+                    guard workspace.remoteConnection?.host == host,workspace.remoteDirectory == path else { return false }
+                } else {
+                    guard workspace.remoteConnection == nil,workspace.root?.url.path == path else { return false }
+                }
+                return workspace.window?.isVisible == true || workspace.agentsRunning
+            } ?? false
+            return !open
+        }
         git.onReview = { [weak self] comment in self?.composeReview(comment) }
         git.onOpenRepository = { [weak self] repo in
             guard let self else { return }
@@ -808,7 +836,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     }
     @objc func commandPalette() {
         var options: [PickerOption] = []
-        for (title,selector) in [("New File",#selector(newFile)),("Open Folder…",#selector(openFolder)),("Connect to SSH Host…",#selector(connectSSH)),("Go to Definition",#selector(definitionCommand)),("Find All References",#selector(findReferences)),("Rename Symbol…",#selector(renameSymbol)),("Language Tools…",#selector(showLanguageTools)),("Go Back",#selector(goBack)),("Go Forward",#selector(goForward)),("Source Control",#selector(gitWorkspace)),("Git Commit Graph",#selector(gitWorkspace)),("Run & Preview",#selector(runWorkspace)),("Find in File",#selector(find)),("Toggle Vim Mode",#selector(toggleVim)),("Split Editor",#selector(toggleSplit)),("Toggle Terminal",#selector(toggleTerminal)),("Agents",#selector(showAgents)),("Increase Font Size",#selector(increaseFont)),("Decrease Font Size",#selector(decreaseFont))] {
+        for (title,selector) in [("New File",#selector(newFile)),("Open Folder…",#selector(openFolder)),("Connect to SSH Host…",#selector(connectSSH)),("Go to Definition",#selector(definitionCommand)),("Find All References",#selector(findReferences)),("Rename Symbol…",#selector(renameSymbol)),("Language Tools…",#selector(showLanguageTools)),("Go Back",#selector(goBack)),("Go Forward",#selector(goForward)),("Source Control",#selector(gitWorkspace)),("Git Commit Graph",#selector(showGitCommitGraph)),("Run & Preview",#selector(runWorkspace)),("Find in File",#selector(find)),("Toggle Vim Mode",#selector(toggleVim)),("Split Editor",#selector(toggleSplit)),("Toggle Terminal",#selector(toggleTerminal)),("Agents",#selector(showAgents)),("Increase Font Size",#selector(increaseFont)),("Decrease Font Size",#selector(decreaseFont))] {
             options.append(PickerOption(title:title,detail:"Linvell command",invoke:{ [weak self] in self?.perform(selector) }))
         }
         for (title,action) in [("New Task Workspace…",#selector(newAgentTask)),("Task Workspaces…",#selector(showAgentTasks)),("Add Review Comment…",#selector(addCurrentReview)),("Review Comments…",#selector(showReviewComments))] {

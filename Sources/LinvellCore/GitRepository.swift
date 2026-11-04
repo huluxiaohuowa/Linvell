@@ -14,6 +14,7 @@ public struct GitCommit {
     public let hash: String
     public let parents: [String]
     public let author: String
+    public let email: String
     public let date: String
     public let subject: String
     public let refs: String
@@ -135,13 +136,46 @@ public struct GitRepository {
         guard !message.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { throw GitError.emptyMessage }
         _ = try run(["commit","-m",message],timeout:120)
     }
-    public func history() throws -> [GitCommit] {
-        let text = try run(["log","-n","150","--all","--topo-order","--date=iso-strict","--format=%H%x00%P%x00%an%x00%ad%x00%s%x00%D%x00"])
+    public func commitTemplate() throws -> String {
+        guard let configured = try? run(["config","--path","--get","commit.template"]) else {
+            throw GitError.command("No commit template is configured.")
+        }
+        let path = configured.hasSuffix("\n") ? String(configured.dropLast()) : configured
+        guard !path.isEmpty else { throw GitError.command("No commit template is configured.") }
+        let url = path.hasPrefix("/") ? URL(fileURLWithPath:path) : root.appendingPathComponent(path)
+        let data: Data
+        if let remote {
+            let reply = try remote.request("read",path:url.path)
+            guard let content = reply.content,let decoded = Data(base64Encoded:content) else {
+                throw GitError.command("The remote response is incomplete.")
+            }
+            data = decoded
+        } else {
+            let values = try url.resourceValues(forKeys:[.isRegularFileKey,.fileSizeKey])
+            guard values.isRegularFile == true,(values.fileSize ?? 0) <= 65_536 else {
+                throw GitError.command("The commit template must be a regular file no larger than 64 KiB.")
+            }
+            let handle = try FileHandle(forReadingFrom:url)
+            defer { try? handle.close() }
+            data = try handle.read(upToCount:65_537) ?? Data()
+        }
+        guard data.count <= 65_536,!data.contains(0),let text = String(data:data,encoding:.utf8) else {
+            throw GitError.command("The commit template must be UTF-8 and no larger than 64 KiB.")
+        }
+        let comment = (try? run(["config","--get","core.commentChar"]))?.trimmingCharacters(in:.newlines) ?? "#"
+        let prefix = comment.count == 1 ? comment : "#"
+        return text.components(separatedBy:.newlines).filter { !$0.hasPrefix(prefix) }.joined(separator:"\n")
+            .trimmingCharacters(in:.whitespacesAndNewlines)
+    }
+
+    public func history(allRefs: Bool = true,limit: Int = 150) throws -> [GitCommit] {
+        let scope = allRefs ? ["--all"] : ["HEAD"]
+        let text = try run(["log","-n",String(limit)]+scope+["--topo-order","--date=iso-strict","--format=%H%x00%P%x00%an%x00%ae%x00%ad%x00%s%x00%D%x00"])
         let parts = text.split(separator:"\0",omittingEmptySubsequences:false).map(String.init)
-        return stride(from:0,to:max(0,parts.count-6),by:6).compactMap { i in
+        return stride(from:0,to:max(0,parts.count-7),by:7).compactMap { i in
             let hash = parts[i].trimmingCharacters(in:.whitespacesAndNewlines)
             guard hash.count == 40 || hash.count == 64 else { return nil }
-            return GitCommit(hash:hash,parents:parts[i+1].split(separator:" ").map(String.init),author:parts[i+2],date:parts[i+3],subject:parts[i+4],refs:parts[i+5])
+            return GitCommit(hash:hash,parents:parts[i+1].split(separator:" ").map(String.init),author:parts[i+2],email:parts[i+3],date:parts[i+4],subject:parts[i+5],refs:parts[i+6])
         }
     }
     public func commitDiff(_ hash: String) throws -> String {

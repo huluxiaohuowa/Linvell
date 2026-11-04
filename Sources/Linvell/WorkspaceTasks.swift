@@ -32,16 +32,18 @@ extension WorkspaceController {
             self.picker = QuickPicker(title:L.text("Task Workspaces…"),options:options,owner:window)
         }
     }
-    func openTaskWorkspace(_ path: String,title: String? = nil) {
-        guard let app = NSApp.delegate as? AppDelegate else { return }
+    @discardableResult
+    func openTaskWorkspace(_ path: String,title: String? = nil) -> WorkspaceController? {
+        guard let app = NSApp.delegate as? AppDelegate else { return nil }
         if let existing = app.workspaces.first(where:{ $0.remoteConnection == nil && $0.root?.url.path == path && $0.window?.isVisible == true }) {
-            existing.window?.makeKeyAndOrderFront(nil); return
+            existing.window?.makeKeyAndOrderFront(nil); return existing
         }
         let target = app.newWorkspace()
         target.setProject(URL(fileURLWithPath:path,isDirectory:true))
         target.synchronizeAgentWorkspace(autoLoad:false)?.isolatesProject = true
         target.projectTitle.stringValue = title ?? URL(fileURLWithPath:path).lastPathComponent
         target.showAgents()
+        return target
     }
     private func removeAgentTask(_ task: AgentTask,repository: GitRepository) {
         let open = (NSApp.delegate as? AppDelegate)?.workspaces.contains { $0.root?.url.path == task.directory && ($0.window?.isVisible == true || $0.agentsRunning) } ?? false

@@ -28,7 +28,8 @@ final class GitLayoutTests: XCTestCase {
         try FileManager.default.createDirectory(at:nested,withIntermediateDirectories:true)
         try "# New research\n".write(to:nested.appendingPathComponent("untracked-note.md"),atomically:true,encoding:.utf8)
         let originalTheme = Theme.profile
-        defer { Theme.profile = originalTheme }
+        let originalDiffMode = UserDefaults.standard.object(forKey:"git.diffMode")
+        defer { Theme.profile = originalTheme; UserDefaults.standard.set(originalDiffMode,forKey:"git.diffMode") }
         for profile in [Theme.Profile.light,.dark] {
         Theme.profile = profile
         let view = GitWorkspace(project:root)
@@ -71,6 +72,13 @@ final class GitLayoutTests: XCTestCase {
             let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in:view.bounds))
             view.cacheDisplay(in:view.bounds,to:bitmap)
             try XCTUnwrap(bitmap.representation(using:.png,properties:[:])).write(to:URL(fileURLWithPath:path).appendingPathComponent("git-changes-"+profile.rawValue+".png"))
+            view.diffMode.selectedSegment = 2
+            view.diffMode.sendAction(view.diffMode.action,to:view.diffMode.target)
+            view.layoutSubtreeIfNeeded()
+            view.cacheDisplay(in:view.bounds,to:bitmap)
+            try XCTUnwrap(bitmap.representation(using:.png,properties:[:])).write(to:URL(fileURLWithPath:path).appendingPathComponent("git-split-"+profile.rawValue+".png"))
+            view.diffMode.selectedSegment = 1
+            view.diffMode.sendAction(view.diffMode.action,to:view.diffMode.target)
         }
 
         view.side.selectedSegment = 1

@@ -56,6 +56,26 @@ final class TaskReviewTests: XCTestCase {
         XCTAssertNotEqual(stagedSelection.location,NSNotFound)
         view.diff.setSelectedRange(stagedSelection); view.addReviewComment()
         XCTAssertEqual(captured?.source,"HEAD → index snapshot"); XCTAssertEqual(captured?.lines.first?.old,1); XCTAssertNil(captured?.lines.first?.new)
+
+        let previousDiffMode = UserDefaults.standard.object(forKey:"git.diffMode")
+        defer { UserDefaults.standard.set(previousDiffMode,forKey:"git.diffMode") }
+        view.diffMode.selectedSegment = 2
+        view.diffMode.sendAction(view.diffMode.action,to:view.diffMode.target)
+        func diffColumn(_ parent: NSView,label: String) -> NSTextView? {
+            if let text = parent as? NSTextView,text.accessibilityLabel() == L.text(label) { return text }
+            return parent.subviews.lazy.compactMap { diffColumn($0,label:label) }.first
+        }
+        let before = try XCTUnwrap(diffColumn(view,label:"Before"))
+        let after = try XCTUnwrap(diffColumn(view,label:"After"))
+        XCTAssertTrue(before.string.contains("-original"))
+        XCTAssertFalse(before.string.contains("+replacement"))
+        XCTAssertTrue(after.string.contains("+replacement"))
+        XCTAssertFalse(after.string.contains("-original"))
+        after.setSelectedRange((after.string as NSString).range(of:"+replacement"))
+        view.addReviewComment()
+        XCTAssertEqual(captured?.source,"HEAD → index snapshot")
+        XCTAssertEqual(captured?.lines.first?.new,1)
+        XCTAssertNil(captured?.lines.first?.old)
     }
     func testReviewDraftGoesOnlyToSelectedLiveSessionInExactWorktreeWithoutSubmitting() throws {
         _ = NSApplication.shared

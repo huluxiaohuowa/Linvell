@@ -246,7 +246,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item(view,"Restart Language Services",#selector(WorkspaceController.restartLanguageServices),route:true)
         item(view,"Project Tools",#selector(WorkspaceController.projectTools),route:true)
         item(view,"Source Control",#selector(WorkspaceController.gitWorkspace),"g",[.control,.shift],route:true)
-        item(view,"Git Commit Graph",#selector(WorkspaceController.gitWorkspace),route:true)
+        item(view,"Git Commit Graph",#selector(WorkspaceController.showGitCommitGraph),route:true)
         item(view,"Run & Preview",#selector(WorkspaceController.runWorkspace),"b",[.command,.shift],route:true)
         view.addItem(.separator())
         item(view,"Toggle Sidebar",#selector(WorkspaceController.toggleSidebar),"b",route:true)
@@ -261,6 +261,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         item(view,"Increase Font Size",#selector(WorkspaceController.increaseFont),"=",route:true)
         item(view,"Decrease Font Size",#selector(WorkspaceController.decreaseFont),"-",route:true)
+        let git = menu("Git")
+        item(git,"Repositories…",#selector(WorkspaceController.browseGitRepositories),route:true)
+        item(git,"Branches and Tags",#selector(WorkspaceController.showGitReferences),route:true)
+        item(git,"Worktrees",#selector(WorkspaceController.showGitWorktrees),route:true)
+        item(git,"Jump to HEAD",#selector(WorkspaceController.jumpToGitHead),"h",[.command,.option,.shift],route:true)
+        item(git,"Git Tools…",#selector(WorkspaceController.showGitTools),route:true)
         let win = menu("Window"); NSApp.windowsMenu = win
         item(win,"Minimize",#selector(NSWindow.performMiniaturize(_:)),"m")
         item(win,"Zoom",#selector(NSWindow.performZoom(_:)))
