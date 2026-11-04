@@ -10,12 +10,16 @@ extension GitRepository {
     public func searchHistory(_ query: String,offset: Int = 0,limit: Int = 100,
                               index: GitHistoryIndex? = nil,isCancelled: () -> Bool = { false }) throws -> GitHistorySearchPage {
         precondition(limit > 0 && offset >= 0)
+        func snapshot() throws -> [String] {
+            try run(["rev-parse","--revs-only","--all","HEAD"]).split(whereSeparator:\.isNewline).map(String.init)
+        }
+        let revisions = try index?.snapshot(scope:journalScope,load:snapshot) ?? snapshot()
         var cursor = offset
         var matches: [GitCommit] = []
         let batchSize = 250
         while !isCancelled() {
             let start = cursor / batchSize * batchSize
-            func load() throws -> [GitCommit] { try history(limit:batchSize,offset:start,includeMessage:true) }
+            func load() throws -> [GitCommit] { try history(limit:batchSize,offset:start,includeMessage:true,revisions:revisions) }
             let batch = try index?.batch(scope:journalScope,at:start,load:load) ?? load()
             for commit in batch.dropFirst(cursor-start) {
                 cursor += 1
@@ -35,6 +39,17 @@ public final class GitHistoryIndex: @unchecked Sendable {
     public init() {}
     private let lock = NSLock()
     private var batches: [String:[Int:[GitCommit]]] = [:]
+    private var snapshots: [String:[String]] = [:]
+    fileprivate func snapshot(scope: String,load: () throws -> [String]) rethrows -> [String] {
+        lock.lock(); let cached = snapshots[scope]; lock.unlock()
+        if let cached { return cached }
+        let revisions = try load()
+        lock.lock(); defer { lock.unlock() }
+        if let cached = snapshots[scope] { return cached }
+        snapshots[scope] = revisions
+        return revisions
+    }
+
 
     fileprivate func batch(scope: String,at offset: Int,load: () throws -> [GitCommit]) rethrows -> [GitCommit] {
         lock.lock()

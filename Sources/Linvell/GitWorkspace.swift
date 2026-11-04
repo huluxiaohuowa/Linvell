@@ -11,7 +11,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
     var changes: [GitChange] = [],commits: [GitCommit] = []
     var graph: [GitGraphRow] = []
     private var lastTimeRefresh = Date()
-    private var pullControl: NSButton?,pushControl: NSButton?
+    private var pullControl: NSButton?,pushControl: NSButton?,manageWorktreesControl: NSButton?
     private var graphWidth = 1
     private var incomingCommits: Set<String> = [],outgoingCommits: Set<String> = []
     var onOpen: ((URL) -> Void)?
@@ -24,10 +24,14 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
     var submodulePage: GitSubmoduleView?
     var actionsPage: GitActionsView?
     var running: Bool { busy || actionsPage?.running == true }
-    func shutdown() { autoFetchTimer?.invalidate(); actionsPage?.terminate() }
+    func shutdown() { autoFetchTimer?.invalidate(); repositoryRefresh?.invalidate(); repositoryRefresh = nil; actionsPage?.terminate() }
     let branchesTable = ResponsiveTableView()
     private let sidebarScope = NSSegmentedControl(labels:[L.text("Branches"),L.text("Worktrees")],trackingMode:.selectOne,target:nil,action:nil)
-    private var showsWorktrees: Bool { sidebarScope.selectedSegment == 1 }
+    private var location: WorkspaceSession {
+        repository.remote.map { .ssh(host:$0.host,path:repository.directory) } ?? .local(path:repository.directory)
+    }
+    private var worktreesEnabled: Bool { GitRepositoryOrganization.showsWorktrees(location) }
+    private var showsWorktrees: Bool { worktreesEnabled && sidebarScope.selectedSegment == 1 }
     private var branchNames: [String] = []
     private var currentBranch = ""
     var references: [GitReference] = []
@@ -38,6 +42,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
     var onOpenWorktree: ((String) -> Void)?
     var onNewTask: (() -> Void)?
     var onRepositories: (() -> Void)?
+    var onWorktreeRelocated: ((String,String?) -> Void)?
     var onCanRemoveWorktree: ((String) -> Bool)?
     var onOpenTerminal: (() -> Void)?
     private let historySearch = NSSearchField()
@@ -46,6 +51,10 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
     private var moreHistory: NSButton!
     private var historyLimit = 150
     private var refreshingWorktreeStates = false
+    private var preferencesObserver: NSObjectProtocol?
+    private var repositoryRefresh: GitWorkspaceRefresh?
+    private var isReloading = false
+    private var reloadRequested = false
     private var worktreeDetails: [String:String] = [:]
     private var worktreeStates: [String:String] = [:]
     private var fetchFailure: String?
@@ -61,10 +70,32 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
     private let otherHeading = Theme.label("",size:11,weight:.semibold)
     private let changeLists = ResizablePanes()
     private var otherPane: NSView!
+    private var landing: (paths: Set<String>,staged: Bool,until: Date)?
     private var oppositeChanges: [GitChange] {
         side.selectedSegment == 0 ? changes.filter(\.staged) : changes.filter(\.unstaged)
     }
     private var historyIndex = GitHistoryIndex()
+    private let swapComparison = NSButton(title:L.text("Swap Commits"),target:nil,action:nil)
+    private let inspectComparison = NSButton(title:L.text("Review Comparison…"),target:nil,action:nil)
+    private let commitSummary = GitCommitSummaryView(frame:.zero)
+    private var commitNavigation: [String] = []
+    private var navigatedCommit: GitCommit?
+    private var historySelectionOrder: [String] = []
+    private var suppressHistorySelection = false
+    private var showsWorkingHistoryEntry: Bool { mode.selectedSegment == 1 && historyQuery.isEmpty && !changes.isEmpty }
+    private var historyOffset: Int { showsWorkingHistoryEntry ? 1 : 0 }
+    private func historyKey(at row: Int) -> String? {
+        if showsWorkingHistoryEntry && row == 0 { return ":working" }
+        let index = row-historyOffset
+        return displayedCommits.indices.contains(index) ? displayedCommits[index].hash : nil
+    }
+    private func historyRow(for key: String) -> Int? {
+        if key == ":working" { return showsWorkingHistoryEntry ? 0 : nil }
+        return displayedCommits.firstIndex(where:{ $0.hash == key }).map { $0+historyOffset }
+    }
+    private func selectedHistoryEndpoints() -> [GitReviewRevision] {
+        historySelectionOrder.map { $0 == ":working" ? .workingTree : .commit($0) }
+    }
     private var searchResults: [GitCommit] = []
     private var searchOffset: Int?
     private var searchTask: Task<Void,Never>?
@@ -185,8 +216,12 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         diffHost.postsFrameChangedNotifications = true
         NotificationCenter.default.addObserver(self,selector:#selector(updateDiffMode),name:NSView.frameDidChangeNotification,object:diffHost)
         let wrap = button("Wrap Lines",#selector(toggleDiffWrapping))
-        let detailActions = Theme.stack([open,review,wrap,NSView()],spacing:8)
-        let diffPage = Theme.stack([detailTitle,detailMetadata,diffMode,detailActions,diffHost],orientation:.vertical,spacing:8)
+        swapComparison.target = self; swapComparison.action = #selector(swapSelectedComparison); swapComparison.isHidden = true
+        inspectComparison.target = self; inspectComparison.action = #selector(compareSelectedCommits); inspectComparison.isHidden = true
+        let detailActions = Theme.stack([open,review,wrap,swapComparison,inspectComparison,NSView()],spacing:8)
+        commitSummary.onNavigate = { [weak self] hash in self?.navigateToCommit(hash) }
+        commitSummary.onBack = { [weak self] in self?.navigateBack() }
+        let diffPage = Theme.stack([detailTitle,detailMetadata,commitSummary,diffMode,detailActions,diffHost],orientation:.vertical,spacing:8)
         let diffPane = NSView()
         Theme.pin(diffPage,in:diffPane,inset:10)
         let otherColumn = NSTableColumn(identifier:NSUserInterfaceItemIdentifier("otherChanges"))
@@ -209,7 +244,8 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         sidebarScope.selectedSegment = 0
         sidebarScope.target = self; sidebarScope.action = #selector(changeSidebarScope)
         let branchScroll = ResponsiveScrollView(); branchScroll.documentView = branchesTable; branchScroll.hasVerticalScroller = true; branchScroll.drawsBackground = false
-        Theme.pin(Theme.stack([repoName,button("Repositories…",#selector(browseRepositories)),sidebarScope,branchScroll,button("Manage Worktrees…",#selector(browseWorktrees)),branches],orientation:.vertical,spacing:12),in:navigation,inset:14)
+        let manageWorktrees = button("Manage Worktrees…",#selector(browseWorktrees)); manageWorktreesControl = manageWorktrees; manageWorktrees.isHidden = !worktreesEnabled
+        Theme.pin(Theme.stack([repoName,button("Repositories…",#selector(browseRepositories)),sidebarScope,branchScroll,manageWorktrees,branches],orientation:.vertical,spacing:12),in:navigation,inset:14)
         mainPage = split; Theme.pin(split,in:pages)
         let details = Theme.stack([bar,mode,network,operations,historyControls,hunkControls,pages,commitBar],orientation:.vertical,spacing:10)
         let content = NSView()
@@ -222,6 +258,19 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
             NotificationCenter.default.addObserver(self,selector:#selector(resizeTable(_:)),name:NSView.frameDidChangeNotification,object:scroll)
         }
         NotificationCenter.default.addObserver(self,selector:#selector(autoFetchFinished(_:)),name:GitAutoFetchScheduler.finished,object:nil)
+        preferencesObserver = NotificationCenter.default.addObserver(forName:UserDefaults.didChangeNotification,object:nil,queue:.main) { [weak self] _ in
+            guard let self else { return }
+            self.sidebarScope.setEnabled(self.worktreesEnabled,forSegment:1)
+            self.manageWorktreesControl?.isHidden = !self.worktreesEnabled
+            if !self.worktreesEnabled { self.sidebarScope.selectedSegment = 0 }
+            let mode = UserDefaults.standard.object(forKey:"git.diffMode") as? Int ?? 1
+            let rerender = self.diff.font != Theme.editorFont
+            self.diffMode.selectedSegment = mode
+            self.updateDiffMode(); self.commitControls.isHidden = self.mode.selectedSegment != 0 || UserDefaults.standard.object(forKey:"git.showCommitMessageArea") as? Bool == false
+            self.table.reloadData(); self.branchesTable.reloadData()
+            if rerender { self.selectionChanged() }
+        }
+        sidebarScope.setEnabled(worktreesEnabled,forSegment:1)
         updateMode()
         changeSide()
         reload()
@@ -233,7 +282,15 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
             }
         }
     }
-    deinit { autoFetchTimer?.invalidate(); searchTask?.cancel() }
+    deinit { if let preferencesObserver { NotificationCenter.default.removeObserver(preferencesObserver) }; autoFetchTimer?.invalidate(); repositoryRefresh?.invalidate(); searchTask?.cancel() }
+    func refreshExternalState() { repositoryRefresh?.check(force:true) }
+    private func installRepositoryRefresh() {
+        guard repositoryRefresh == nil else { return }
+        repositoryRefresh = GitWorkspaceRefresh(repository:repository,isVisible:{ [weak self] in
+            guard let self else { return false }
+            return NSApp.isActive && self.window?.isVisible == true && !self.isHiddenOrHasHiddenAncestor && !self.running
+        },changed:{ [weak self] in self?.reload() })
+    }
     required init?(coder: NSCoder) { fatalError() }
     @objc private func resizeTable(_ notification: Notification) {
         guard let scroll = notification.object as? NSScrollView,
@@ -273,7 +330,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
     private func button(_ title: String,_ action: Selector) -> NSButton {
         let button = Theme.actionButton(title,target:self,action:action); actions.append(button); return button
     }
-    func numberOfRows(in tableView: NSTableView) -> Int { tableView === otherChanges ? oppositeChanges.count : tableView === branchesTable ? (showsWorktrees ? worktrees.count : branchNames.count) : mode.selectedSegment == 0 ? fileRows.count : mode.selectedSegment == 1 ? displayedCommits.count : 0 }
+    func numberOfRows(in tableView: NSTableView) -> Int { tableView === otherChanges ? oppositeChanges.count : tableView === branchesTable ? (showsWorktrees ? worktrees.count : branchNames.count) : mode.selectedSegment == 0 ? fileRows.count : mode.selectedSegment == 1 ? displayedCommits.count+historyOffset : 0 }
     func tableView(_ tableView: NSTableView,viewFor tableColumn: NSTableColumn?,row: Int) -> NSView? {
         if tableView === otherChanges {
             guard oppositeChanges.indices.contains(row) else { return nil }
@@ -307,9 +364,12 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
             label.lineBreakMode = .byTruncatingMiddle
             return label
         } else {
-            let rows = displayedCommits
-            guard rows.indices.contains(row) else { return nil }
-            return GitHistoryCell(commit:rows[row],row:historyQuery.isEmpty && !UserDefaults.standard.bool(forKey:"git.hideCommitGraph") ? graph[row] : nil,lanes:graphWidth,incoming:incomingCommits.contains(rows[row].hash),outgoing:outgoingCommits.contains(rows[row].hash))
+            if showsWorkingHistoryEntry,row == 0 {
+                return Theme.stack([Theme.label("Uncommitted Changes",size:13,weight:.semibold),Theme.label(L.format("%d changed files",changes.count),size:11,color:Theme.secondary)],orientation:.vertical,spacing:3)
+            }
+            let rows = displayedCommits,index = row-historyOffset
+            guard rows.indices.contains(index) else { return nil }
+            return GitHistoryCell(commit:rows[index],row:historyQuery.isEmpty && !UserDefaults.standard.bool(forKey:"git.hideCommitGraph") ? graph[index] : nil,lanes:graphWidth,incoming:incomingCommits.contains(rows[index].hash),outgoing:outgoingCommits.contains(rows[index].hash))
         }
     }
     func tableView(_ tableView: NSTableView,heightOfRow row: Int) -> CGFloat {
@@ -326,7 +386,21 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         } else if open.isEnabled { openSelected() }
     }
     func tableViewSelectionDidChange(_ notification: Notification) {
-        if notification.object as? NSTableView === table { selectionChanged() }
+        if notification.object as? NSTableView === table {
+            guard !suppressHistorySelection else { return }
+            navigatedCommit = nil; commitNavigation = []
+            if mode.selectedSegment == 1 {
+                let keys = table.selectedRowIndexes.compactMap { historyKey(at:$0) }
+                historySelectionOrder = historySelectionOrder.filter(keys.contains)+keys.filter { !historySelectionOrder.contains($0) }
+                if historySelectionOrder.count > 2 {
+                    historySelectionOrder = [historySelectionOrder[0],historySelectionOrder.last!]
+                    suppressHistorySelection = true
+                    table.selectRowIndexes(IndexSet(historySelectionOrder.compactMap(historyRow)),byExtendingSelection:false)
+                    suppressHistorySelection = false
+                }
+            } else { historySelectionOrder = [] }
+            selectionChanged()
+        }
     }
     func focusHistorySearch() { showCommitGraph(); window?.makeFirstResponder(historySearch) }
     func showCommitGraph() { mode.selectedSegment = 1; modeChanged() }
@@ -386,15 +460,29 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         otherHeading.stringValue = L.text(side.selectedSegment == 0 ? "Staged" : "Working Tree")
         otherPane.isHidden = mode.selectedSegment != 0 || oppositeChanges.isEmpty
         otherChanges.reloadData(); otherChanges.deselectAll(nil)
+        if let landing,landing.until > Date(),landing.staged == (side.selectedSegment == 0) {
+            let indices = IndexSet(oppositeChanges.enumerated().filter { landing.paths.contains($0.element.path) }.map(\.offset))
+            otherChanges.selectRowIndexes(indices,byExtendingSelection:false)
+            if let first = indices.first { otherChanges.scrollRowToVisible(first) }
+        }
         changeLists.needsLayout = true
+        let historySelection = historySelectionOrder
+        suppressHistorySelection = true
+        defer { suppressHistorySelection = false }
         table.reloadData()
         table.noteHeightOfRows(withIndexesChanged:IndexSet(integersIn:0..<table.numberOfRows))
         let count = numberOfRows(in:table)
         if count > 0 {
             let matching = path.flatMap { path in fileRows.firstIndex { $0?.path == path } }
-                ?? hash.flatMap { hash in displayedCommits.firstIndex { $0.hash == hash } }
+                ?? hash.flatMap { historyRow(for:$0) }
             let fallback = preferredRow < 0 && mode.selectedSegment == 0 ? fileRows.firstIndex(where:{ $0 != nil }) ?? 0 : preferredRow
-            table.selectRowIndexes(IndexSet(integer:min(max(0,matching ?? fallback),count-1)),byExtendingSelection:false)
+            let retained = mode.selectedSegment == 1 ? historySelection.compactMap(historyRow) : []
+            if !retained.isEmpty { table.selectRowIndexes(IndexSet(retained),byExtendingSelection:false) }
+            else { table.selectRowIndexes(IndexSet(integer:min(max(0,matching ?? fallback),count-1)),byExtendingSelection:false) }
+            if mode.selectedSegment == 1 {
+                historySelectionOrder = historySelection.filter { historyRow(for:$0) != nil }
+                if historySelectionOrder.isEmpty,let key = historyKey(at:table.selectedRow) { historySelectionOrder = [key] }
+            }
         } else {
             table.deselectAll(nil)
         }
@@ -475,6 +563,8 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
             if let actionsPage,actionsPage.repository.directory != repository.directory,!actionsPage.running { self.actionsPage = nil }
             if actionsPage == nil {
                 let page = GitActionsView(repository:repository); page.onChange = { [weak self] in self?.reload() }
+                page.onWorktreeManagement = { [weak self] in self?.browseWorktrees() }
+                page.onFetchSuccess = { [weak self] in guard let self else { return }; GitAutoFetchScheduler.shared.recordSuccess(self.location) }
                 page.onBusyChange = { [weak self] value in
                     guard let self else { return }; self.busy = value
                     self.actions.forEach { $0.isEnabled = !value }; self.mode.isEnabled = !value; self.branchesTable.isEnabled = !value; self.updateActionAvailability()
@@ -514,7 +604,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         } else {
             guard branchNames.indices.contains(row),branchNames[row] != currentBranch else { return }
             let name = branchNames[row],repo = repository
-            if let tree = worktrees.first(where:{ $0.branch == name && $0.path != repo.directory && !$0.prunable }) {
+            if worktreesEnabled,let tree = worktrees.first(where:{ $0.branch == name && $0.path != repo.directory && !$0.prunable }) {
                 onOpenWorktree?(tree.path); return
             }
             perform("Switching branch…") { _ = try repo.run(["switch",name]) }
@@ -545,7 +635,9 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         }
     }
     @objc func reload() {
-        guard !busy else { return }
+        guard !busy else { reloadRequested = true; return }
+        guard !isReloading else { reloadRequested = true; return }
+        isReloading = true
         let request = UUID(); refreshGeneration = request; let repo = repository
         let allRefs = historyScope.selectedSegment == 1,limit = historyLimit
         caption.stringValue = L.text("Reading repository…")
@@ -564,13 +656,19 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
                 return (changes,commits,branch,refs,worktrees,repo,incoming,outgoing,counts,try repo.stagedStat())
             }
             DispatchQueue.main.async {
-                guard let self,self.refreshGeneration == request else { return }
+                guard let self else { return }
+                self.isReloading = false
+                defer {
+                    if self.reloadRequested && !self.busy { self.reloadRequested = false; self.reload() }
+                }
+                guard self.refreshGeneration == request else { return }
                 switch result {
                 case .success(let (changes,commits,branch,refs,worktrees,repo,incoming,outgoing,counts,stat)):
                     let oldRow = self.table.selectedRow
                     let path = self.selectedChange?.path
                     let hash = self.selectedCommit?.hash
                     self.repository = repo
+                    self.installRepositoryRefresh()
                     self.stagedSummary.stringValue = L.format("%d files · +%d · −%d",stat.files,stat.insertions,stat.deletions)+(stat.binaryFiles > 0 ? " · "+L.format("%d binary",stat.binaryFiles) : "")
                     self.incomingCommits = incoming; self.outgoingCommits = outgoing
                     self.pullControl?.title = L.text("Pull")+(counts.count == 2 ? " ↓"+String(counts[1]) : "")
@@ -579,6 +677,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
                     self.changes = changes; self.commits = commits; self.graph = GitGraph.layout(commits)
                     self.graphWidth = self.graph.map(\.width).max() ?? 1
                     self.currentBranch = branch; self.references = refs; self.worktrees = worktrees
+                    GitRepositoryOrganization.registerWorktreeFamily(worktrees,location:self.location)
                     self.branchNames = refs.filter { $0.category == "Local Branches" }.map(\.name)
                     self.refreshWorktreeStates()
                     self.branchesTable.reloadData()
@@ -610,10 +709,16 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         let history = mode.selectedSegment == 1
         table.allowsMultipleSelection = history
         let change = selectedChange,commit = selectedCommit,hash = commit?.hash
-        diff.string = ""; detailMetadata.stringValue = ""
+        diff.string = ""; detailMetadata.stringValue = ""; commitSummary.isHidden = true
         if !splitDiff.isHidden { splitDiff.render(NSAttributedString()) }
         updateDiffMode()
-        guard change != nil || hash != nil else {
+        let endpoints = history ? selectedHistoryEndpoints() : []
+        swapComparison.isHidden = endpoints.count != 2; inspectComparison.isHidden = endpoints.count != 2
+        let workingSelected = history && endpoints.count == 1 && historySelectionOrder.first == ":working"
+        if history,endpoints.count == 2 {
+            renderSelectedComparison(endpoints[0],endpoints[1]); return
+        }
+        guard change != nil || hash != nil || workingSelected else {
             if !history,let folder = fileGroups[table.selectedRow] {
                 detailTitle.stringValue = folder
                 detailMetadata.stringValue = L.text("Double-click a folder to expand or collapse it")
@@ -625,7 +730,16 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
             return
         }
         let repo = repository,staged = side.selectedSegment == 1
-        if let commit {
+        if workingSelected { detailTitle.stringValue = L.text("Uncommitted Changes") }
+        else if let commit {
+            commitSummary.render(commit,mergedIn:nil,canGoBack:!commitNavigation.isEmpty)
+            DispatchQueue.global(qos:.utility).async { [weak self] in
+                let merged = try? repo.introducingMerge(commit.hash)
+                DispatchQueue.main.async {
+                    guard let self,self.generation == request else { return }
+                    self.commitSummary.render(commit,mergedIn:merged,canGoBack:!self.commitNavigation.isEmpty)
+                }
+            }
             detailTitle.stringValue = commit.subject
             detailMetadata.stringValue = String(commit.hash.prefix(12))+" · "+commit.author+" · "+String(commit.date.prefix(10))+" · "+commit.refs
         } else if let change {
@@ -634,6 +748,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         }
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
             let result = Result {
+                if workingSelected { return try repo.uncommittedPatch() }
                 if let hash { return try repo.commitDiff(hash) }
                 if let change { return try repo.diff(change,staged:staged) }
                 return ""
@@ -650,25 +765,14 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
                 self.hunkControls.isHidden = self.hunks.isEmpty
                 self.hunkAction.title = L.text(staged ? "Unstage Hunk" : "Stage Hunk")
                 self.lineAction.title = L.text(staged ? "Unstage Selected Lines" : "Stage Selected Lines")
-                let rendered = NSMutableAttributedString(string:text,attributes:[.font:Theme.editorFont,.foregroundColor:Theme.foreground])
-                (text as NSString).enumerateSubstrings(in:NSRange(location:0,length:text.utf16.count),options:.byLines) { line,range,_,_ in
-                    guard let line else { return }
-                    if line.hasPrefix("+"),!line.hasPrefix("+++ ") {
-                        let color = Theme.color(Theme.isDark ? 0x8BCB9B : 0x287A43)
-                        rendered.addAttributes([.foregroundColor:color,.backgroundColor:color.withAlphaComponent(0.12)],range:range)
-                    } else if line.hasPrefix("-"),!line.hasPrefix("--- ") {
-                        let color = Theme.color(Theme.isDark ? 0xE99B9B : 0xA43D3D)
-                        rendered.addAttributes([.foregroundColor:color,.backgroundColor:color.withAlphaComponent(0.12)],range:range)
-                    } else if line.hasPrefix("@@") { rendered.addAttribute(.foregroundColor,value:Theme.accent,range:range) }
-                }
-                InlineDiff.highlight(rendered,removed:.systemRed,added:.systemGreen)
+                let rendered = GitDiffRendering.styled(text,path:change?.path)
                 self.diff.textStorage?.setAttributedString(rendered)
                 self.unifiedPreview.verticalRulerView?.needsDisplay = true
                 if !self.splitDiff.isHidden { self.splitDiff.render(rendered) }
                 if case .success = result { self.reviewChange = change }
                 self.diff.apply = self.hunks.isEmpty ? nil : { [weak self] patch in
                     guard let self,let change else { return }
-                    self.perform(staged ? "Unstaging…" : "Staging…") {
+                    self.perform(staged ? "Unstaging…" : "Staging…",onSuccess:{ [weak self] in self?.markLanding([change.path],staged:!staged) }) {
                         if let patch { try repo.applyHunk(patch,unstage:false) }
                         else if staged { try repo.unstage(change) } else { try repo.stage(change) }
                     }
@@ -680,14 +784,62 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
             }
         }
     }
+    func navigateToCommit(_ hash: String,remember: Bool = true) {
+        let repo = repository,request = UUID(); generation = request
+        let previous = selectedCommit?.hash
+        DispatchQueue.global(qos:.userInitiated).async { [weak self] in
+            let result = Result { try repo.commitDetails(hash) }
+            DispatchQueue.main.async {
+                guard let self,self.generation == request else { return }
+                switch result {
+                case .success(let commit):
+                    if remember,let previous,previous != commit.hash { self.commitNavigation.append(previous) }
+                    self.navigatedCommit = commit; self.historySelectionOrder = [commit.hash]
+                    self.mode.selectedSegment = 1; self.updateMode(); self.selectionChanged()
+                case .failure(let error): self.caption.stringValue = error.localizedDescription
+                }
+            }
+        }
+    }
+    private func navigateBack() {
+        guard let hash = commitNavigation.popLast() else { return }
+        navigateToCommit(hash,remember:false)
+    }
+    private func endpointName(_ value: GitReviewRevision) -> String {
+        switch value { case .workingTree: return L.text("Working Tree"); case .commit(let hash): return String(hash.prefix(12)) }
+    }
+    private func renderSelectedComparison(_ base: GitReviewRevision,_ target: GitReviewRevision) {
+        let request = generation,repo = repository
+        detailTitle.stringValue = endpointName(base)+" → "+endpointName(target)
+        commitSummary.isHidden = true
+        DispatchQueue.global(qos:.userInitiated).async { [weak self] in
+            let result = Result { () throws -> (String,GitDiffStat) in
+                let paths = try repo.comparisonPaths(base:base,target:target)
+                return (try paths.map { try repo.comparisonPatch(base:base,target:target,path:$0) }.joined(separator:"\n"),try repo.comparisonStat(base:base,target:target))
+            }
+            DispatchQueue.main.async {
+                guard let self,self.generation == request else { return }
+                switch result {
+                case .success(let (patch,stat)):
+                    self.detailMetadata.stringValue = L.format("%d files · +%d · −%d",stat.files,stat.insertions,stat.deletions)
+                    let value = GitDiffRendering.styled(patch)
+                    self.diff.textStorage?.setAttributedString(value); self.splitDiff.render(value)
+                    self.diff.enclosingScrollView?.verticalRulerView?.needsDisplay = true
+                case .failure(let error): self.diff.string = error.localizedDescription
+                }
+            }
+        }
+    }
+
     private var selectedChange: GitChange? {
         guard mode.selectedSegment == 0 else { return nil }
         return fileRows.indices.contains(table.selectedRow) ? fileRows[table.selectedRow] : nil
     }
     private var selectedCommit: GitCommit? {
-        let rows = displayedCommits
-        guard mode.selectedSegment == 1,rows.indices.contains(table.selectedRow) else { return nil }
-        return rows[table.selectedRow]
+        if let navigatedCommit { return navigatedCommit }
+        let rows = displayedCommits,index = table.selectedRow-historyOffset
+        guard mode.selectedSegment == 1,rows.indices.contains(index) else { return nil }
+        return rows[index]
     }
     @objc func addReviewComment() {
         guard mode.selectedSegment == 0,let change = reviewChange else { return }
@@ -704,27 +856,40 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         do {
             let patch = try GitHunk.selection(in:diff.string,range:range,unstage:side.selectedSegment == 1)
             let repo = repository
-            perform("Updating index…") { try repo.applyHunk(patch,unstage:false) }
+            perform("Updating index…",onSuccess:{ [weak self] in if let path = self?.selectedChange?.path { self?.markLanding([path],staged:self?.side.selectedSegment == 0) } }) { try repo.applyHunk(patch,unstage:false) }
         } catch { if let window { NSAlert(error:error).beginSheetModal(for:window) } }
     }
 
     @objc private func applySelectedHunk() {
         guard hunks.indices.contains(hunkPicker.indexOfSelectedItem) else { return }
         let hunk = hunks[hunkPicker.indexOfSelectedItem],repo = repository,unstage = side.selectedSegment == 1
-        perform(unstage ? "Unstaging…" : "Staging…") { try repo.applyHunk(hunk,unstage:unstage) }
+        perform(unstage ? "Unstaging…" : "Staging…",onSuccess:{ [weak self] in if let path = self?.selectedChange?.path { self?.markLanding([path],staged:!unstage) } }) { try repo.applyHunk(hunk,unstage:unstage) }
     }
-    @objc private func stageSelected() { guard let change = selectedChange else { return }; let repo = repository; perform("Staging…") { try repo.stage(change) } }
-    @objc private func unstageSelected() { guard let change = selectedChange else { return }; let repo = repository; perform("Unstaging…") { try repo.unstage(change) } }
+    private func markLanding(_ paths: [String],staged: Bool) {
+        landing = (Set(paths),staged,Date().addingTimeInterval(2))
+        DispatchQueue.main.asyncAfter(deadline:.now()+2) { [weak self] in
+            guard let self,let landing = self.landing,landing.until <= Date() else { return }
+            self.landing = nil; self.otherChanges.deselectAll(nil)
+        }
+    }
+    @objc private func stageSelected() {
+        guard let change = selectedChange else { return }; let repo = repository
+        perform("Staging…",onSuccess:{ [weak self] in self?.markLanding([change.path],staged:true) }) { try repo.stage(change) }
+    }
+    @objc private func unstageSelected() {
+        guard let change = selectedChange else { return }; let repo = repository
+        perform("Unstaging…",onSuccess:{ [weak self] in self?.markLanding([change.path],staged:false) }) { try repo.unstage(change) }
+    }
     @objc private func openSelected() { if let change = selectedChange { onOpen?(repository.root.appendingPathComponent(change.path)) } }
     @objc private func unstageAllChanges() {
         guard unstageAll.isEnabled else { return }
         let repo = repository
-        perform("Unstaging…") { try repo.unstageAll() }
+        perform("Unstaging…",onSuccess:{ [weak self] in guard let self else { return }; self.markLanding(self.changes.filter(\.staged).map(\.path),staged:false) }) { try repo.unstageAll() }
     }
     @objc private func stageAllChanges() {
         guard stageAll.isEnabled else { return }
         let repo = repository
-        perform("Staging…") { _ = try repo.run(["add","--all"]) }
+        perform("Staging…",onSuccess:{ [weak self] in guard let self else { return }; self.markLanding(self.changes.filter(\.unstaged).map(\.path),staged:true) }) { _ = try repo.run(["add","--all"]) }
     }
     @objc private func commitStaged() {
         guard commit.isEnabled else { return }
@@ -737,34 +902,132 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
     }
     @objc private func showFailedCommand() { showGitLog(failuresOnly:true,operation:failedOperation) }
 
+    @objc private func swapSelectedComparison() {
+        guard historySelectionOrder.count == 2 else { return }
+        historySelectionOrder.reverse(); selectionChanged()
+    }
     @objc func compareSelectedCommits() {
-        let selected = table.selectedRowIndexes.compactMap { displayedCommits.indices.contains($0) ? displayedCommits[$0] : nil }
-        guard let newest = selected.first,let oldest = selected.last,selected.count > 1 else { return }
-        openComparison(oldest.hash,newest.hash)
+        let endpoints = selectedHistoryEndpoints()
+        guard endpoints.count == 2 else { return }
+        openComparison(endpoints[0],endpoints[1])
     }
 
     func openComparison(_ base: String,_ target: String) {
+        openComparison(.commit(base),.commit(target))
+    }
+    func openComparison(_ base: GitReviewRevision,_ target: GitReviewRevision) {
         let repo = repository
-        performResult("Reading repository…",{ try (repo.resolvedRevision(base),repo.resolvedRevision(target)) }) { [weak self] left,right in
-            guard let self else { return }
-            self.performResult("Reading repository…",{ try repo.comparePaths(left,right) }) { [weak self] paths in
-                self?.openReview(paths.map { path in
-                    GitReviewPanel.File(path:path,patch:{ try repo.comparisonPatch(left,right,path:path) },images:{
-                        try repo.revisionImages(left,right,path:path)
-                    })
-                })
+        performResult("Reading repository…",{
+            func pinned(_ value: GitReviewRevision) throws -> GitReviewRevision {
+                switch value { case .commit(let ref): return .commit(try repo.resolvedRevision(ref)); case .workingTree: return .workingTree }
             }
+            let base = try pinned(base),target = try pinned(target)
+            return (base,target,try repo.comparisonPaths(base:base,target:target),try repo.comparisonStat(base:base,target:target))
+        }) { [weak self] base,target,paths,stat in
+            guard let self else { return }
+            let files = paths.map { path in
+                GitReviewPanel.File(path:path,patch:{ try repo.comparisonPatch(base:base,target:target,path:path) },images:{ try repo.comparisonImages(base:base,target:target,path:path) })
+            }
+            let context = GitReviewPanel.Context(title:L.text("Compare Revisions"),base:self.endpointName(base),target:self.endpointName(target),statistics:L.format("%d files · +%d · −%d",stat.files,stat.insertions,stat.deletions),statisticsProvider:{
+                let latest = try repo.comparisonStat(base:base,target:target)
+                return L.format("%d files · +%d · −%d",latest.files,latest.insertions,latest.deletions)
+            },onSwap:{ [weak self] in self?.openComparison(target,base) })
+            let loader: (() throws -> [GitReviewPanel.File])? = base == .workingTree || target == .workingTree ? {
+                try repo.comparisonPaths(base:base,target:target).map { path in
+                    GitReviewPanel.File(path:path,patch:{ try repo.comparisonPatch(base:base,target:target,path:path) },images:{ try repo.comparisonImages(base:base,target:target,path:path) })
+                }
+            } : nil
+            self.openReview(files,context:context,reloadFiles:loader)
         }
     }
+
+    func canPerformMenuAction(_ action: String) -> Bool {
+        switch action {
+        case "commitGitChanges": return commit.isEnabled
+        case "stageGitChanges": return stageAll.isEnabled
+        case "unstageGitChanges": return unstageAll.isEnabled
+        case "stageGitFile": return stage.isEnabled
+        case "unstageGitFile": return unstage.isEnabled
+        case "checkoutGitCommit","revertGitCommit","copyGitCommit": return mode.selectedSegment == 1 && selectedHistoryEndpoints().count == 1 && selectedCommit != nil
+        case "compareGitCommits": return mode.selectedSegment == 1 && selectedHistoryEndpoints().count == 2
+        case "createGitWorktree","finishGitWorktree": return worktreesEnabled && !worktrees.isEmpty
+        case "showGitInFinder": return repository.remote == nil
+        case "expandGitDirectories","collapseGitDirectories": return mode.selectedSegment == 0 && groupFiles
+        case "renameGitBranch": return !currentBranch.isEmpty
+        case "amendGitCommit": return !commits.isEmpty
+        default: return !running
+        }
+    }
+    func showChangesFromMenu() { mode.selectedSegment = 0; modeChanged() }
+    func openTerminalFromMenu() { onOpenTerminal?() }
+    func showInFinderFromMenu() { guard repository.remote == nil else { return }; NSWorkspace.shared.activateFileViewerSelecting([repository.root]) }
+    func expandDirectoriesFromMenu(_ expanded: Bool) {
+        guard mode.selectedSegment == 0,groupFiles else { return }
+        let path = selectedChange?.path
+        if expanded { collapsedFolders.removeAll() }
+        else {
+            for change in visibleChanges {
+                var folder = (change.path as NSString).deletingLastPathComponent
+                while !folder.isEmpty { collapsedFolders.insert(folder); folder = (folder as NSString).deletingLastPathComponent }
+            }
+        }
+        reloadRows(path:path)
+    }
+    func newBranchFromMenu() { openOperation("Create Branch") }
+    func newTagFromMenu() { openOperation("Create Tag") }
+    func stashFromMenu() { openOperation("Stash Changes") }
+    func stashesFromMenu() { browseStashes() }
+    func renameBranchFromMenu() { openOperation("Rename Selected Branch",values:["Branch":currentBranch]) }
+    func mergeBranchFromMenu() { openOperation("Merge") }
+    func amendFromMenu() { amendLastCommit() }
+    func checkoutCommitFromMenu() { if let commit = selectedCommit { openOperation("Checkout Commit",values:["Revision":commit.hash]) } }
+    func revertCommitFromMenu() { if let commit = selectedCommit { openOperation("Revert Commit",values:["Revision":commit.hash]) } }
+    func copyCommitFromMenu() {
+        guard let commit = selectedCommit else { return }
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(commit.hash,forType:.string)
+    }
+    func newWorktreeFromMenu() {
+        guard worktreesEnabled,let window else { return }
+        GitWorktreePanels.create(repository:repository,owner:window) { [weak self] path in self?.reload(); self?.onOpenWorktree?(path) }
+    }
+    func finishWorktreeFromMenu() {
+        guard worktreesEnabled else { return }
+        if let current = worktrees.dropFirst().first(where:{ $0.path == repository.directory && !$0.prunable && !$0.branch.isEmpty }) { finishWorktree(current); return }
+        showGitPicker("Finish Worktree…",worktrees.dropFirst().filter { !$0.prunable && !$0.branch.isEmpty }.map { entry in
+            PickerOption(title:entry.branch,detail:entry.path) { [weak self] in self?.finishWorktree(entry) }
+        })
+    }
+    func shortcutsFromMenu() {
+        let menu = NSApp.mainMenu?.items.first { $0.title == L.text("Git") }?.submenu
+        let lines = (menu?.items ?? []).filter { !$0.keyEquivalent.isEmpty }.map { item in
+            let mask = item.keyEquivalentModifierMask
+            let symbols = (mask.contains(.control) ? "⌃" : "")+(mask.contains(.option) ? "⌥" : "")+(mask.contains(.shift) ? "⇧" : "")+(mask.contains(.command) ? "⌘" : "")
+            let key = ["\r":"↩","\u{f703}":"→","\u{f702}":"←"][item.keyEquivalent] ?? item.keyEquivalent.uppercased()
+            return symbols+key+"   "+item.title
+        }
+        showGitText("Git Keyboard Shortcuts",text:(lines+["⌘F   "+L.text("Search repository history"),"⌥→ / ⌥←   "+L.text("Expand / collapse review diffs")]).joined(separator:"\n"))
+    }
+    func commitFromMenu() { commitStaged() }
+    func stageAllFromMenu() { stageAllChanges() }
+    func unstageAllFromMenu() { unstageAllChanges() }
+    func stageFromMenu() { stageSelected() }
+    func unstageFromMenu() { unstageSelected() }
+    func pullFromMenu() { pull() }
+    func pushFromMenu() { push() }
+    func showBranchesFromMenu() { browseReferences() }
 
     func openRepositoryReview() { browseTrackedFiles() }
     func openChangesReview() { browseWorkingChanges() }
     func openGitJournal() { showGitLog() }
     func fetchRepository() { fetch() }
 
+    @objc private func showDiffSettings() { if let window { _ = GitDiffSettingsPanel(owner:window.attachedSheet ?? window) } }
+    @objc func showRepositorySettings() { if let window { GitRepositorySettingsPanel.show(owner:window.attachedSheet ?? window) } }
     @objc func showGitSettings() {
         guard let window else { return }
         let defaults = UserDefaults.standard
+        let repositorySettings = Theme.actionButton("Repository Settings…",target:self,action:#selector(showRepositorySettings))
+        let diffSettings = Theme.actionButton("Diff Appearance…",target:self,action:#selector(showDiffSettings))
         let showMessage = NSButton(checkboxWithTitle:L.text("Show Commit Message Area"),target:nil,action:nil)
         showMessage.state = defaults.object(forKey:"git.showCommitMessageArea") as? Bool == false ? .off : .on
         let defaultFetch = NSButton(checkboxWithTitle:L.text("Auto Fetch by Default"),target:nil,action:nil)
@@ -790,15 +1053,15 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         let terminal = NSTextField(string:defaults.string(forKey:"git.externalTerminal") ?? "")
         editor.placeholderString = "/Applications/Editor.app"
         terminal.placeholderString = "/Applications/Terminal.app"
-        let accessory = NSView(frame:NSRect(x:0,y:0,width:470,height:384))
-        Theme.pin(Theme.stack([graph,showMessage,worktreeStatus,Theme.stack([Theme.label("Commit Time"),relative]),expand,Theme.stack([Theme.label("Auto Fetch"),fetch]),defaultFetch,
+        let accessory = NSView(frame:NSRect(x:0,y:0,width:470,height:440))
+        Theme.pin(Theme.stack([Theme.stack([repositorySettings,diffSettings]),graph,showMessage,worktreeStatus,Theme.stack([Theme.label("Commit Time"),relative]),expand,Theme.stack([Theme.label("Auto Fetch"),fetch]),defaultFetch,
                               Theme.stack([Theme.label("Fetch interval in minutes"),minutes,defaultInterval]),
                               Theme.stack([Theme.label("Default fetch interval in minutes"),defaultMinutes]),
                               Theme.label(L.text("Last successful Fetch")+" · "+last),
                               Theme.stack([Theme.label("External editor"),editor]),
                               Theme.stack([Theme.label("External terminal"),terminal])],
                              orientation:.vertical,spacing:6),in:accessory)
-        let alert = NSAlert(); alert.messageText = L.text("Git Settings…"); alert.accessoryView = accessory
+        let alert = NSAlert(); alert.window.appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua); alert.messageText = L.text("Git Settings…"); alert.accessoryView = accessory
         alert.addButton(withTitle:L.text("Save")); alert.addButton(withTitle:L.text("Cancel"))
         alert.beginSheetModal(for:window) { [weak self] response in
             guard response == .alertFirstButtonReturn,let self else { return }
@@ -841,12 +1104,13 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
 
     @objc private func fetch() {
         let repo = repository,operation = UUID()
-        performResult("Fetching…",operation:operation,{ Result { try repo.run(["fetch","--all"],timeout:120) } }) { [weak self] result in
+        performResult("Fetching…",operation:operation,{ Result { try repo.fetch() } }) { [weak self] result in
             switch result {
             case .success:
                 self?.fetchFailure = nil
                 self?.fetchOperation = nil
                 self?.lastSuccessfulFetch = Date()
+                if let self { GitAutoFetchScheduler.shared.recordSuccess(self.location) }
             case .failure(let error):
                 self?.fetchFailure = error.localizedDescription
                 self?.fetchOperation = operation
@@ -855,8 +1119,13 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
             }
         }
     }
-    @objc private func pull() { let repo = repository; perform("Pulling (fast-forward only)…") { _ = try repo.run(["pull","--ff-only"],timeout:120) } }
-    @objc private func push() { let repo = repository; perform("Pushing…") { _ = try repo.run(["push"],timeout:120) } }
+    @objc private func pull() {
+        let repo = repository
+        perform("Pulling (fast-forward only)…",onSuccess:{ [weak self] in
+            guard let self else { return }; GitAutoFetchScheduler.shared.recordSuccess(self.location)
+        }) { _ = try repo.fetch(); _ = try repo.run(["pull","--ff-only"],timeout:120) }
+    }
+    @objc private func push() { let repo = repository; perform("Pushing…") { _ = try repo.pushTrackingBranch() } }
     @objc private func browseRepositories() { onRepositories?() }
     @objc func browseTools() {
         var options = ["Stash Changes","List Stashes","Create Tag","List Remotes"].map { operationOption($0) }
@@ -890,6 +1159,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         if let fetchFailure {
             options.insert(PickerOption(title:L.text("Fetch Failure Details…"),detail:"") { [weak self] in self?.showFetchFailure(fetchFailure) },at:0)
         }
+        if !worktreesEnabled { options.removeAll { $0.title == L.text("Clean Up Merged Worktrees…") } }
         showGitPicker("Git Tools…",options)
     }
     private func amendLastCommit() {
@@ -928,7 +1198,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
             let head = (try? repo.run(["rev-parse","HEAD"]))?.trimmingCharacters(in:.whitespacesAndNewlines)
             DispatchQueue.main.async {
                 guard let self,self.mode.selectedSegment == 1,let head else { return }
-                if let row = self.displayedCommits.firstIndex(where:{ $0.hash == head }) {
+                if let row = self.historyRow(for:head) {
                     self.table.selectRowIndexes(IndexSet(integer:row),byExtendingSelection:false)
                     self.table.scrollRowToVisible(row)
                 } else {
@@ -943,7 +1213,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         performResult("Reading repository…",{
             let hash = try repo.resolvedRevision(ref)
             let parents = try repo.run(["rev-list","--parents","-1",hash,"--"]).split(whereSeparator:\.isWhitespace).dropFirst().map(String.init)
-            guard let base = parents.first else { return [GitReviewPanel.File]() }
+            guard let base = parents.first else { throw GitError.command("Invalid stash commit.") }
             var files = try repo.comparePaths(base,hash).map { path in
                 GitReviewPanel.File(path:path,patch:{ try repo.comparisonPatch(base,hash,path:path) },images:{ try repo.revisionImages(base,hash,path:path) })
             }
@@ -953,8 +1223,12 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
                     GitReviewPanel.File(path:path,patch:{ try repo.commitDiff(untracked,path:path) },images:{ (nil,try repo.blobData(untracked,path:path)) })
                 }
             }
-            return files
-        }) { [weak self] files in self?.openReview(files) }
+            return (hash,files)
+        }) { [weak self] hash,files in
+            self?.openReview(files,context:.init(title:ref,primaryActionTitle:L.text("Apply Stash"),primaryAction:{ [weak self] in
+                self?.perform("Applying stash…") { _ = try repo.run(["stash","apply",hash],timeout:120) }
+            }))
+        }
     }
 
     private func browseStashes() {
@@ -997,13 +1271,13 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         }
         let row = table.clickedRow
         guard row >= 0 else { return }
-        table.selectRowIndexes(IndexSet(integer:row),byExtendingSelection:false)
+        if !table.selectedRowIndexes.contains(row) { table.selectRowIndexes(IndexSet(integer:row),byExtendingSelection:false) }
         if let commit = selectedCommit {
             addMenuOptions([
                 PickerOption(title:L.text("Copy Commit Hash"),detail:"") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(commit.hash,forType:.string) },
                 PickerOption(title:L.text("Merged Commits…"),detail:"") { [weak self] in self?.browseMergedCommits(commit) },
                 PickerOption(title:L.text("Commit Details…"),detail:"") { [weak self] in
-                    self?.showGitText("Commit Details…",text:commit.hash+"\n"+commit.author+" <"+commit.email+">\n"+commit.date+"\n\n"+commit.message)
+                    self?.navigateToCommit(commit.hash)
                 },
                 PickerOption(title:L.text("Compare with HEAD"),detail:"") { [weak self] in self?.openComparison(commit.hash,"HEAD") },
                 PickerOption(title:L.text("Compare Selected Commits"),detail:"") { [weak self] in self?.compareSelectedCommits() },
@@ -1016,7 +1290,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         } else if let folder = fileGroups[row],mode.selectedSegment == 0 {
             let stage = side.selectedSegment == 0,repo = repository
             addMenuOptions([PickerOption(title:L.text(stage ? "Stage Folder" : "Unstage Folder"),detail:folder) { [weak self] in
-                self?.perform(stage ? "Staging…" : "Unstaging…") { try repo.setFolderStaged(folder,staged:stage) }
+                self?.perform(stage ? "Staging…" : "Unstaging…",onSuccess:{ [weak self] in guard let self else { return }; self.markLanding(self.changes.filter { $0.path.hasPrefix(folder+"/") }.map(\.path),staged:stage) }) { try repo.setFolderStaged(folder,staged:stage) }
             }],to:menu)
         } else if let change = selectedChange {
             addMenuOptions([PickerOption(title:L.text("File History…"),detail:change.path) { [weak self] in
@@ -1041,36 +1315,12 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
     @objc private func invokeMenuItem(_ sender: NSMenuItem) { (sender.representedObject as? PickerOption)?.invoke() }
 
     func finishWorktree(_ entry: GitWorktreeEntry) {
-        guard let window,onCanRemoveWorktree?(entry.path) != false else {
-            caption.stringValue = L.text("Close the worktree window and stop its agents before finishing.")
-            return
-        }
-        let repo = repository
-        let branches = branchNames.filter { $0 != entry.branch }
-        guard !branches.isEmpty else { return }
-        let targets = Theme.choiceButton()
-        targets.frame = NSRect(x:0,y:0,width:360,height:28)
-        targets.addItems(withTitles:branches)
-        if branches.contains(currentBranch) { targets.selectItem(withTitle:currentBranch) }
-        let alert = NSAlert(); alert.messageText = L.text("Finish Worktree…")
-        alert.informativeText = entry.branch+"\n"+L.text("Choose the target branch. Git will merge in its checked-out worktree or switch this clean worktree to that branch.")
-        let remove = NSButton(checkboxWithTitle:L.text("Remove the source worktree after merging"),target:nil,action:nil)
-        remove.state = .on
-        let delete = NSButton(checkboxWithTitle:L.text("Delete merged local branches"),target:nil,action:nil)
-        let accessory = NSView(frame:NSRect(x:0,y:0,width:370,height:94))
-        Theme.pin(Theme.stack([targets,remove,delete],orientation:.vertical,spacing:8),in:accessory)
-        alert.accessoryView = accessory
-        alert.addButton(withTitle:L.text("Finish Worktree")); alert.addButton(withTitle:L.text("Cancel"))
-        alert.beginSheetModal(for:window) { [weak self] response in
-            guard response == .alertFirstButtonReturn,let self,let target = targets.titleOfSelectedItem,
-                  self.onCanRemoveWorktree?(entry.path) != false else { return }
-            let removeSource = remove.state == .on,deleteBranch = delete.state == .on
-            self.performResult("Finishing Worktree…",{
-                try repo.finishWorktree(entry,into:target,removeSource:removeSource,deleteBranch:deleteBranch)
-            }) { [weak self] merge in
-                if let merge { self?.showWorktreeConflicts(merge) }
-            }
-        }
+        guard worktreesEnabled,let window else { return }
+        GitWorktreePanels.finish(entry:entry,repository:repository,owner:window,
+            canRemove:{ [weak self] in self?.onCanRemoveWorktree?($0) != false },
+            onOpen:{ [weak self] in self?.onOpenWorktree?($0) },
+            onOpenFile:{ [weak self] repo,path in self?.onOpenMergeFile?(repo,path) },
+            onChanged:{ [weak self] in self?.reload() },onRelocated:{ [weak self] in self?.onWorktreeRelocated?($0,$1) })
     }
 
     private func showWorktreeConflicts(_ merge: GitWorktreeMerge) {
@@ -1165,7 +1415,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
 
 }
 
-private extension GitWorkspace {
+extension GitWorkspace {
     func showGitText(_ title: String,text: String,export: Bool = false) {
         guard let window else { return }
         let scroll = NSTextView.scrollableTextView()
@@ -1191,11 +1441,14 @@ private extension GitWorkspace {
         }
     }
 
+}
+
+private extension GitWorkspace {
     func logText(_ entry: GitCommandJournal.Entry) -> String {
         let date = ISO8601DateFormatter().string(from:entry.date)
         let result = L.text(entry.succeeded ? "Succeeded" : "Failed")
         let duration = String(format:"%.3fs",entry.elapsed)
-        return "\(date)  git \(entry.command)  \(result)  \(duration)"
+        return "\(date)  \(entry.displayCommand)  \(result)  \(duration)"
     }
 
     func showGitLog(failuresOnly: Bool = false,operation: UUID? = nil,includeReads: Bool = true) {
@@ -1225,17 +1478,17 @@ private extension GitWorkspace {
             }
         ]
         options += entries.map { entry in
-            PickerOption(title:"git "+entry.command,detail:logText(entry)) { [weak self] in
+            PickerOption(title:entry.displayCommand,detail:logText(entry)) { [weak self] in
                 guard let self else { return }
                 self.showGitPicker("Git Command Log…",[
-                    PickerOption(title:L.text("Copy Command"),detail:"git "+entry.command) {
-                        NSPasteboard.general.clearContents(); NSPasteboard.general.setString("git "+entry.command,forType:.string)
+                    PickerOption(title:L.text("Copy Command"),detail:entry.displayCommand) {
+                        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(entry.displayCommand,forType:.string)
                     },
                     PickerOption(title:L.text("Copy Log"),detail:"") { [weak self] in
                         guard let self else { return }
                         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(self.logText(entry),forType:.string)
                     },
-                    PickerOption(title:L.text("Details…"),detail:"") { [weak self] in self?.showGitText("Git Command Log…",text:self?.logText(entry) ?? "") }
+                    PickerOption(title:L.text("Details…"),detail:"") { [weak self] in self?.showGitText("Git Command Log…",text:entry.details) }
                 ])
             }
         }
@@ -1324,21 +1577,23 @@ private extension GitWorkspace {
         })
     }
 
-    func openReview(_ files: [GitReviewPanel.File]) {
+    func openReview(_ files: [GitReviewPanel.File],context: GitReviewPanel.Context = .init(),reloadFiles: (() throws -> [GitReviewPanel.File])? = nil) {
         guard let window else { return }
-        reviewPanel = GitReviewPanel(repository:repository,files:files,owner:window,onOpen:onOpen)
+        reviewPanel = GitReviewPanel(repository:repository,files:files,owner:window,onOpen:onOpen,context:context,reloadFiles:reloadFiles)
     }
 
     func browseMergedCommits(_ commit: GitCommit) {
         guard commit.parents.count >= 2 else { return }
         let repo = repository
-        performResult("Reading repository…",{ try repo.run(["log","--format=%H%x09%s",commit.parents[0]+".."+commit.hash,"--"]) }) { [weak self] output in
-            self?.showGitPicker("Merged Commits…",output.split(whereSeparator:\.isNewline).compactMap { line in
-                let parts = line.split(separator:"\t",maxSplits:1)
-                guard parts.count == 2 else { return nil }
-                let hash = String(parts[0])
-                return PickerOption(title:String(parts[1]),detail:String(hash.prefix(12))) { [weak self] in self?.browseCommitFiles(hash) }
-            })
+        performResult("Reading repository…",{ try repo.run(["log","--format=%H%x00%an%x00%ad%x00%s%x00%b%x00","--date=short",commit.parents[0]+".."+commit.hash+"^@","--"]) }) { [weak self] output in
+            let fields = output.components(separatedBy:"\0")
+            let options: [PickerOption] = stride(from:0,to:fields.count-1,by:5).compactMap { index in
+                guard index+4 < fields.count else { return nil }
+                let hash = fields[index].trimmingCharacters(in:.newlines)
+                let detail = fields[index+1]+" · "+fields[index+2]+" · "+String(hash.prefix(12))+" · "+String(fields[index+4].trimmingCharacters(in:.whitespacesAndNewlines).prefix(300))
+                return PickerOption(title:fields[index+3],detail:detail) { [weak self] in self?.navigateToCommit(hash) }
+            }
+            self?.showGitPicker("Merged Commits…",options)
         }
     }
 
@@ -1357,32 +1612,38 @@ private extension GitWorkspace {
     func browseTrackedFiles() {
         let repo = repository
         performResult("Reading repository…",{ try repo.reviewFiles() }) { [weak self] paths in
-            self?.openReview(paths.map { GitReviewPanel.File(path:$0,patch:nil) })
+            self?.openReview(paths.map { GitReviewPanel.File(path:$0,patch:nil) },reloadFiles:{ try repo.reviewFiles().map { GitReviewPanel.File(path:$0,patch:nil) } })
         }
     }
 
     func browseWorkingChanges() {
         let repo = repository,staged = side.selectedSegment == 1
-        openReview(visibleChanges.map { change in
-            GitReviewPanel.File(path:change.path,patch:{ try repo.diff(change,staged:staged) },indexSide:change.conflicted ? nil : staged,images:{
-                let head = try? repo.resolvedRevision("HEAD")
-                let before = staged ? head.flatMap { try? repo.blobData($0,path:change.originalPath ?? change.path) } : try? repo.blobData(":",path:change.path)
-                let after = staged ? try? repo.blobData(":",path:change.path) : try? repo.workingFileData(change.path,largeFile:true)
-                return (before,after)
-            })
-        })
+        let loader: () throws -> [GitReviewPanel.File] = {
+            try repo.changes().filter { staged ? $0.staged : $0.unstaged }.map { change in
+                GitReviewPanel.File(path:change.path,patch:{ try repo.diff(change,staged:staged) },indexSide:change.conflicted ? nil : staged,images:{
+                    let head = try? repo.resolvedRevision("HEAD")
+                    let before = staged ? head.flatMap { try? repo.blobData($0,path:change.originalPath ?? change.path) } : try? repo.blobData(":",path:change.path)
+                    let after = staged ? try? repo.blobData(":",path:change.path) : try? repo.workingFileData(change.path,largeFile:true)
+                    return (before,after)
+                })
+            }
+        }
+        performResult("Reading repository…",loader) { [weak self] files in self?.openReview(files,reloadFiles:loader) }
     }
 
-    func browseFileHistory(_ path: String,offset: Int = 0) {
+    func browseFileHistory(_ path: String,offset: Int = 0,revision: String? = nil) {
         let repo = repository,pageSize = 60
-        performResult("Reading repository…",{ try repo.fileHistory(path,limit:pageSize+1,offset:offset) }) { [weak self] commits in
-            var options = commits.prefix(pageSize).map { commit in
-                PickerOption(title:commit.subject,detail:String(commit.hash.prefix(8))+" · "+commit.author) { [weak self] in
-                    self?.showHistoricalDiff(commit,path:path)
+        performResult("Reading repository…",{
+            let tip = try repo.resolvedRevision(revision ?? "HEAD")
+            return (tip,try repo.fileHistoryEntries(path,revision:tip,limit:pageSize+1,offset:offset))
+        }) { [weak self] tip,entries in
+            var options = entries.prefix(pageSize).map { entry in
+                PickerOption(title:entry.commit.subject,detail:entry.commit.author+" · "+entry.commit.date+" · "+String(entry.commit.hash.prefix(12))) { [weak self] in
+                    self?.openReview([GitReviewPanel.File(path:entry.newPath ?? entry.oldPath ?? path,patch:{ try repo.fileHistoryDiff(entry) },images:{ try repo.fileHistoryImages(entry) })],context:.init(title:entry.commit.subject,statistics:entry.commit.author+" · "+entry.commit.date+" · "+entry.commit.hash,message:entry.commit.message))
                 }
             }
-            if commits.count > pageSize {
-                options.insert(PickerOption(title:L.text("Load More"),detail:path) { [weak self] in self?.browseFileHistory(path,offset:offset+pageSize) },at:0)
+            if entries.count > pageSize {
+                options.insert(PickerOption(title:L.text("Load More"),detail:path) { [weak self] in self?.browseFileHistory(path,offset:offset+pageSize,revision:tip) },at:0)
             }
             self?.showGitPicker("File History…",options)
         }
@@ -1402,7 +1663,7 @@ private extension GitWorkspace {
         guard showsWorktrees,!refreshingWorktreeStates,!running else { return }
         refreshingWorktreeStates = true
         let repo = repository,entries = worktrees
-        let target = branchNames.contains("main") ? "main" : currentBranch
+        let target = ""
         DispatchQueue.global(qos:.utility).async { [weak self] in
             let latest = (try? repo.worktrees()) ?? entries
             let merged = Set(((try? repo.cleanupCandidates(into:target)) ?? []).map { $0.entry.path })
@@ -1410,7 +1671,7 @@ private extension GitWorkspace {
             for entry in latest where !entry.prunable {
                 if let state = try? repo.worktreeState(entry) {
                     states[entry.path] = state == "Clean" && merged.contains(entry.path) ? "Merged" : state
-                    details[entry.path] = try? repo.worktreeDetail(entry,against:target)
+                    details[entry.path] = (try? repo.worktreeDetail(entry,against:target)).map(GitWorktreeStatusText.localized)
                 }
             }
             let result = states,tooltip = details
@@ -1427,7 +1688,8 @@ private extension GitWorkspace {
     }
 
     func browseMergedWorktrees() {
-        showGitPicker("Select Cleanup Target",branchNames.map { target in
+        guard worktreesEnabled else { return }
+        showGitPicker("Select Cleanup Target",[PickerOption(title:L.text("Automatic Trunk"),detail:L.text("Use the remote default branch and its upstream")) { [weak self] in self?.previewMergedWorktrees(into:"") }]+branchNames.map { target in
             PickerOption(title:target,detail:"") { [weak self] in self?.previewMergedWorktrees(into:target) }
         })
     }
@@ -1436,6 +1698,6 @@ private extension GitWorkspace {
         guard let window else { return }
         cleanupPanel = GitWorktreeCleanupPanel(repository:repository,target:target,owner:window,canRemove:{ [weak self] path in
             self?.onCanRemoveWorktree?(path) != false
-        },onRemoved:{ [weak self] in self?.reload() })
+        },onRemoved:{ [weak self] in self?.reload() },onWorktreeRemoved:{ [weak self] in self?.onWorktreeRelocated?($0,nil) })
     }
 }

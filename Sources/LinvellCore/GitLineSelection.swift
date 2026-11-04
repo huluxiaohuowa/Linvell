@@ -15,6 +15,20 @@ extension GitHunk {
         }
         let pattern = try NSRegularExpression(pattern:#"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@"#)
         var header = lines[..<first].map(\.0).filter { !$0.hasPrefix("index ") }
+        if unstage,header.contains(where:{ $0.hasPrefix("rename from ") || $0.hasPrefix("copy from ") }),
+           let target = header.first(where:{ $0.hasPrefix("+++ ") }).map({ String($0.dropFirst(4)) }) {
+            // Partially unstaging content keeps the staged rename and edits the new index path.
+            func side(_ prefix: String) -> String {
+                if target.hasPrefix("\"b/") { return "\""+prefix+target.dropFirst(3) }
+                if target.hasPrefix("b/") { return prefix+target.dropFirst(2) }
+                return target
+            }
+            let a = side("a/"),b = side("b/")
+            header.removeAll { $0.hasPrefix("diff --git ") || $0.hasPrefix("rename ") || $0.hasPrefix("copy ") || $0.hasPrefix("similarity index ") || $0.hasPrefix("dissimilarity index ") || $0.hasPrefix("--- ") || $0.hasPrefix("+++ ") }
+            header.insert("diff --git "+a+" "+b,at:0)
+            // The general reversal below swaps these back into old=a/new=b order.
+            header += ["--- "+b,"+++ "+a]
+        }
         if unstage {
             header = header.map { line in
                 if line.hasPrefix("new file mode ") { return line.replacingOccurrences(of:"new file mode ",with:"deleted file mode ") }

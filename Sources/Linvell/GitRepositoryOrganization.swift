@@ -115,3 +115,87 @@ final class GitRepositoryPickerRefresh {
         }
     }
 }
+
+extension GitRepositoryOrganization {
+    static func locations(defaults: UserDefaults = .standard) -> [WorkspaceSession] {
+        let saved = defaults.data(forKey:"git.savedRepositories").flatMap { try? JSONDecoder().decode([WorkspaceSession].self,from:$0) } ?? []
+        return saved+WorkspaceSession.recent(defaults:defaults).filter { !saved.contains($0) }
+    }
+    static func persist(_ locations: [WorkspaceSession],defaults: UserDefaults = .standard) {
+        register(locations,defaults:defaults)
+        if let data = try? JSONEncoder().encode(locations) { defaults.set(data,forKey:"git.savedRepositories") }
+    }
+    static func remove(_ ids: Set<String>,defaults: UserDefaults = .standard) {
+        persist(locations(defaults:defaults).filter { !ids.contains($0.repositoryID) },defaults:defaults)
+        let recent = WorkspaceSession.recent(defaults:defaults).filter { !ids.contains($0.repositoryID) }
+        if let data = try? JSONEncoder().encode(recent) { defaults.set(data,forKey:WorkspaceSession.recentKey) }
+        for key in ["git.repositoryAliases","git.repositoryGroups","git.repositoryAdded","git.repositoryOpened","git.repositoryModified"] {
+            var values = defaults.dictionary(forKey:key) ?? [:]; for id in ids { values.removeValue(forKey:id) }; defaults.set(values,forKey:key)
+        }
+        defaults.set((defaults.stringArray(forKey:"git.archivedRepositories") ?? []).filter { !ids.contains($0) },forKey:"git.archivedRepositories")
+        if let current = WorkspaceSession.load(defaults:defaults),ids.contains(current.repositoryID) { defaults.removeObject(forKey:WorkspaceSession.key); defaults.removeObject(forKey:"lastProject") }
+    }
+    @discardableResult
+    static func relocate(_ location: WorkspaceSession,to path: String?,defaults: UserDefaults = .standard) -> String? {
+        var persistenceError: String?
+        do { try GitWorktreePersistence.relocate(location,to:path) } catch { persistenceError = error.localizedDescription }
+        let replacement: WorkspaceSession? = path.map { switch location { case .local: return .local(path:$0); case .ssh(let host,_): return .ssh(host:host,path:$0) } }
+        let id = location.repositoryID
+        for key in ["git.savedRepositories",WorkspaceSession.recentKey] {
+            let values = defaults.data(forKey:key).flatMap { try? JSONDecoder().decode([WorkspaceSession].self,from:$0) } ?? []
+            let updated = values.compactMap { $0 == location ? replacement : $0 }
+            if let data = try? JSONEncoder().encode(updated) { defaults.set(data,forKey:key) }
+        }
+        for key in ["git.repositoryAliases","git.repositoryGroups","git.repositoryAdded","git.repositoryOpened","git.repositoryModified","git.repositoryWorktreeVisibility"] {
+            var values = defaults.dictionary(forKey:key) ?? [:]
+            if let value = values.removeValue(forKey:id),let replacement { values[replacement.repositoryID] = value }; defaults.set(values,forKey:key)
+        }
+        for key in ["git.repositoryOrder","git.repositoryRootOrder","git.archivedRepositories"] { defaults.set((defaults.stringArray(forKey:key) ?? []).compactMap { $0 == id ? replacement?.repositoryID : $0 },forKey:key) }
+        let oldKey = GitAutoFetchScheduler.key(location)
+        for suffix in ["",".minutes",".lastSuccess",".error"] {
+            if let value = defaults.object(forKey:oldKey+suffix),let replacement { defaults.set(value,forKey:GitAutoFetchScheduler.key(replacement)+suffix) }; defaults.removeObject(forKey:oldKey+suffix)
+        }
+        if WorkspaceSession.load(defaults:defaults) == location {
+            if let replacement,let data = try? JSONEncoder().encode(replacement) { defaults.set(data,forKey:WorkspaceSession.key) }
+            else { defaults.removeObject(forKey:WorkspaceSession.key) }
+        }
+        var families = defaults.dictionary(forKey:"git.repositoryWorktreeFamilies") as? [String:String] ?? [:]
+        if let family = families.removeValue(forKey:id),let replacement { families[replacement.repositoryID] = family }
+        if let replacement { families = families.mapValues { $0 == id ? replacement.repositoryID : $0 } }
+        defaults.set(families,forKey:"git.repositoryWorktreeFamilies")
+        var errors = defaults.dictionary(forKey:"git.autoFetchErrors") as? [String:String] ?? [:]
+        if let error = errors.removeValue(forKey:oldKey),let replacement { errors[GitAutoFetchScheduler.key(replacement)] = error }; defaults.set(errors,forKey:"git.autoFetchErrors")
+        return persistenceError
+    }
+    static func repository(_ location: WorkspaceSession) throws -> GitRepository {
+        switch location { case .local(let path): return GitRepository(root:URL(fileURLWithPath:path))
+        case .ssh(let host,let path): return GitRepository(remote:try SSHRemote(host:host),directory:path) }
+    }
+    static func showsWorktrees(_ location: WorkspaceSession,defaults: UserDefaults = .standard) -> Bool {
+        (defaults.object(forKey:"git.enableWorktrees") as? Bool ?? true) && (defaults.dictionary(forKey:"git.repositoryWorktreeVisibility")?[worktreePreferenceKey(location,defaults:defaults)] as? Bool ?? true)
+    }
+}
+
+extension GitRepositoryOrganization {
+    static func registerWorktreeFamily(_ worktrees: [GitWorktreeEntry],location: WorkspaceSession,defaults: UserDefaults = .standard) {
+        guard let primary = worktrees.first else { return }
+        func locationAt(_ path: String) -> WorkspaceSession { switch location { case .local: return .local(path:path); case .ssh(let host,_): return .ssh(host:host,path:path) } }
+        let family = locationAt(primary.path).repositoryID
+        var families = defaults.dictionary(forKey:"git.repositoryWorktreeFamilies") as? [String:String] ?? [:]
+        let before = families
+        for tree in worktrees { families[locationAt(tree.path).repositoryID] = family }; families[location.repositoryID] = family
+        if families != before { defaults.set(families,forKey:"git.repositoryWorktreeFamilies") }
+        var preferences = defaults.dictionary(forKey:"git.repositoryWorktreeVisibility") as? [String:Bool] ?? [:]
+        let previous = preferences
+        if preferences[family] == nil,let inherited = preferences[location.repositoryID] ?? worktrees.compactMap({ preferences[locationAt($0.path).repositoryID] }).first { preferences[family] = inherited }
+        for tree in worktrees { let id = locationAt(tree.path).repositoryID; if id != family { preferences.removeValue(forKey:id) } }
+        if preferences != previous { defaults.set(preferences,forKey:"git.repositoryWorktreeVisibility") }
+    }
+    static func worktreePreferenceKey(_ location: WorkspaceSession,defaults: UserDefaults = .standard) -> String {
+        (defaults.dictionary(forKey:"git.repositoryWorktreeFamilies") as? [String:String])?[location.repositoryID] ?? location.repositoryID
+    }
+    static func setWorktreesEnabled(_ enabled: Bool,for location: WorkspaceSession,defaults: UserDefaults = .standard) {
+        var values = defaults.dictionary(forKey:"git.repositoryWorktreeVisibility") as? [String:Bool] ?? [:]
+        values[worktreePreferenceKey(location,defaults:defaults)] = enabled; defaults.set(values,forKey:"git.repositoryWorktreeVisibility")
+    }
+}

@@ -8,10 +8,15 @@ enum GitPreviewText {
         else if data.starts(with:[0xFE,0xFF]) { source = try strictUTF16(data.dropFirst(2),littleEndian:false) }
         else { source = String(data:data.starts(with:[0xEF,0xBB,0xBF]) ? data.dropFirst(3) : data[...],encoding:.utf8) }
         guard let source else { throw GitError.command("Unsupported or invalid text encoding.") }
-        var lines = 1,length = 0
-        for unit in source.utf16 {
+        var lines = 1,length = 0,previousWasCR = false
+        for (index,unit) in source.utf16.enumerated() {
+            if index % 4096 == 0 { try Task.checkCancellation() }
             guard unit != 0,unit >= 32 || [9,10,13,12].contains(unit) else { throw GitError.command("Binary file") }
-            if [10,13,0x2028,0x2029].contains(unit) { lines += 1; length = 0 } else { length += 1 }
+            if [10,13,0x2028,0x2029].contains(unit) {
+                if unit != 10 || !previousWasCR { lines += 1 }
+                length = 0
+            } else { length += 1 }
+            previousWasCR = unit == 13
             if !plain && (lines > 100_000 || length > 20_000) {
                 throw GitError.command("This file needs a plain-text preview. Choose Load Large Plain Text.")
             }

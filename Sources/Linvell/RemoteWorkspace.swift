@@ -3,7 +3,7 @@ import LinvellCore
 
 final class RemoteDocument {
     let connection: SSHRemote
-    let path: String
+    var path: String
     var digest: String
     let cache: URL
     init(connection: SSHRemote,path: String,digest: String,data: Data,cacheRoot: URL = FileManager.default.temporaryDirectory) throws {

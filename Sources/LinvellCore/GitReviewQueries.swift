@@ -3,12 +3,12 @@ import Foundation
 extension GitRepository {
     public func changedPaths(in hash: String) throws -> [String] {
         guard [40,64].contains(hash.count),hash.allSatisfy(\.isHexDigit) else { throw GitError.invalidPath }
-        return try run(["show","--format=","--first-parent","--name-only","-z",hash,"--"])
+        return try run(["show","--format=","--first-parent","--find-renames","--name-only","-z",hash,"--"])
             .split(separator:"\0").map(String.init)
     }
 
     public func fileHistory(_ path: String,limit: Int = 100,offset: Int = 0) throws -> [GitCommit] {
-        try history(allRefs:false,limit:limit,offset:offset,path:path)
+        try fileHistoryEntries(path,limit:limit,offset:offset).map(\.commit)
     }
 
     public func setFolderStaged(_ folder: String,staged: Bool) throws {
@@ -38,8 +38,21 @@ extension GitRepository {
     }
 
     public func workingFilePreview(_ path: String,largeFile: Bool = false) throws -> String {
+        try workingFilePreviewWithSize(path,largeFile:largeFile).text
+    }
+
+    public func workingFilePreviewWithSize(_ path: String,largeFile: Bool = false) throws -> (text: String,bytes: Int) {
         let data = try workingFileData(path,largeFile:largeFile)
-        return try GitPreviewText.decode(data,plain:largeFile)
+        return (try GitPreviewText.decode(data,plain:largeFile),data.count)
+    }
+
+    func validateDiffFile(_ path: String) throws {
+        let path = try checked(path)
+        if let remote {
+            _ = try remote.request("review-read",path:root.appendingPathComponent(path).path,digest:"diff",repositoryRoot:directory)
+        } else {
+            _ = try GitSourceReader.read(root:root,path:path,limit:16*1024*1024,allowSymbolicLink:true)
+        }
     }
 
     public func workingFileData(_ path: String,largeFile: Bool = false) throws -> Data {
@@ -53,14 +66,7 @@ extension GitRepository {
             }
             data = decoded
         } else {
-            let values = try file.resourceValues(forKeys:[.isRegularFileKey,.isSymbolicLinkKey])
-            guard values.isRegularFile == true,values.isSymbolicLink != true,
-                  file.resolvingSymlinksInPath().path.hasPrefix(root.resolvingSymlinksInPath().path+"/") else {
-                throw GitError.invalidPath
-            }
-            let handle = try FileHandle(forReadingFrom:file)
-            defer { try? handle.close() }
-            data = try handle.read(upToCount:limit+1) ?? Data()
+            data = try GitSourceReader.read(root:root,path:checked(path),limit:limit)
         }
         guard data.count <= limit else { throw GitError.command("File too large for a preview.") }
         return data
@@ -74,12 +80,12 @@ extension GitRepository {
     }
 
     public func comparePaths(_ base: String,_ target: String) throws -> [String] {
-        try run(["diff","--name-only","-z","--no-ext-diff",resolvedRevision(base),resolvedRevision(target),"--"])
+        try run(["diff","--name-only","-z","--find-renames","--no-ext-diff",resolvedRevision(base),resolvedRevision(target),"--"])
             .split(separator:"\0").map(String.init)
     }
 
     public func comparisonPatch(_ base: String,_ target: String,path: String) throws -> String {
-        try run(["diff","--no-ext-diff","--no-textconv","--full-index",resolvedRevision(base),resolvedRevision(target),"--",checked(path)])
+        try revisionPatch(base,target,path:path)
     }
 
     public func blobData(_ revision: String,path: String) throws -> Data {

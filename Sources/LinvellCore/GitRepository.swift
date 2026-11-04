@@ -57,7 +57,7 @@ public struct GitRepository {
     public init(root: URL) { directory = root.path; remote = nil; executor = nil }
     public init(remote: SSHRemote,directory: String) {
         self.directory = directory; self.remote = remote
-        executor = { try remote.git($1,directory:$0,input:$2,timeout:$3) }
+        executor = nil
     }
     init(directory: String,remote: SSHRemote?,executor: @escaping Executor) { self.directory = directory; self.remote = remote; self.executor = executor }
     func atWorktree(_ path: String) -> GitRepository {
@@ -79,25 +79,33 @@ public struct GitRepository {
     public var journalScope: String { (remote?.host ?? "local")+"\0"+directory }
     public func run(_ arguments: [String],timeout: TimeInterval = 30,input: Data? = nil) throws -> String {
         let started = Date()
-        var succeeded = false
-        let safeCommands: Set<String> = ["add","branch","checkout","clone","commit","diff","fetch","log","merge","pull","push","restore","show","stash","status","switch","tag","worktree","rev-list","rev-parse","ls-files","ls-tree","cat-file","merge-base","hash-object","show-ref","for-each-ref","config","update-ref"]
-        let command = arguments.first.flatMap { safeCommands.contains($0) ? $0 : nil } ?? "operation"
+        var succeeded = false,exitCode: Int32?,timedOut = false,outputBytes = 0,diagnosticFailure: String?
+        let safeCommands: Set<String> = ["add","branch","checkout","clone","commit","diff","fetch","log","merge","pull","push","restore","show","stash","status","switch","tag","worktree","rev-list","rev-parse","ls-files","ls-tree","cat-file","merge-base","hash-object","show-ref","for-each-ref","config","update-ref","apply","rm","read-tree","remote","merge-tree","check-ref-format"]
+        let command = arguments.first(where:{ safeCommands.contains($0) }) ?? "operation"
         defer {
-            GitCommandJournal.shared.append(.init(operation:GitCommandJournal.operation,date:started,command:command,elapsed:Date().timeIntervalSince(started),succeeded:succeeded,readOnly:["diff","log","show","status","rev-list","rev-parse","ls-files","ls-tree","cat-file","merge-base","hash-object","show-ref","for-each-ref"].contains(command)),scope:journalScope)
+            var entry = GitCommandJournal.Entry(operation:GitCommandJournal.operation,date:started,command:command,elapsed:Date().timeIntervalSince(started),succeeded:succeeded,readOnly:["diff","log","show","status","rev-list","rev-parse","ls-files","ls-tree","cat-file","merge-base","hash-object","show-ref","for-each-ref","check-ref-format"].contains(command))
+            entry.arguments = GitCommandJournal.redactedArguments(arguments)
+            entry.exitCode = exitCode; entry.timedOut = timedOut; entry.outputBytes = outputBytes
+            if !succeeded { entry.failure = timedOut ? "Git operation timed out." : diagnosticFailure ?? "Git command failed; output contents are omitted for privacy." }
+            GitCommandJournal.shared.append(entry,scope:journalScope)
         }
         if let executor {
             let value = try executor(directory,arguments,input,timeout)
-            succeeded = true
+            succeeded = true; exitCode = 0; outputBytes = value.utf8.count
             return value
         }
-        let result = try ToolCommand.run(URL(fileURLWithPath:"/usr/bin/git"),arguments:Self.arguments(directory:directory,arguments:arguments),directory:root,timeout:timeout,input:input,trimOutput:false,maximumOutputBytes:16*1024*1024)
+        let result: ToolResult
+        if let remote { result = try remote.gitExecution(arguments,directory:directory,input:input,timeout:timeout) }
+        else { result = try ToolCommand.run(URL(fileURLWithPath:"/usr/bin/git"),arguments:Self.arguments(directory:directory,arguments:arguments),directory:root,timeout:timeout,input:input,trimOutput:false,maximumOutputBytes:16*1024*1024) }
+        exitCode = result.exitCode; timedOut = result.timedOut; outputBytes = result.output.utf8.count
+        if !result.succeeded { diagnosticFailure = GitCommandJournal.failureSummary(result.output) }
         let expectedDifference = arguments.first == "diff" && arguments.contains("--no-index") && result.exitCode == 1 && !result.timedOut
         guard result.succeeded || expectedDifference else { throw GitError.command(result.timedOut ? "Git operation timed out." : result.output) }
         succeeded = true
         return result.output
     }
     static func arguments(directory: String,arguments: [String]) -> [String] {
-        ["--no-pager","--literal-pathspecs","-c","color.ui=false","-c","core.fsmonitor=false","-C",directory]+arguments
+        ["--no-pager","--no-optional-locks","--literal-pathspecs","-c","color.ui=false","-c","core.fsmonitor=false","-C",directory]+arguments
     }
     public func changes() throws -> [GitChange] { Self.parseStatus(try run(["status","--porcelain=v1","-z","--untracked-files=all"])) }
     public static func parseStatus(_ text: String) -> [GitChange] {
@@ -123,10 +131,10 @@ public struct GitRepository {
     }
     public func diff(_ change: GitChange,staged: Bool) throws -> String {
         if change.index == "?" {
-            _ = try workingFileData(change.path)
+            try validateDiffFile(change.path)
             return try run(["diff","--no-index","--no-ext-diff","--no-textconv","--full-index","--","/dev/null",checked(change.path)])
         }
-        return try run(["diff","--no-ext-diff","--no-textconv","--full-index"]+(staged ? ["--cached"] : [])+["--",checked(change.path)])
+        return try run(["diff","--no-ext-diff","--no-textconv","--full-index","--find-renames"]+(staged ? ["--cached"] : [])+["--"]+[change.path,change.originalPath].compactMap { $0 }.map(checked))
     }
     public func stage(_ change: GitChange) throws {
         var paths = [try checked(change.path)]
@@ -189,8 +197,8 @@ public struct GitRepository {
             .trimmingCharacters(in:.whitespacesAndNewlines)
     }
 
-    public func history(allRefs: Bool = true,limit: Int = 150,offset: Int = 0,includeMessage: Bool = false,path: String? = nil) throws -> [GitCommit] {
-        let scope = allRefs ? ["--all"] : ["HEAD"]
+    public func history(allRefs: Bool = true,limit: Int = 150,offset: Int = 0,includeMessage: Bool = false,path: String? = nil,revisions: [String]? = nil) throws -> [GitCommit] {
+        let scope = revisions ?? (allRefs ? ["--all"] : ["HEAD"])
         let format = "%H%x00%P%x00%an%x00%ae%x00%ad%x00%s%x00%D%x00"+(includeMessage ? "%B%x00" : "")
         let paths = try path.map { ["--full-history","--first-parent","--",try checked($0)] } ?? []
         let text = try run(["log","-n",String(limit),"--skip="+String(offset)]+scope+["--topo-order","--date=iso-strict","--format="+format]+paths)
@@ -204,6 +212,7 @@ public struct GitRepository {
     }
     public func commitDiff(_ hash: String,path: String? = nil) throws -> String {
         guard [40,64].contains(hash.count),hash.allSatisfy(\.isHexDigit) else { throw GitError.invalidPath }
-        return try run(["show","--first-parent","--format=","--stat","--patch","--no-ext-diff","--no-textconv","--full-index",hash,"--"] + (try path.map { [try checked($0)] } ?? []))
+        if let path,let parent = try commitDetails(hash).parents.first { return try revisionPatch(parent,hash,path:path) }
+        return try run(["show","--first-parent","--find-renames","--format=","--stat","--patch","--no-ext-diff","--no-textconv","--full-index",hash,"--"] + (try path.map { [try checked($0)] } ?? []))
     }
 }

@@ -58,7 +58,7 @@ final class GitRepositoryGroupEditor: NSView, NSTextFieldDelegate {
     }
     @objc private func chooseDirectories() {
         guard let window else { return }
-        let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = true
+        let panel = NSOpenPanel(); panel.appearance = window.effectiveAppearance; panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = true
         panel.title = L.text("Add Repositories from Finder")
         panel.beginSheetModal(for:window) { [weak self] response in
             if response == .OK { self?.importDirectories(panel.urls) }
@@ -92,5 +92,23 @@ final class GitRepositoryGroupEditor: NSView, NSTextFieldDelegate {
                 self.render(); self.onImport?(found); self.onValidationChanged?(); completion?()
             }
         }
+    }
+}
+
+extension GitRepositoryGroupEditor {
+    static func discovered(_ urls: [URL]) throws -> [WorkspaceSession] {
+        var found: [WorkspaceSession] = []
+        for input in urls {
+            let directory = input.standardizedFileURL.resolvingSymlinksInPath()
+            let children = FileManager.default.fileExists(atPath:directory.appendingPathComponent(".git").path) ? [directory] :
+                try FileManager.default.contentsOfDirectory(at:directory,includingPropertiesForKeys:[.isDirectoryKey,.isSymbolicLinkKey],options:.skipsHiddenFiles)
+            for file in children {
+                let values = try file.resourceValues(forKeys:[.isDirectoryKey,.isSymbolicLinkKey])
+                guard values.isDirectory == true,values.isSymbolicLink != true,FileManager.default.fileExists(atPath:file.appendingPathComponent(".git").path),
+                      let resolved = try? GitRepository(root:file).resolvedWorkingTree(),resolved.root.resolvingSymlinksInPath() == file.resolvingSymlinksInPath() else { continue }
+                let value = WorkspaceSession.local(path:resolved.directory); if !found.contains(value) { found.append(value) }
+            }
+        }
+        return found
     }
 }

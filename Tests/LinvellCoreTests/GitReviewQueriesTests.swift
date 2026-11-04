@@ -36,7 +36,7 @@ final class GitReviewQueriesTests: XCTestCase {
         let diff = try repo.commitDiff(hash,path:path)
         XCTAssertTrue(diff.contains("+second"))
         XCTAssertFalse(diff.contains("other.txt"))
-        XCTAssertEqual(GitCommandJournal.shared.entries(for:repo.journalScope).first?.command,"show")
+        XCTAssertEqual(GitCommandJournal.shared.entries(for:repo.journalScope).first?.command,"diff")
     }
     func testReviewPreviewAndFailedJournalEntry() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -83,8 +83,8 @@ final class GitReviewQueriesTests: XCTestCase {
         _ = try repo.run(["mv","image.png","renamed.png"])
         try repo.commit("Renamed image")
         let rename = try repo.patchImages(repo.commitDiff(repo.resolvedRevision("HEAD"),path:"renamed.png"))
-        // A path-filtered rename may be emitted as an addition; the new side must remain available.
-        XCTAssertEqual(rename.1,changed)
+        // A rename-only patch has no index record; revision images retain both blob sides.
+        XCTAssertNil(rename.0); XCTAssertNil(rename.1)
         let renamePair = try repo.commitImages(repo.resolvedRevision("HEAD"),path:"renamed.png")
         XCTAssertEqual(renamePair.0,changed); XCTAssertEqual(renamePair.1,changed)
         let remoteRoot = root.appendingPathComponent("remote.git")

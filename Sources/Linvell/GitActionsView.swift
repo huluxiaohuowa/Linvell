@@ -14,6 +14,8 @@ final class GitActionsView: NSView, NSTextFieldDelegate, LocalProcessTerminalVie
     var pathHint: String?
     var terminal: DisplayPacedTerminalView?
     var onChange: (() -> Void)?
+    var onWorktreeManagement: (() -> Void)?
+    var onFetchSuccess: (() -> Void)?
     var onBusyChange: ((Bool) -> Void)?
     private(set) var busy = false
     private var runButton: NSButton!
@@ -93,15 +95,23 @@ final class GitActionsView: NSView, NSTextFieldDelegate, LocalProcessTerminalVie
     }
     func perform(_ arguments: [String]) {
         guard !running else { return }
+        if let index = arguments.firstIndex(of:"worktree"),arguments.indices.contains(index+1),["move","remove","prune"].contains(arguments[index+1]),let onWorktreeManagement {
+            onWorktreeManagement(); return
+        }
         terminal?.removeFromSuperview(); terminal = nil
         busy = true; onBusyChange?(true); runButton.isEnabled = false; status.stringValue = L.text("Running Git…")
         let repo = repository
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
-            let result = Result { String(try repo.run(arguments,timeout:600).suffix(512*1024)) }
+            let result = Result { () -> String in
+                if arguments.first == "fetch",arguments.dropFirst().contains("--all"),arguments.dropFirst().allSatisfy({ ["--all","--tags","--prune"].contains($0) }) {
+                    _ = try repo.fetch(tags:arguments.contains("--tags"),prune:arguments.contains("--prune")); return L.text("Fetch completed.")
+                }
+                return String(try repo.run(arguments,timeout:600).suffix(512*1024))
+            }
             DispatchQueue.main.async {
                 guard let self else { return }; self.busy = false; self.onBusyChange?(false); self.runButton.isEnabled = true
                 switch result {
-                case .success(let text): self.output.string = text; self.status.stringValue = L.text("Git operation completed."); self.onChange?()
+                case .success(let text): self.output.string = text; self.status.stringValue = L.text("Git operation completed."); self.onChange?(); if ["fetch","pull"].contains(arguments.first ?? "") { self.onFetchSuccess?() }
                 case .failure(let error): self.output.string = String(error.localizedDescription.suffix(512*1024)); self.status.stringValue = L.text("Git operation failed. Review the output.")
                 }
             }

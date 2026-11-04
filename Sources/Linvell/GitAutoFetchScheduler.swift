@@ -10,23 +10,37 @@ final class GitAutoFetchScheduler {
     static let shared = GitAutoFetchScheduler()
     static let finished = Notification.Name("Linvell.AutoFetchFinished")
     private let defaults: UserDefaults
-    private let fetch: (WorkspaceSession) throws -> Void
+    private let fetch: (WorkspaceSession,Date) throws -> Void
     private let queue = OperationQueue()
     private var timer: Timer?
     private var attempts: [String:Date] = [:]
-    private var running: Set<String> = []
+    private(set) var running: Set<String> = []
+    var errors: [String:String] { defaults.dictionary(forKey:"git.autoFetchErrors") as? [String:String] ?? [:] }
 
     init(defaults: UserDefaults = .standard,fetch: ((WorkspaceSession) throws -> Void)? = nil) {
         self.defaults = defaults
-        self.fetch = fetch ?? { location in
+        self.fetch = { location,since in
+            if let fetch { try fetch(location); return }
             let repo: GitRepository
             switch location {
             case .local(let path): repo = GitRepository(root:URL(fileURLWithPath:path))
             case .ssh(let host,let path): repo = GitRepository(remote:try SSHRemote(host:host),directory:path)
             }
-            _ = try repo.resolvedWorkingTree().run(["fetch","--all"],timeout:120)
+            _ = try repo.fetch(scheduledSince:since)
         }
         queue.maxConcurrentOperationCount = 2
+    }
+    private func recordError(_ error: String?,key: String) {
+        var values = defaults.dictionary(forKey:"git.autoFetchErrors") as? [String:String] ?? [:]
+        values[key] = error; defaults.set(values,forKey:"git.autoFetchErrors")
+        if let error { defaults.set(error,forKey:key+".error") } else { defaults.removeObject(forKey:key+".error") }
+    }
+    func recordSuccess(_ location: WorkspaceSession,at date: Date = Date()) { let key = Self.key(location); defaults.set(date,forKey:key+".lastSuccess"); recordError(nil,key:key) }
+    func fetchNow(_ location: WorkspaceSession) {
+        let key = Self.key(location); guard !running.contains(key) else { return }; running.insert(key); let operation = UUID()
+        queue.addOperation { [weak self] in guard let self else { return }; let result = Result { try GitRepositoryOrganization.repository(location).fetch() }
+            DispatchQueue.main.async { self.running.remove(key); let error: String?; switch result { case .success(let date): self.recordSuccess(location,at:date); error = nil; case .failure(let failure): error = failure.localizedDescription; self.recordError(error,key:key) }; NotificationCenter.default.post(name:Self.finished,object:Event(key:key,operation:operation,error:error)) }
+        }
     }
     static func key(_ location: WorkspaceSession) -> String {
         switch location {
@@ -60,13 +74,13 @@ final class GitAutoFetchScheduler {
             let operation = UUID()
             queue.addOperation { [weak self] in
                 guard let self else { return }
-                let result = Result { try GitCommandJournal.$operation.withValue(operation) { try self.fetch(location) } }
+                let result = Result { try GitCommandJournal.$operation.withValue(operation) { try self.fetch(location,last) } }
                 DispatchQueue.main.async {
                     self.running.remove(key)
                     let error: String?
                     switch result {
-                    case .success: self.defaults.set(Date(),forKey:key+".lastSuccess"); error = nil
-                    case .failure(let value): error = value.localizedDescription
+                    case .success: self.defaults.set(Date(),forKey:key+".lastSuccess"); self.recordError(nil,key:key); error = nil
+                    case .failure(let value): error = value.localizedDescription; self.recordError(error,key:key)
                     }
                     NotificationCenter.default.post(name:Self.finished,object:Event(key:key,operation:operation,error:error))
                 }

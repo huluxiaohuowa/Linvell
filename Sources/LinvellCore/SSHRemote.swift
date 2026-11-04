@@ -115,11 +115,14 @@ public struct SSHRemote {
         return "/bin/sh -c "+quote(command)
     }
     public func git(_ arguments: [String],directory: String,input: Data? = nil,timeout: TimeInterval = 30) throws -> String {
-        guard (directory.hasPrefix("/") || directory == "~"),!directory.utf8.contains(0) else { throw GitError.invalidPath }
-        let result = try ToolCommand.run(URL(fileURLWithPath:"/usr/bin/ssh"),arguments:transportArguments(command:Self.gitCommand(arguments,directory:directory)),directory:nil,timeout:timeout+10,input:input,trimOutput:false,maximumOutputBytes:16*1024*1024)
+        let result = try gitExecution(arguments,directory:directory,input:input,timeout:timeout)
         let expectedDifference = arguments.first == "diff" && arguments.contains("--no-index") && result.exitCode == 1 && !result.timedOut
         guard result.succeeded || expectedDifference else { throw GitError.command(result.timedOut ? "SSH Git operation timed out." : result.output) }
         return result.output
+    }
+    func gitExecution(_ arguments: [String],directory: String,input: Data?,timeout: TimeInterval) throws -> ToolResult {
+        guard (directory.hasPrefix("/") || directory == "~"),!directory.utf8.contains(0) else { throw GitError.invalidPath }
+        return try ToolCommand.run(URL(fileURLWithPath:"/usr/bin/ssh"),arguments:transportArguments(command:Self.gitCommand(arguments,directory:directory)),directory:nil,timeout:timeout+10,input:input,trimOutput:false,maximumOutputBytes:16*1024*1024)
     }
     // Fixed stdlib-only protocol. No server installation, shell interpolation or credentials are sent.
     public static let agent = #"""
@@ -304,13 +307,38 @@ try:
         reply=dict(path=path,content=base64.b64encode(run.stdout).decode())
     elif op=='review-read':
         root=os.path.realpath(req['repositoryRoot'])
-        resolved=os.path.realpath(path)
-        if os.path.commonpath([root,resolved])!=root or os.path.islink(path) or not os.path.isfile(resolved):
-            raise ValueError('The Git path is invalid.')
-        limit=16*1024*1024 if req.get('digest')=='large' else 1024*1024
-        with open(resolved,'rb') as f: data=f.read(limit+1)
-        if len(data)>limit: raise ValueError('File too large for a preview.')
-        reply=dict(path=resolved,content=base64.b64encode(data).decode())
+        relative=os.path.relpath(path,req['repositoryRoot'])
+        parts=[part for part in relative.split('/') if part and part!='.']
+        if not parts or '..' in parts: raise ValueError('The Git path is invalid.')
+        limit=16*1024*1024 if req.get('digest') in ('large','diff') else 1024*1024
+        parent=os.open(root,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+        fd=None
+        try:
+            for part in parts[:-1]:
+                nextfd=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=parent)
+                os.close(parent); parent=nextfd
+            if req.get('digest')=='diff' and stat.S_ISLNK(os.stat(parts[-1],dir_fd=parent,follow_symlinks=False).st_mode):
+                reply=dict(path=path,content='')
+                print('LINVELL_JSON:'+json.dumps(reply)); sys.exit(0)
+            fd=os.open(parts[-1],os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=parent)
+            before=os.fstat(fd)
+            if not stat.S_ISREG(before.st_mode): raise ValueError('The Git path is invalid.')
+            if before.st_size>limit: raise ValueError('File too large for a preview.')
+            chunks=[]; count=0
+            while count<=limit:
+                chunk=os.read(fd,min(65536,limit+1-count))
+                if not chunk: break
+                chunks.append(chunk); count+=len(chunk)
+            if count>limit: raise ValueError('File too large for a preview.')
+            after=os.fstat(fd)
+            current=os.stat(parts[-1],dir_fd=parent,follow_symlinks=False)
+            def identity(value): return (value.st_dev,value.st_ino,value.st_size,value.st_mode,value.st_mtime_ns,value.st_ctime_ns)
+            if identity(before)!=identity(after) or identity(after)!=identity(current): raise ValueError('The file changed while loading. Refresh and try again.')
+            data=b''.join(chunks)
+        finally:
+            if fd is not None: os.close(fd)
+            os.close(parent)
+        reply=dict(path=path,content=base64.b64encode(data).decode())
     elif op=='read':
         path=os.path.realpath(path)
         if os.path.getsize(path)>16*1024*1024: raise ValueError('Remote editor limit: 16 MiB per file.')

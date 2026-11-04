@@ -71,6 +71,15 @@ public final class DocumentBuffer {
         savedText = text; self.url = resolved; diskDigest = Self.digest(data)
     }
 
+    /// Retargets the same file after Git moves its containing worktree.
+    @discardableResult public func relocate(from oldRoot: URL,to newRoot: URL) -> Bool {
+        guard let url else { return false }
+        let old = oldRoot.standardizedFileURL.path
+        guard url.path == old || url.path.hasPrefix(old+"/") else { return false }
+        self.url = URL(fileURLWithPath:newRoot.standardizedFileURL.path+String(url.path.dropFirst(old.count)))
+        return true
+    }
+
     public func matchesDisk(_ snapshot: DocumentBuffer) -> Bool { diskDigest == snapshot.diskDigest }
     /// The caller rechecks the captured revision on the UI thread before applying.
     @discardableResult public func adoptExternal(_ snapshot: DocumentBuffer) -> Bool {

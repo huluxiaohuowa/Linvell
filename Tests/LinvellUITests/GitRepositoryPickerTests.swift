@@ -11,6 +11,7 @@ final class GitRepositoryPickerTests: XCTestCase {
                     "git.repositoryGroups","git.repositoryGroupNames","git.repositorySortByName","git.repositorySort","git.repositorySortAscending","git.repositoryAdded","git.repositoryOpened","git.repositoryModified","git.savedRepositories",WorkspaceSession.key,WorkspaceSession.recentKey]
         let previous = keys.map { ($0,defaults.object(forKey:$0)) }
         defer { for (key,value) in previous { defaults.set(value,forKey:key) } }
+        for key in keys { defaults.removeObject(forKey:key) }
         defaults.set("manual",forKey:"git.repositorySort")
         let fixture = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).resolvingSymlinksInPath()
         let source = fixture.appendingPathComponent("source")
@@ -32,21 +33,20 @@ final class GitRepositoryPickerTests: XCTestCase {
 
         let current = "local:"+destination.path,previousRepo = "local:"+source.path
         let extra = fixture.appendingPathComponent("extra")
-        let extraID = "local:"+extra.path
         defaults.set(try JSONEncoder().encode([WorkspaceSession.local(path:source.path),.local(path:extra.path)]),forKey:"git.savedRepositories")
         defaults.set([current:"Cloned alias"],forKey:"git.repositoryAliases")
         defaults.set([previousRepo],forKey:"git.archivedRepositories")
         workspace.browseGitRepositories()
-        let picker = try XCTUnwrap(workspace.picker)
-        XCTAssertEqual(picker.options.first { $0.reorderID == current }?.title,"Cloned alias")
-        XCTAssertFalse(picker.options.contains { $0.reorderID == previousRepo })
-        XCTAssertTrue(picker.moveRepository(extraID,before:current))
-        XCTAssertEqual(defaults.stringArray(forKey:"git.repositoryOrder")?.first,extraID)
-        let archive = try XCTUnwrap(picker.options.first { $0.title == L.text("Archived Repositories…") })
-        picker.dismiss()
-        archive.invoke()
-        XCTAssertTrue(workspace.picker?.options.contains { $0.reorderID == previousRepo } == true)
-        workspace.picker?.dismiss()
+        let browserWindow = try XCTUnwrap(workspace.window?.attachedSheet)
+        func views(_ view: NSView) -> [NSView] { [view]+view.subviews.flatMap(views) }
+        let outline = try XCTUnwrap(views(try XCTUnwrap(browserWindow.contentView)).compactMap { $0 as? NSOutlineView }.first)
+        let roots = (0..<(outline.dataSource?.outlineView?(outline,numberOfChildrenOfItem:nil) ?? 0)).compactMap {
+            outline.dataSource?.outlineView?(outline,child:$0,ofItem:nil) as? GitRepositoryBrowserPanel.Node
+        }
+        XCTAssertEqual(roots.first { $0.location?.repositoryID == current }?.title,"Cloned alias")
+        XCTAssertFalse(roots.contains { $0.location?.repositoryID == previousRepo })
+        XCTAssertTrue(roots.flatMap(\.children).contains { $0.location?.repositoryID == previousRepo })
+        workspace.window?.endSheet(browserWindow); browserWindow.orderOut(nil)
         workspace.manageGitGroups([.local(path:source.path),.local(path:destination.path)])
         let groups = try XCTUnwrap(workspace.picker)
         let add = try XCTUnwrap(groups.options.first { $0.title == L.text("New Group…") })

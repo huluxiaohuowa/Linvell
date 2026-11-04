@@ -63,12 +63,12 @@ final class GitReviewPanelTests: XCTestCase {
         }
         workspace.openGitJournal()
         let log = try XCTUnwrap(workspace.gitPicker)
-        XCTAssertTrue(log.options.contains { $0.title == "git show" })
+        XCTAssertTrue(log.options.contains { $0.title.hasPrefix("git show ") })
         let filter = try XCTUnwrap(log.options.first { $0.title == L.text("Show Failed Commands") })
         log.dismiss()
         filter.invoke()
         let filtered = try XCTUnwrap(workspace.gitPicker)
-        XCTAssertTrue(filtered.options.contains { $0.title == "git show" })
+        XCTAssertTrue(filtered.options.contains { $0.title.hasPrefix("git show ") })
         XCTAssertFalse(filtered.options.contains { $0.title == "git operation" && $0.detail.contains(L.text("Succeeded")) })
         filtered.dismiss()
         workspace.showGitSettings()
@@ -92,7 +92,7 @@ final class GitReviewPanelTests: XCTestCase {
         let deadline = Date().addingTimeInterval(5)
         var images: [NSImageView] = []
         while Date() < deadline {
-            images = descendants(content).compactMap { $0 as? NSImageView }.filter { $0.image != nil }
+            images = descendants(content).compactMap { $0 as? NSImageView }.filter { $0.image != nil && $0.identifier?.rawValue.hasPrefix("git-review-image-") == true }
             if images.count == 2 { break }
             RunLoop.current.run(until:Date().addingTimeInterval(0.02))
         }

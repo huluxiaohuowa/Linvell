@@ -7,6 +7,7 @@ final class GitWorktreeCleanupPanel: NSWindowController, NSWindowDelegate {
     private let target: String
     private let canRemove: (String) -> Bool
     private let onRemoved: () -> Void
+    private let onWorktreeRemoved: ((String) -> Void)?
     private let list = NSStackView()
     private let scroll = NSScrollView()
     private let status = Theme.label("",size:12,color:Theme.secondary)
@@ -23,8 +24,8 @@ final class GitWorktreeCleanupPanel: NSWindowController, NSWindowDelegate {
     private var hasLoaded = false
     private var finished = false
 
-    init(repository: GitRepository,target: String,owner: NSWindow,canRemove: @escaping (String) -> Bool,onRemoved: @escaping () -> Void) {
-        self.repository = repository; self.target = target; self.canRemove = canRemove; self.onRemoved = onRemoved
+    init(repository: GitRepository,target: String,owner: NSWindow,canRemove: @escaping (String) -> Bool,onRemoved: @escaping () -> Void,onWorktreeRemoved: ((String) -> Void)? = nil) {
+        self.repository = repository; self.target = target; self.canRemove = canRemove; self.onRemoved = onRemoved; self.onWorktreeRemoved = onWorktreeRemoved
         let panel = NSPanel(contentRect:NSRect(x:0,y:0,width:700,height:500),styleMask:[.titled,.resizable,.closable],backing:.buffered,defer:false)
         super.init(window:panel)
         panel.title = L.text("Clean Up Merged Worktrees…"); panel.delegate = self; panel.minSize = NSSize(width:640,height:380)
@@ -159,6 +160,7 @@ final class GitWorktreeCleanupPanel: NSWindowController, NSWindowDelegate {
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
             guard let self else { return }
             var rows: [(String,String,String?)] = []
+            var removedPaths: [String] = []
             for candidate in choices {
                 do {
                     let allowed = DispatchQueue.main.sync { self.canRemove(candidate.entry.path) }
@@ -173,10 +175,15 @@ final class GitWorktreeCleanupPanel: NSWindowController, NSWindowDelegate {
                     case .keptChanged: message = L.text("Worktree removed; changed branch kept."); command = nil
                     case .failed(let error): message = L.text("Worktree removed; branch deletion failed.")+" "+error; command = self.deleteCommand(path:candidate.entry.path,branch:candidate.entry.branch)
                     }
-                    rows.append((candidate.entry.path,message,command))
+                    rows.append((candidate.entry.path,message,command)); removedPaths.append(candidate.entry.path)
                 } catch { rows.append((candidate.entry.path,error.localizedDescription,self.deleteCommand(path:candidate.entry.path))) }
             }
             DispatchQueue.main.async {
+                for path in removedPaths {
+                    let location: WorkspaceSession = self.repository.remote.map { .ssh(host:$0.host,path:path) } ?? .local(path:path)
+                    if let error = GitRepositoryOrganization.relocate(location,to:nil),let index = rows.firstIndex(where:{ $0.0 == path }) { rows[index].1 += "\n"+L.text("Worktree Metadata")+" · "+error }
+                    self.onWorktreeRemoved?(path)
+                }
                 self.results = rows; self.isRunning = false; self.finished = true
                 self.status.stringValue = L.format("%d worktrees processed",rows.count)
                 self.render(); self.updateControls(); self.onRemoved()

@@ -47,8 +47,9 @@ final class GitHistorySearchTests: XCTestCase {
         var calls = 0
         let repo = GitRepository(directory:"/fixture/repo",remote:remote) { directory,args,input,_ in
             XCTAssertEqual(directory,"/fixture/repo")
+            if args.first == "rev-parse" { return String(repeating:"a",count:40)+"\n" }
             XCTAssertEqual(args.first,"log")
-            XCTAssertTrue(args.contains("--all"))
+            XCTAssertTrue(args.contains(String(repeating:"a",count:40)))
             XCTAssertNil(input)
             calls += 1
             let hash = String(repeating:"a",count:40)

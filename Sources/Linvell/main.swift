@@ -1,7 +1,7 @@
 import AppKit
 import LinvellCore
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     var workspaces: [WorkspaceController] = []
     var keyMonitor: Any?
     var chordDeadline: Date?
@@ -127,6 +127,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             for doc in workspace.documents { try? workspace.recovery.remove(doc.buffer.id) }
         }
         return .terminateNow
+    }
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        guard let action = item.representedObject as? String else { return true }
+        if action == "showGitWorktrees" { return (NSApp.keyWindow?.windowController as? WorkspaceController)?.worktreeIntegrationEnabled == true }
+        let scoped = Set(["commitGitChanges","stageGitChanges","unstageGitChanges","stageGitFile","unstageGitFile","pullGitChanges","pushGitChanges","createGitBranch","createGitTag","stashGitChanges","browseGitStashes","renameGitBranch","mergeGitBranch","amendGitCommit","checkoutGitCommit","revertGitCommit","copyGitCommit","compareGitCommits","createGitWorktree","finishGitWorktree","showGitShortcuts","showGitChanges","refreshGitRepository","openGitTerminal","showGitInFinder","expandGitDirectories","collapseGitDirectories"])
+        if action == "saveAs",let controller = NSApp.keyWindow?.windowController as? WorkspaceController,
+           let git = controller.gitWorkspaceView,controller.editors.arrangedSubviews.first === git { return false }
+        guard scoped.contains(action) else { return true }
+        guard let controller = NSApp.keyWindow?.windowController as? WorkspaceController,
+              let git = controller.gitWorkspaceView,controller.editors.arrangedSubviews.first === git,
+              !git.running,NSApp.keyWindow?.attachedSheet == nil else { return false }
+        return git.canPerformMenuAction(action)
     }
     @objc func route(_ item: NSMenuItem) {
         guard let action = item.representedObject as? String else { return }
@@ -264,13 +276,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item(view,"Decrease Font Size",#selector(WorkspaceController.decreaseFont),"-",route:true)
         let git = menu("Git")
         item(git,"Repositories…",#selector(WorkspaceController.browseGitRepositories),route:true)
+        item(git,"Clone Repository…",#selector(WorkspaceController.cloneGitRepositoryFromMenu),route:true)
+        item(git,"New Group…",#selector(WorkspaceController.createGitRepositoryGroup),route:true)
         item(git,"Branches and Tags",#selector(WorkspaceController.showGitReferences),route:true)
         item(git,"Worktrees",#selector(WorkspaceController.showGitWorktrees),route:true)
+        item(git,"Uncommitted Changes",#selector(WorkspaceController.showGitChanges),"1",[.command,.control],route:true)
+        item(git,"Refresh",#selector(WorkspaceController.refreshGitRepository),"r",route:true)
+        item(git,"Expand Folders",#selector(WorkspaceController.expandGitDirectories),"\u{f703}",[.option],route:true)
+        item(git,"Collapse Folders",#selector(WorkspaceController.collapseGitDirectories),"\u{f702}",[.option],route:true)
         item(git,"Jump to HEAD",#selector(WorkspaceController.jumpToGitHead),"h",[.command,.option,.shift],route:true)
         item(git,"Repository Review…",#selector(WorkspaceController.reviewRepositoryFiles),"r",[.command,.option],route:true)
         item(git,"Review Changed Files…",#selector(WorkspaceController.reviewGitChanges),"d",[.command,.option],route:true)
         item(git,"Git Command Log…",#selector(WorkspaceController.showGitJournal),"l",[.command,.option],route:true)
         item(git,"Fetch",#selector(WorkspaceController.fetchGitRepository),"f",[.command,.option],route:true)
+        git.addItem(.separator())
+        item(git,"Commit",#selector(WorkspaceController.commitGitChanges),"\r",[.command],route:true)
+        item(git,"Stage All",#selector(WorkspaceController.stageGitChanges),"s",[.command,.shift],route:true)
+        item(git,"Unstage All",#selector(WorkspaceController.unstageGitChanges),"s",[.command,.option,.shift],route:true)
+        item(git,"Stage File",#selector(WorkspaceController.stageGitFile),route:true)
+        item(git,"Unstage File",#selector(WorkspaceController.unstageGitFile),route:true)
+        item(git,"Pull",#selector(WorkspaceController.pullGitChanges),"l",[.command,.control],route:true)
+        item(git,"Push",#selector(WorkspaceController.pushGitChanges),"p",[.command,.control],route:true)
+        git.addItem(.separator())
+        item(git,"Create Branch",#selector(WorkspaceController.createGitBranch),"b",[.command,.control],route:true)
+        item(git,"Create Tag",#selector(WorkspaceController.createGitTag),"t",[.command,.control,.shift],route:true)
+        item(git,"Rename Selected Branch",#selector(WorkspaceController.renameGitBranch),route:true)
+        item(git,"Merge",#selector(WorkspaceController.mergeGitBranch),route:true)
+        git.addItem(.separator())
+        item(git,"Stash Changes",#selector(WorkspaceController.stashGitChanges),"h",[.command,.control],route:true)
+        item(git,"Browse Stashes",#selector(WorkspaceController.browseGitStashes),route:true)
+        git.addItem(.separator())
+        item(git,"Compare Selected Commits",#selector(WorkspaceController.compareGitCommits),"d",[.command,.control],route:true)
+        item(git,"Copy Commit Hash",#selector(WorkspaceController.copyGitCommit),route:true)
+        item(git,"Checkout Commit",#selector(WorkspaceController.checkoutGitCommit),route:true)
+        item(git,"Revert Commit",#selector(WorkspaceController.revertGitCommit),route:true)
+        item(git,"Amend Commit",#selector(WorkspaceController.amendGitCommit),route:true)
+        git.addItem(.separator())
+        item(git,"New Worktree",#selector(WorkspaceController.createGitWorktree),"n",[.command,.control],route:true)
+        item(git,"Finish Worktree…",#selector(WorkspaceController.finishGitWorktree),"w",[.command,.control,.shift],route:true)
+        item(git,"Open Terminal",#selector(WorkspaceController.openGitTerminal),"t",[.command,.control],route:true)
+        item(git,"Show in Finder",#selector(WorkspaceController.showGitInFinder),"o",[.command,.control],route:true)
+        item(git,"Git Keyboard Shortcuts",#selector(WorkspaceController.showGitShortcuts),route:true)
+        git.addItem(.separator())
         item(git,"Git Settings…",#selector(WorkspaceController.openGitSettings),route:true)
         item(git,"Git Tools…",#selector(WorkspaceController.showGitTools),route:true)
         let win = menu("Window"); NSApp.windowsMenu = win

@@ -301,7 +301,9 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         preserveEditorPosition()
         current = nil; activePane = nil; panes = []; markdownView = nil
         editors.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        let git = gitWorkspaceView ?? GitWorkspace(repository:repository); gitWorkspaceView = git
+        let existing = gitWorkspaceView
+        let git = existing ?? GitWorkspace(repository:repository); gitWorkspaceView = git
+        if existing != nil { git.refreshExternalState() }
         git.onOpen = { [weak self] url in
             if let remote = repository.remote { self?.openRemote(url.path,connection:remote) }
             else { self?.open(url) }
@@ -348,9 +350,14 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
                 } else {
                     guard workspace.remoteConnection == nil,workspace.root?.url.path == path else { return false }
                 }
-                return workspace.window?.isVisible == true || workspace.agentsRunning
+                return workspace.window?.isVisible == true || workspace.agentsRunning || workspace.documents.contains { $0.buffer.isModified }
             } ?? false
             return !open
+        }
+        git.onWorktreeRelocated = { old,new in
+            for workspace in (NSApp.delegate as? AppDelegate)?.workspaces ?? [] {
+                workspace.worktreeDidRelocate(host:repository.remote?.host,from:old,to:new)
+            }
         }
         git.onReview = { [weak self] comment in self?.composeReview(comment) }
         git.onOpenRepository = { [weak self] repo in

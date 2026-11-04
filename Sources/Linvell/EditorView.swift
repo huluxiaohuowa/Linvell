@@ -7,7 +7,7 @@ final class OpenDocument: NSObject, NSTextStorageDelegate {
     let vim = VimEngine()
     let lines: LineIndex
     let syntax = EditorSyntaxState()
-    let imageURL: URL?
+    var imageURL: URL?
     var codeDiagnostics: [CodeDiagnostic] = []
     var markdownPreview = false
     var remote: RemoteDocument?

@@ -22,6 +22,7 @@ extension GitWorkspace {
         var options = [
             PickerOption(title:L.text("Compare References…"),detail:L.text("Compare any two branches or tags")) { [weak self] in self?.compareReferences() },
             operationOption("Create Branch"), operationOption("Create Tag"),
+            PickerOption(title:L.text("Fetch Tags"),detail:"") { [weak self] in guard let self else { return }; self.performResult("Fetching tags…",{ try self.repository.fetch(tags:true) }) { _ in } },
             PickerOption(title:L.text("Create & Push Tag…"),detail:"") { [weak self] in self?.createAndPushTag() }
         ]
         options += references.map { reference in
@@ -39,15 +40,18 @@ extension GitWorkspace {
             operationOption("Create Tag",values:["Revision":ref.fullName])
         ]
         if ref.category == "Local Branches" {
-            if let tree = worktrees.first(where:{ $0.branch == ref.name && $0.path != repository.directory && !$0.prunable }) {
+            let location: WorkspaceSession = repository.remote.map { .ssh(host:$0.host,path:repository.directory) } ?? .local(path:repository.directory)
+            if GitRepositoryOrganization.showsWorktrees(location),let tree = worktrees.first(where:{ $0.branch == ref.name && $0.path != repository.directory && !$0.prunable }) {
                 options.insert(PickerOption(title:L.text("Open Worktree"),detail:tree.path) { [weak self] in self?.onOpenWorktree?(tree.path) },at:0)
             } else { options.insert(operationOption("Switch Branch",values:["Branch":ref.name]),at:0) }
             options.append(operationOption("Rename Selected Branch",values:["Branch":ref.name]))
             options.append(operationOption("Delete Merged Branch",values:["Branch":ref.name]))
         } else if ref.category == "Tags" {
+            options.insert(operationOption("Checkout Tag",values:["Revision":ref.fullName]),at:0)
             options.append(operationOption("Delete Tag",values:["Name":ref.name]))
         } else {
             options.insert(operationOption("Track Remote Branch",values:["Revision":ref.fullName]),at:0)
+            options.append(operationOption("Delete Remote Tracking Branch",values:["Branch":ref.name]))
         }
         showGitPicker(ref.name,options)
     }
@@ -58,7 +62,7 @@ extension GitWorkspace {
         let selection = GitComparisonSelection(refs:refs)
         let from = selection.from,to = selection.to
         let fields = selection
-        let alert = NSAlert(); alert.messageText = L.text("Compare References…"); alert.accessoryView = fields
+        let alert = GitNativeSheet.alert(owner:window); alert.messageText = L.text("Compare References…"); alert.accessoryView = fields
         alert.addButton(withTitle:L.text("Compare")); alert.addButton(withTitle:L.text("Cancel"))
         alert.beginSheetModal(for:window) { [weak self] response in
             guard response == .alertFirstButtonReturn,let self,
@@ -68,18 +72,14 @@ extension GitWorkspace {
     }
 
     @objc func browseWorktrees() {
-        guard !running else { return }
-        var options = [operationOption("Add Worktree with New Branch"),operationOption("Add Worktree"),operationOption("Prune Worktrees")]
-        if repository.remote == nil,let onNewTask {
-            options.insert(PickerOption(title:L.text("New Task Workspace…"),detail:L.text("Isolate a task in its own branch and directory"),invoke:onNewTask),at:0)
-        }
-        options += worktrees.map { entry in
-            let label = entry.branch.isEmpty ? L.text("Detached HEAD") : entry.branch
-            let state = entry.locked ? " · "+L.text("Locked") : entry.prunable ? " · "+L.text("Prunable") : ""
-            return PickerOption(title:label+state,detail:entry.path) { [weak self] in guard let self else { return }
-                self.showGitPicker("Worktrees",self.worktreeOptions(entry)) }
-        }
-        showGitPicker("Worktrees",options)
+        let location: WorkspaceSession = repository.remote.map { .ssh(host:$0.host,path:repository.directory) } ?? .local(path:repository.directory)
+        guard !running,let window,GitRepositoryOrganization.showsWorktrees(location) else { return }
+        GitWorktreePanels.manage(repository:repository,owner:window,canRemove:{ [weak self] in self?.onCanRemoveWorktree?($0) != false },
+            onOpen:{ [weak self] in self?.onOpenWorktree?($0) },onRelocated:{ [weak self] old,new in
+                guard let self else { return }
+                let location: WorkspaceSession = self.repository.remote.map { .ssh(host:$0.host,path:old) } ?? .local(path:old)
+                if let error = GitRepositoryOrganization.relocate(location,to:new) { let alert = GitNativeSheet.alert(owner:window); alert.messageText = L.text("Worktree Metadata"); alert.informativeText = error; alert.runModal() }; self.onWorktreeRelocated?(old,new); self.reload()
+            },onFinish:{ [weak self] in self?.finishWorktree($0) })
     }
 
     func worktreeOptions(_ entry: GitWorktreeEntry) -> [PickerOption] {
@@ -98,7 +98,7 @@ extension GitWorkspace {
                 self.onOpenWorktree?(entry.path)
             })
         }
-        if !isMain && !active && !entry.prunable {
+        if !isMain && !entry.prunable {
             if !entry.locked {
                 options.append(operationOption("Move Worktree",path:entry.path))
                 options.append(operationOption("Remove Clean Worktree",path:entry.path))
@@ -122,6 +122,9 @@ extension GitWorkspace {
         if title == "Compare References",let base = values["Base"],let target = values["Target"] {
             openComparison(base,target)
             return
+        }
+        if title == "Add Worktree" || title == "Add Worktree with New Branch" || title == "Add Detached Worktree" {
+            guard let window else { return }; GitWorktreePanels.create(repository:repository,owner:window) { [weak self] path in self?.onOpenWorktree?(path); self?.reload() }; return
         }
         showOperations()
         actionsPage?.selectOperation(title,path:path,values:values)
@@ -154,203 +157,23 @@ extension WorkspaceController {
 
     @objc func browseGitRepositories() {
         guard let window else { return }
-        let defaults = UserDefaults.standard
-        let groups = defaults.dictionary(forKey:"git.repositoryGroups") as? [String:String] ?? [:]
-        let sortMode = defaults.string(forKey:"git.repositorySort").flatMap(GitRepositorySort.init(rawValue:))
-            ?? (defaults.bool(forKey:"git.repositorySortByName") ? .name : .manual)
-        let ascending = defaults.object(forKey:"git.repositorySortAscending") as? Bool ?? (sortMode == .name || sortMode == .manual)
-        let aliases = defaults.dictionary(forKey:"git.repositoryAliases") as? [String:String] ?? [:]
-        let archived = Set(defaults.stringArray(forKey:"git.archivedRepositories") ?? [])
-        let order = defaults.stringArray(forKey:"git.repositoryOrder") ?? []
-        let savedKey = "git.savedRepositories"
-        let saved = defaults.data(forKey:savedKey).flatMap { try? JSONDecoder().decode([WorkspaceSession].self,from:$0) } ?? []
-        func save(_ locations: [WorkspaceSession]) {
-            GitRepositoryOrganization.register(locations)
-            if let encoded = try? JSONEncoder().encode(locations) { defaults.set(encoded,forKey:savedKey) }
-        }
-        var locations = WorkspaceSession.recent()
-        locations += saved.filter { !locations.contains($0) }
-        func key(_ location: WorkspaceSession) -> String {
+        _ = GitRepositoryBrowserPanel(owner:window,onOpen:{ [weak self] location in
+            guard let self else { return }; self.openRecentProject(location)
             switch location {
-            case .local(let path): return "local:"+path
-            case .ssh(let host,let path): return "ssh:"+host+":"+path
-            }
-        }
-        GitRepositoryOrganization.register(locations)
-        let dateKey = sortMode == .recentlyAdded ? "git.repositoryAdded" : sortMode == .recentlyModified ? "git.repositoryModified" : "git.repositoryOpened"
-        let dates = defaults.dictionary(forKey:dateKey) as? [String:Double] ?? [:]
-        locations = GitRepositoryOrganization.sorted(locations,mode:sortMode,ascending:ascending,aliases:aliases,dates:dates,order:order)
-        func option(_ location: WorkspaceSession,group: String) -> PickerOption {
-            let display = aliases[key(location)] ?? location.title
-            return PickerOption(title:group.isEmpty ? display : group+" / "+display,detail:location.path,reorderID:key(location)) { [weak self] in
-                guard let self else { return }
-                self.openRecentProject(location)
-                switch location {
-                case .local(let path): guard self.root?.url.path == path,self.remoteConnection == nil else { return }
-                case .ssh(let host,let path): guard self.remoteConnection?.host == host,self.remoteDirectory == path else { return }
-                }
-                self.gitWorkspace()
-            }
-        }
-        var options = [
-            PickerOption(title:L.text("Manage Groups…"),detail:"") { [weak self] in self?.manageGitGroups(locations) },
-            PickerOption(title:L.text("Clone Repository…"),detail:"") { [weak self] in self?.cloneGitRepository() },
-            PickerOption(title:L.text("Open Repository…"),detail:"") { [weak self] in self?.openFolder() },
-            PickerOption(title:L.text("Import Repository Folder…"),detail:L.text("Group Git repositories directly inside a folder")) { [weak self] in
-                guard let self else { return }
-                let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false
-                panel.beginSheetModal(for:window) { [weak self] result in
-                    guard result == .OK,let folder = panel.url,let self else { return }
-                    let children = (try? FileManager.default.contentsOfDirectory(at:folder,includingPropertiesForKeys:[.isDirectoryKey],options:[.skipsHiddenFiles])) ?? []
-                    let repositories = children.filter { FileManager.default.fileExists(atPath:$0.appendingPathComponent(".git").path) }
-                    guard !repositories.isEmpty else {
-                        self.status.stringValue = L.text("No Git repositories were found directly inside this folder.")
-                        return
-                    }
-                    var updated = groups
-                    var imported = saved
-                    for repository in repositories {
-                        let location = WorkspaceSession.local(path:repository.path)
-                        if !imported.contains(location) { imported.append(location) }
-                        if updated[key(location)] == nil { updated[key(location)] = folder.lastPathComponent }
-                    }
-                    save(imported)
-                    defaults.set(updated,forKey:"git.repositoryGroups")
-                }
-            },
-            PickerOption(title:L.text("Sort Repositories…"),detail:L.text(sortMode.title)) { [weak self] in
-                guard let self else { return }
-                self.picker = QuickPicker(title:L.text("Sort Repositories…"),options:GitRepositorySort.allCases.map { mode in
-                    PickerOption(title:L.text(mode.title),detail:"") { [weak self] in
-                        defaults.set(mode.rawValue,forKey:"git.repositorySort")
-                        defaults.set(mode == .name || mode == .manual,forKey:"git.repositorySortAscending")
-                        self?.browseGitRepositories()
-                    }
-                },owner:window)
-            },
-            PickerOption(title:L.text(ascending ? "Sort Descending" : "Sort Ascending"),detail:"") { [weak self] in
-                defaults.set(!ascending,forKey:"git.repositorySortAscending")
-                self?.browseGitRepositories()
-            }
-        ]
-        if let current = locations.first(where:{
-            switch $0 {
-            case .local(let path): return remoteConnection == nil && root?.url.path == path
-            case .ssh(let host,let path): return remoteConnection?.host == host && remoteDirectory == path
-            }
-        }) {
-            options.append(PickerOption(title:L.text("Rename Repository Display Name…"),detail:aliases[key(current)] ?? current.title) {
-                let alert = NSAlert(); alert.messageText = L.text("Rename Repository Display Name…")
-                let name = NSTextField(frame:NSRect(x:0,y:0,width:350,height:24))
-                name.stringValue = aliases[key(current)] ?? ""
-                alert.accessoryView = name
-                alert.addButton(withTitle:L.text("Save")); alert.addButton(withTitle:L.text("Cancel"))
-                alert.beginSheetModal(for:window) { response in
-                    guard response == .alertFirstButtonReturn else { return }
-                    var updated = aliases
-                    let value = name.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)
-                    updated[key(current)] = value.isEmpty ? nil : value
-                    defaults.set(updated,forKey:"git.repositoryAliases")
-                }
-            })
-            options.append(PickerOption(title:L.text(archived.contains(key(current)) ? "Restore Archived Repository" : "Archive Repository"),detail:current.title) {
-                var updated = archived
-                if updated.remove(key(current)) == nil {
-                    updated.insert(key(current))
-                    if !saved.contains(current) { save(saved+[current]) }
-                }
-                defaults.set(Array(updated),forKey:"git.archivedRepositories")
-            })
-            options.append(PickerOption(title:L.text(saved.contains(current) ? "Unpin Repository" : "Pin Repository"),detail:current.title) {
-                var updated = saved.filter { $0 != current }
-                if !saved.contains(current) { updated.append(current) }
-                save(updated)
-            })
-            options.append(PickerOption(title:L.text("Set Repository Group…"),detail:groups[key(current)] ?? current.title) {
-                let alert = NSAlert(); alert.messageText = L.text("Set Repository Group…")
-                let name = NSTextField(frame:NSRect(x:0,y:0,width:350,height:24))
-                name.stringValue = groups[key(current)] ?? ""
-                alert.accessoryView = name
-                alert.addButton(withTitle:L.text("Save")); alert.addButton(withTitle:L.text("Cancel"))
-                alert.beginSheetModal(for:window) { response in
-                    guard response == .alertFirstButtonReturn else { return }
-                    var updated = defaults.dictionary(forKey:"git.repositoryGroups") as? [String:String] ?? [:]
-                    let group = name.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)
-                    updated[key(current)] = group.isEmpty ? nil : group
-                    defaults.set(updated,forKey:"git.repositoryGroups")
-                }
-            })
-        }
-        let archivedLocations = locations.filter { archived.contains(key($0)) }
-        if !archivedLocations.isEmpty {
-            options.append(PickerOption(title:L.text("Archived Repositories…"),detail:String(archivedLocations.count)) { [weak self] in
-                self?.picker = QuickPicker(title:L.text("Archived Repositories…"),options:archivedLocations.map { option($0,group:groups[key($0)] ?? "") },owner:window)
-            })
-        }
-        options += locations.filter { !archived.contains(key($0)) }.map { option($0,group:groups[key($0)] ?? "") }
-        let browser = QuickPicker(title:L.text("Repositories…"),options:options,owner:window)
-        browser.rowActions = { option in
-            guard let id = option.reorderID,let location = locations.first(where:{ $0.repositoryID == id }) else { return [] }
-            return [PickerOption(title:L.text("Copy Path"),detail:location.path) {
-                NSPasteboard.general.clearContents(); NSPasteboard.general.setString(location.path,forType:.string)
-            }]
-        }
-        browser.selectionActions = [
-            ("Copy Paths",{ ids in
-                let paths = locations.filter { ids.contains($0.repositoryID) }.map(\.path)
-                NSPasteboard.general.clearContents(); NSPasteboard.general.setString(paths.joined(separator:"\n"),forType:.string)
-            }),
-            ("New Group with Selection",{ [weak self] ids in self?.editGitGroup(nil,locations:locations,selection:Set(ids)) }),
-            ("Move Selection to Group…",{ [weak self] ids in
-                guard let self else { return }
-                let names = Set(groups.values).union(defaults.stringArray(forKey:"git.repositoryGroupNames") ?? []).sorted()
-                self.picker = QuickPicker(title:L.text("Move Selection to Group…"),options:([""]+names).map { group in
-                    PickerOption(title:L.text(group.isEmpty ? "Ungrouped" : group),detail:"") {
-                        var updated = defaults.dictionary(forKey:"git.repositoryGroups") as? [String:String] ?? [:]
-                        for id in ids { updated[id] = group.isEmpty ? nil : group }
-                        defaults.set(updated,forKey:"git.repositoryGroups")
-                    }
-                },owner:window)
-            }),
-            ("Archive Selection",{ ids in
-                defaults.set(Array(archived.union(ids)),forKey:"git.archivedRepositories")
-                save(saved+locations.filter { ids.contains(key($0)) && !saved.contains($0) })
-            })
-        ]
-        browser.onReorder = { ids in
-            defaults.set(ids,forKey:"git.repositoryOrder")
-            defaults.set(false,forKey:"git.repositorySortByName")
-            defaults.set(GitRepositorySort.manual.rawValue,forKey:"git.repositorySort")
-        }
-        if sortMode == .recentlyModified {
-            let refresh = GitRepositoryPickerRefresh(picker:browser,locations:locations,aliases:aliases,ascending:ascending,order:order)
-            browser.onDismiss = { refresh.stop() }
-            refresh.start()
-        }
-        picker = browser
+            case .local(let path): guard self.root?.url.path == path,self.remoteConnection == nil else { return }
+            case .ssh(let host,let path): guard self.remoteConnection?.host == host,self.remoteDirectory == path else { return }
+            }; self.gitWorkspace()
+        },
+            onClone:{ [weak self] in self?.cloneGitRepository() },onAdd:{ [weak self] in self?.openFolder() },
+            onGroup:{ [weak self] name,selection in self?.editGitGroup(name,locations:GitRepositoryOrganization.locations(),selection:selection) })
     }
+
+    @objc func cloneGitRepositoryFromMenu() { cloneGitRepository() }
+    @objc func createGitRepositoryGroup() { editGitGroup(nil,locations:GitRepositoryOrganization.locations()) }
 
     private func cloneGitRepository() {
         guard let window else { return }
-        let alert = NSAlert(); alert.messageText = L.text("Clone Repository…")
-        let address = NSTextField(frame:NSRect(x:0,y:0,width:430,height:24))
-        address.placeholderString = L.text("Repository URL")
-        alert.accessoryView = address
-        alert.addButton(withTitle:L.text("Choose Destination…")); alert.addButton(withTitle:L.text("Cancel"))
-        alert.beginSheetModal(for:window) { [weak self] response in
-            let url = address.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)
-            guard response == .alertFirstButtonReturn,!url.isEmpty,let self else { return }
-            let panel = NSSavePanel()
-            panel.nameFieldStringValue = "repository"
-            panel.beginSheetModal(for:window) { [weak self] response in
-                guard response == .OK,let destination = panel.url,let self else { return }
-                guard !FileManager.default.fileExists(atPath:destination.path) else {
-                    self.status.stringValue = L.text("Choose a new folder for the clone.")
-                    return
-                }
-                self.cloneGitRepository(from:url,into:destination)
-            }
-        }
+        _ = GitClonePanel(owner:window) { [weak self] destination in self?.setProject(destination); self?.gitWorkspace() }
     }
 
     func cloneGitRepository(from url: String,into destination: URL,completion: ((Bool) -> Void)? = nil) {
@@ -403,7 +226,7 @@ extension WorkspaceController {
         let groups = defaults.dictionary(forKey:"git.repositoryGroups") as? [String:String] ?? [:]
         let selected = selection ?? Set(locations.filter { oldName != nil && groups[$0.repositoryID] == oldName }.map(\.repositoryID))
         let editor = GitRepositoryGroupEditor(name:oldName ?? "",candidates:locations,selected:selected)
-        let alert = NSAlert(); alert.messageText = L.text(oldName == nil ? "New Group…" : "Manage Repositories…")
+        let alert = GitNativeSheet.alert(owner:window); alert.messageText = L.text(oldName == nil ? "New Group…" : "Manage Repositories…")
         alert.accessoryView = editor
         alert.addButton(withTitle:L.text("Save")); alert.addButton(withTitle:L.text("Cancel"))
         editor.onValidationChanged = { [weak editor,weak alert] in alert?.buttons.first?.isEnabled = editor?.canSave == true }
@@ -415,6 +238,10 @@ extension WorkspaceController {
             for value in editor.selectedLocations { updated[value.repositoryID] = title }
             var names = Set(defaults.stringArray(forKey:"git.repositoryGroupNames") ?? [])
             if let oldName { names.remove(oldName) }; names.insert(title)
+            if let oldName,oldName != title {
+                defaults.set((defaults.stringArray(forKey:"git.repositoryRootOrder") ?? []).map { $0 == "group:"+oldName ? "group:"+title : $0 },forKey:"git.repositoryRootOrder")
+                defaults.set((defaults.stringArray(forKey:"git.repositoryGroupOrder") ?? []).map { $0 == oldName ? title : $0 },forKey:"git.repositoryGroupOrder")
+            }
             defaults.set(Array(names),forKey:"git.repositoryGroupNames")
             defaults.set(updated,forKey:"git.repositoryGroups")
             let saved = defaults.data(forKey:"git.savedRepositories").flatMap { try? JSONDecoder().decode([WorkspaceSession].self,from:$0) } ?? []
@@ -435,7 +262,7 @@ extension GitWorkspace {
         Theme.pin(Theme.stack([Theme.stack([Theme.label("Name"),name]),
                                Theme.stack([Theme.label("Revision"),revision]),
                                Theme.stack([Theme.label("Remote"),remote])],orientation:.vertical,spacing:6),in:form)
-        let alert = NSAlert(); alert.messageText = L.text("Create & Push Tag…"); alert.accessoryView = form
+        let alert = GitNativeSheet.alert(owner:window); alert.messageText = L.text("Create & Push Tag…"); alert.accessoryView = form
         alert.addButton(withTitle:L.text("Create & Push")); alert.addButton(withTitle:L.text("Cancel"))
         alert.beginSheetModal(for:window) { [weak self] result in
             guard let self,result == .alertFirstButtonReturn else { return }
