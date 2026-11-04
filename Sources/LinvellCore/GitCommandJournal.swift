@@ -18,7 +18,11 @@ public final class GitCommandJournal: @unchecked Sendable {
             value.range(of:#"[^a-zA-Z0-9_./:=+@%-]"#,options:.regularExpression) == nil ? value : "'"+value.replacingOccurrences(of:"'",with:"'\\''")+"'"
         }.joined(separator:" ") }
         public var details: String {
-            displayCommand+"\n"+(timedOut ? "Timed out" : succeeded ? "Succeeded" : "Failed")+(exitCode.map { " · exit "+String($0) } ?? "")+"\n"+String(outputBytes)+" output bytes (contents omitted)"+(failure.map { "\n"+$0 } ?? "")
+            var status = timedOut ? "Timed out" : succeeded ? "Succeeded" : "Failed"
+            if let exitCode { status += " · exit "+String(exitCode) }
+            var lines = [displayCommand,status,String(outputBytes)+" output bytes (contents omitted)"]
+            if let failure { lines.append(failure) }
+            return lines.joined(separator:"\n")
         }
     }
 
