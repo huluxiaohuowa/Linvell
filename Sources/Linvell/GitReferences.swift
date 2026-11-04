@@ -87,6 +87,9 @@ extension GitWorkspace {
         if repository.remote == nil,!entry.prunable {
             options.append(PickerOption(title:L.text("Show in Finder"),detail:entry.path) { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath:entry.path)]) })
         }
+        options.insert(PickerOption(title:L.text("Copy Path"),detail:entry.path) {
+            NSPasteboard.general.clearContents(); NSPasteboard.general.setString(entry.path,forType:.string)
+        },at:0)
         let active = entry.path == repository.directory
         let isMain = worktrees.first?.path == entry.path
         if !active && !entry.prunable {
@@ -286,6 +289,34 @@ extension WorkspaceController {
         }
         options += locations.filter { !archived.contains(key($0)) }.map { option($0,group:groups[key($0)] ?? "") }
         let browser = QuickPicker(title:L.text("Repositories…"),options:options,owner:window)
+        browser.rowActions = { option in
+            guard let id = option.reorderID,let location = locations.first(where:{ $0.repositoryID == id }) else { return [] }
+            return [PickerOption(title:L.text("Copy Path"),detail:location.path) {
+                NSPasteboard.general.clearContents(); NSPasteboard.general.setString(location.path,forType:.string)
+            }]
+        }
+        browser.selectionActions = [
+            ("Copy Paths",{ ids in
+                let paths = locations.filter { ids.contains($0.repositoryID) }.map(\.path)
+                NSPasteboard.general.clearContents(); NSPasteboard.general.setString(paths.joined(separator:"\n"),forType:.string)
+            }),
+            ("New Group with Selection",{ [weak self] ids in self?.editGitGroup(nil,locations:locations,selection:Set(ids)) }),
+            ("Move Selection to Group…",{ [weak self] ids in
+                guard let self else { return }
+                let names = Set(groups.values).union(defaults.stringArray(forKey:"git.repositoryGroupNames") ?? []).sorted()
+                self.picker = QuickPicker(title:L.text("Move Selection to Group…"),options:([""]+names).map { group in
+                    PickerOption(title:L.text(group.isEmpty ? "Ungrouped" : group),detail:"") {
+                        var updated = defaults.dictionary(forKey:"git.repositoryGroups") as? [String:String] ?? [:]
+                        for id in ids { updated[id] = group.isEmpty ? nil : group }
+                        defaults.set(updated,forKey:"git.repositoryGroups")
+                    }
+                },owner:window)
+            }),
+            ("Archive Selection",{ ids in
+                defaults.set(Array(archived.union(ids)),forKey:"git.archivedRepositories")
+                save(saved+locations.filter { ids.contains(key($0)) && !saved.contains($0) })
+            })
+        ]
         browser.onReorder = { ids in
             defaults.set(ids,forKey:"git.repositoryOrder")
             defaults.set(false,forKey:"git.repositorySortByName")
@@ -366,39 +397,34 @@ extension WorkspaceController {
         },owner:window)
     }
 
-    private func editGitGroup(_ oldName: String?,locations: [WorkspaceSession]) {
+    private func editGitGroup(_ oldName: String?,locations: [WorkspaceSession],selection: Set<String>? = nil) {
         guard let window else { return }
         let defaults = UserDefaults.standard
         let groups = defaults.dictionary(forKey:"git.repositoryGroups") as? [String:String] ?? [:]
-        let name = NSTextField(string:oldName ?? "")
-        name.placeholderString = L.text("Group Name")
-        let rows = NSStackView(); rows.orientation = .vertical; rows.alignment = .leading; rows.spacing = 6
-        let choices = locations.map { location -> NSButton in
-            let button = NSButton(checkboxWithTitle:location.title,target:nil,action:nil)
-            button.state = oldName != nil && groups[location.repositoryID] == oldName ? .on : .off
-            button.toolTip = location.path
-            rows.addArrangedSubview(button)
-            return button
-        }
-        rows.frame = NSRect(origin:.zero,size:rows.fittingSize)
-        let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.documentView = rows
-        let accessory = NSView(frame:NSRect(x:0,y:0,width:480,height:290))
-        Theme.pin(Theme.stack([name,scroll],orientation:.vertical,spacing:8),in:accessory)
+        let selected = selection ?? Set(locations.filter { oldName != nil && groups[$0.repositoryID] == oldName }.map(\.repositoryID))
+        let editor = GitRepositoryGroupEditor(name:oldName ?? "",candidates:locations,selected:selected)
         let alert = NSAlert(); alert.messageText = L.text(oldName == nil ? "New Group…" : "Manage Repositories…")
-        alert.accessoryView = accessory
+        alert.accessoryView = editor
         alert.addButton(withTitle:L.text("Save")); alert.addButton(withTitle:L.text("Cancel"))
+        editor.onValidationChanged = { [weak editor,weak alert] in alert?.buttons.first?.isEnabled = editor?.canSave == true }
+        editor.onValidationChanged?()
         alert.beginSheetModal(for:window) { [weak self] response in
-            let title = name.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)
-            guard response == .alertFirstButtonReturn,!title.isEmpty else { return }
-            var updated = groups.filter { oldName == nil || $0.value != oldName }
-            for (location,choice) in zip(locations,choices) where choice.state == .on { updated[location.repositoryID] = title }
+            guard response == .alertFirstButtonReturn,editor.canSave else { return }
+            let title = editor.name.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)
+            var updated = (defaults.dictionary(forKey:"git.repositoryGroups") as? [String:String] ?? [:]).filter { oldName == nil || $0.value != oldName }
+            for value in editor.selectedLocations { updated[value.repositoryID] = title }
             var names = Set(defaults.stringArray(forKey:"git.repositoryGroupNames") ?? [])
             if let oldName { names.remove(oldName) }; names.insert(title)
             defaults.set(Array(names),forKey:"git.repositoryGroupNames")
             defaults.set(updated,forKey:"git.repositoryGroups")
+            let saved = defaults.data(forKey:"git.savedRepositories").flatMap { try? JSONDecoder().decode([WorkspaceSession].self,from:$0) } ?? []
+            let combined = saved+editor.selectedLocations.filter { !saved.contains($0) }
+            if let data = try? JSONEncoder().encode(combined) { defaults.set(data,forKey:"git.savedRepositories") }
+            GitRepositoryOrganization.register(combined)
             self?.browseGitRepositories()
         }
     }
+
 }
 
 extension GitWorkspace {

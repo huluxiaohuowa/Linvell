@@ -269,7 +269,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-FoldGit — InlineDiff, worktree content integration, prepared HEAD-lock cleanup, repository modification scans and strict UTF-16 preview decoding
+FoldGit — InlineDiff, worktree content integration, prepared HEAD-lock cleanup, repository modification scans, strict UTF-16 preview decoding, group discovery and cleanup review
 https://github.com/dufu1991/foldgit
 
 MIT License

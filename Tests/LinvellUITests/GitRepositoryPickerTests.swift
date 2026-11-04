@@ -56,8 +56,9 @@ final class GitRepositoryPickerTests: XCTestCase {
         let controls = descendants(try XCTUnwrap(sheet.contentView))
         let name = try XCTUnwrap(controls.compactMap { $0 as? NSTextField }.first { $0.placeholderString == L.text("Group Name") })
         name.stringValue = "Fixture group"
+        name.delegate?.controlTextDidChange?(Notification(name:NSControl.textDidChangeNotification,object:name))
         let check = try XCTUnwrap(controls.compactMap { $0 as? NSButton }.first { $0.toolTip == source.path })
-        check.state = .on
+        check.performClick(nil)
         let submit = try XCTUnwrap(controls.compactMap { $0 as? NSButton }.first { $0.title == L.text("Save") })
         submit.performClick(nil)
         let deadline = Date().addingTimeInterval(3)

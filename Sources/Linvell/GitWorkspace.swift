@@ -88,7 +88,9 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
     private var unstageAll: NSButton!
     private var stageAll: NSButton!
     private var commit: NSButton!
-    private let quickSnippets = NSPopUpButton()
+    private let favoriteSnippets = NSStackView()
+    let stagedSummary = Theme.label("",size:12,color:Theme.secondary)
+    private var cleanupPanel: GitWorktreeCleanupPanel?
     private var open: NSButton!
     private var review: NSButton!
     private var changesControls: NSStackView!
@@ -146,9 +148,14 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         let network = Theme.stack([caption,failureButton,NSView(),fetch,pull,push,tools],spacing:8)
         let menu = NSMenu(); menu.delegate = self; table.menu = menu
         let branchMenu = NSMenu(); branchMenu.delegate = self; branchesTable.menu = branchMenu
-        quickSnippets.target = self; quickSnippets.action = #selector(insertQuickSnippet)
+        favoriteSnippets.spacing = 6
+        let snippetScroll = NSScrollView(); snippetScroll.hasHorizontalScroller = true; snippetScroll.drawsBackground = false
+        snippetScroll.documentView = favoriteSnippets
         reloadQuickSnippets()
-        let commitBar = Theme.stack([message,quickSnippets,commit],spacing:8)
+        let manage = button("Commit Snippets…",#selector(showCommitSnippets))
+        let footer = Theme.stack([snippetScroll,manage,stagedSummary,commit],spacing:8)
+        footer.heightAnchor.constraint(equalToConstant:36).isActive = true
+        let commitBar = Theme.stack([message,footer],orientation:.vertical,spacing:6)
         changesControls = operations; commitControls = commitBar
         hunkAction = button("Stage Hunk",#selector(applySelectedHunk))
         lineAction = button("Stage Selected Lines",#selector(applySelectedLines))
@@ -462,7 +469,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
     }
     private func updateMode() {
         historyControls.isHidden = mode.selectedSegment != 1
-        changesControls.isHidden = mode.selectedSegment != 0; commitControls.isHidden = mode.selectedSegment != 0; hunkControls.isHidden = true
+        changesControls.isHidden = mode.selectedSegment != 0; commitControls.isHidden = mode.selectedSegment != 0 || UserDefaults.standard.object(forKey:"git.showCommitMessageArea") as? Bool == false; hunkControls.isHidden = true
         pages.subviews.forEach { $0.removeFromSuperview() }
         if mode.selectedSegment == 3 {
             if let actionsPage,actionsPage.repository.directory != repository.directory,!actionsPage.running { self.actionsPage = nil }
@@ -543,7 +550,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         let allRefs = historyScope.selectedSegment == 1,limit = historyLimit
         caption.stringValue = L.text("Reading repository…")
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
-            let result = Result { () throws -> ([GitChange],[GitCommit],String,[GitReference],[GitWorktreeEntry],GitRepository,Set<String>,Set<String>,[Int]) in
+            let result = Result { () throws -> ([GitChange],[GitCommit],String,[GitReference],[GitWorktreeEntry],GitRepository,Set<String>,Set<String>,[Int],GitDiffStat) in
                 let repo = try repo.resolvedWorkingTree()
                 let changes = try repo.changes()
                 let commits = (try? repo.history(allRefs:allRefs,limit:limit,includeMessage:true)) ?? []
@@ -554,16 +561,17 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
                 let incoming = Set(((try? repo.run(["rev-list","--max-count=10000","HEAD..@{upstream}","--"])) ?? "").split(whereSeparator:\.isNewline).map(String.init))
                 let outgoing = Set(((try? repo.run(["rev-list","--max-count=10000","@{upstream}..HEAD","--"])) ?? "").split(whereSeparator:\.isNewline).map(String.init))
                 let counts = ((try? repo.run(["rev-list","--left-right","--count","HEAD...@{upstream}","--"])) ?? "").split(whereSeparator:\.isWhitespace).compactMap { Int($0) }
-                return (changes,commits,branch,refs,worktrees,repo,incoming,outgoing,counts)
+                return (changes,commits,branch,refs,worktrees,repo,incoming,outgoing,counts,try repo.stagedStat())
             }
             DispatchQueue.main.async {
                 guard let self,self.refreshGeneration == request else { return }
                 switch result {
-                case .success(let (changes,commits,branch,refs,worktrees,repo,incoming,outgoing,counts)):
+                case .success(let (changes,commits,branch,refs,worktrees,repo,incoming,outgoing,counts,stat)):
                     let oldRow = self.table.selectedRow
                     let path = self.selectedChange?.path
                     let hash = self.selectedCommit?.hash
                     self.repository = repo
+                    self.stagedSummary.stringValue = L.format("%d files · +%d · −%d",stat.files,stat.insertions,stat.deletions)+(stat.binaryFiles > 0 ? " · "+L.format("%d binary",stat.binaryFiles) : "")
                     self.incomingCommits = incoming; self.outgoingCommits = outgoing
                     self.pullControl?.title = L.text("Pull")+(counts.count == 2 ? " ↓"+String(counts[1]) : "")
                     self.pushControl?.title = L.text("Push")+(counts.count == 2 ? " ↑"+String(counts[0]) : "")
@@ -757,6 +765,8 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
     @objc func showGitSettings() {
         guard let window else { return }
         let defaults = UserDefaults.standard
+        let showMessage = NSButton(checkboxWithTitle:L.text("Show Commit Message Area"),target:nil,action:nil)
+        showMessage.state = defaults.object(forKey:"git.showCommitMessageArea") as? Bool == false ? .off : .on
         let defaultFetch = NSButton(checkboxWithTitle:L.text("Auto Fetch by Default"),target:nil,action:nil)
         defaultFetch.state = defaults.bool(forKey:"git.defaultAutoFetch") ? .on : .off
         let worktreeStatus = NSButton(checkboxWithTitle:L.text("Show Worktree Status in Sidebar"),target:nil,action:nil)
@@ -780,8 +790,8 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         let terminal = NSTextField(string:defaults.string(forKey:"git.externalTerminal") ?? "")
         editor.placeholderString = "/Applications/Editor.app"
         terminal.placeholderString = "/Applications/Terminal.app"
-        let accessory = NSView(frame:NSRect(x:0,y:0,width:470,height:356))
-        Theme.pin(Theme.stack([graph,worktreeStatus,Theme.stack([Theme.label("Commit Time"),relative]),expand,Theme.stack([Theme.label("Auto Fetch"),fetch]),defaultFetch,
+        let accessory = NSView(frame:NSRect(x:0,y:0,width:470,height:384))
+        Theme.pin(Theme.stack([graph,showMessage,worktreeStatus,Theme.stack([Theme.label("Commit Time"),relative]),expand,Theme.stack([Theme.label("Auto Fetch"),fetch]),defaultFetch,
                               Theme.stack([Theme.label("Fetch interval in minutes"),minutes,defaultInterval]),
                               Theme.stack([Theme.label("Default fetch interval in minutes"),defaultMinutes]),
                               Theme.label(L.text("Last successful Fetch")+" · "+last),
@@ -792,6 +802,8 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         alert.addButton(withTitle:L.text("Save")); alert.addButton(withTitle:L.text("Cancel"))
         alert.beginSheetModal(for:window) { [weak self] response in
             guard response == .alertFirstButtonReturn,let self else { return }
+            defaults.set(showMessage.state == .on,forKey:"git.showCommitMessageArea")
+            self.commitControls.isHidden = self.mode.selectedSegment != 0 || showMessage.state == .off
             defaults.set(defaultFetch.state == .on,forKey:"git.defaultAutoFetch")
             defaults.set(worktreeStatus.state == .on,forKey:"git.showWorktreeStatus")
             defaults.set(min(1440,max(1,defaultMinutes.integerValue)),forKey:"git.defaultFetchMinutes")
@@ -1244,26 +1256,27 @@ private extension GitWorkspace {
     }
 
     private func insertSnippet(_ value: String) {
+        UserDefaults.standard.set(true,forKey:"git.showCommitMessageArea")
         mode.selectedSegment = 0; modeChanged()
         message.stringValue += (message.stringValue.isEmpty ? "" : "\n")+value
         updateActionAvailability()
         window?.makeFirstResponder(message)
     }
 
+    @objc private func showCommitSnippets() { browseSnippets() }
     private func reloadQuickSnippets() {
-        quickSnippets.removeAllItems()
-        quickSnippets.addItem(withTitle:L.text("Quick Input"))
+        favoriteSnippets.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for snippet in GitCommitSnippet.load().filter(\.favorite) {
-            quickSnippets.addItem(withTitle:String(snippet.text.prefix(50)).replacingOccurrences(of:"\n",with:" · "))
-            quickSnippets.lastItem?.representedObject = snippet.text
+            let button = NSButton(title:String(snippet.text.prefix(40)).replacingOccurrences(of:"\n",with:" · "),target:self,action:#selector(insertFavoriteSnippet(_:)))
+            button.identifier = NSUserInterfaceItemIdentifier(snippet.text)
+            button.toolTip = snippet.text
+            button.setAccessibilityLabel(snippet.text)
+            favoriteSnippets.addArrangedSubview(button)
         }
-        quickSnippets.addItem(withTitle:L.text("Commit Snippets…"))
+        favoriteSnippets.frame = NSRect(origin:.zero,size:NSSize(width:max(1,favoriteSnippets.fittingSize.width),height:30))
     }
-
-    @objc private func insertQuickSnippet() {
-        if let value = quickSnippets.selectedItem?.representedObject as? String { insertSnippet(value) }
-        else if quickSnippets.indexOfSelectedItem > 0 { browseSnippets() }
-        quickSnippets.selectItem(at:0)
+    @objc private func insertFavoriteSnippet(_ sender: NSButton) {
+        if let value = sender.identifier?.rawValue { insertSnippet(value) }
     }
 
     private func editSnippet(_ snippet: GitCommitSnippet?) {
@@ -1420,56 +1433,9 @@ private extension GitWorkspace {
     }
 
     func previewMergedWorktrees(into target: String) {
-        let repo = repository
-        performResult("Reading repository…",{ try repo.cleanupCandidates(into:target) }) { [weak self] result in
-            guard let self,let window = self.window else { return }
-            let eligible = result.filter { self.onCanRemoveWorktree?($0.entry.path) != false }
-            guard !eligible.isEmpty else { self.showGitText("Clean Up Merged Worktrees…",text:L.text("No eligible worktrees")); return }
-            let alert = NSAlert(); alert.messageText = L.text("Clean Up Merged Worktrees…")
-            let list = NSStackView()
-            list.orientation = .vertical; list.alignment = .leading; list.spacing = 5
-            let choices = eligible.map { candidate in
-                let title = candidate.entry.branch+" · "+candidate.entry.path
-                let choice = NSButton(checkboxWithTitle:title,target:nil,action:nil)
-                choice.state = candidate.selectedByDefault ? .on : .off
-                if !candidate.selectedByDefault { choice.toolTip = L.text("Recent activity, unstarted worktrees or ignored files require an explicit choice.") }
-                list.addArrangedSubview(choice)
-                if !candidate.ignored.isEmpty {
-                    let paths = candidate.ignored.prefix(30).joined(separator:", ")
-                    let omitted = candidate.ignored.count > 30 ? " (+"+String(candidate.ignored.count-30)+")" : ""
-                    let label = NSTextField(wrappingLabelWithString:L.text("Ignored files will be deleted")+" · "+paths+omitted)
-                    label.maximumNumberOfLines = 3
-                    list.addArrangedSubview(label)
-                    label.widthAnchor.constraint(lessThanOrEqualToConstant:550).isActive = true
-                    label.toolTip = candidate.ignored.joined(separator:"\n")
-                }
-                return choice
-            }
-            let delete = NSButton(checkboxWithTitle:L.text("Delete merged local branches"),target:nil,action:nil)
-            let scroll = NSScrollView()
-            scroll.hasVerticalScroller = true
-            scroll.documentView = list
-            list.frame = NSRect(origin:.zero,size:list.fittingSize)
-            let accessory = NSView(frame:NSRect(x:0,y:0,width:580,height:220))
-            Theme.pin(Theme.stack([scroll,delete],orientation:.vertical,spacing:8),in:accessory)
-            alert.accessoryView = accessory
-            alert.addButton(withTitle:L.text("Remove Selected Worktrees")); alert.addButton(withTitle:L.text("Cancel"))
-            alert.beginSheetModal(for:window) { [weak self] response in
-                guard response == .alertFirstButtonReturn,let self else { return }
-                let selected = zip(eligible,choices).compactMap { candidate,choice in
-                    choice.state == .on && self.onCanRemoveWorktree?(candidate.entry.path) != false ? candidate : nil
-                }
-                let deleteBranch = delete.state == .on
-                guard !selected.isEmpty else { return }
-                self.performResult("Cleaning Worktrees…",{
-                    selected.compactMap { candidate -> String? in
-                        do { try repo.removeCleanupCandidate(candidate,into:target,deleteBranch:deleteBranch); return nil }
-                        catch { return candidate.entry.branch+" · "+error.localizedDescription }
-                    }
-                }) { [weak self] failures in
-                    if !failures.isEmpty { self?.showGitText("Worktree Cleanup Details",text:failures.joined(separator:"\n")) }
-                }
-            }
-        }
+        guard let window else { return }
+        cleanupPanel = GitWorktreeCleanupPanel(repository:repository,target:target,owner:window,canRemove:{ [weak self] path in
+            self?.onCanRemoveWorktree?(path) != false
+        },onRemoved:{ [weak self] in self?.reload() })
     }
 }

@@ -231,7 +231,12 @@ extension GitRepository {
         try removeCleanupCandidate(candidate,into:target,deleteBranch:false)
     }
 
-    public func removeCleanupCandidate(_ candidate: CleanupCandidate,into target: String,deleteBranch: Bool) throws {
+    public enum CleanupBranchOutcome {
+        case kept, deleted, detached, keptContentMerged, keptChanged, failed(String)
+    }
+
+    @discardableResult
+    public func removeCleanupCandidate(_ candidate: CleanupCandidate,into target: String,deleteBranch: Bool) throws -> CleanupBranchOutcome {
         try atWorktree(candidate.entry.path).withLockedHead(candidate.head) {
         guard let live = try cleanupCandidates(into:target).first(where:{
             $0.entry.path == candidate.entry.path && $0.entry.branch == candidate.entry.branch && $0.head == candidate.head
@@ -241,12 +246,15 @@ extension GitRepository {
         _ = try run(["worktree","remove","--",live.entry.path],timeout:60)
         }
         let live = candidate
-        if deleteBranch,live.ancestor,!live.entry.branch.isEmpty,
-           (try? revision("refs/heads/"+live.entry.branch)) == live.head,
-           (try? run(["merge-base","--is-ancestor",live.head,"refs/heads/"+target])) != nil {
-            // Git checks the merged state and any other checkout. Never force branch deletion.
+        guard !live.entry.branch.isEmpty else { return .detached }
+        guard deleteBranch else { return .kept }
+        guard live.ancestor else { return .keptContentMerged }
+        guard (try? revision("refs/heads/"+live.entry.branch)) == live.head,
+              (try? run(["merge-base","--is-ancestor",live.head,"refs/heads/"+target])) != nil else { return .keptChanged }
+        do {
             _ = try run(["branch","-d","--",live.entry.branch])
-        }
+            return .deleted
+        } catch { return .failed(error.localizedDescription) }
     }
 
     public func worktreeDetail(_ entry: GitWorktreeEntry,against target: String) throws -> String {

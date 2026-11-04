@@ -32,7 +32,7 @@ struct PickerOption {
     init(title: String,detail: String,fileURL: URL? = nil,reorderID: String? = nil,invoke: @escaping () -> Void) { self.title = title; self.detail = detail; self.fileURL = fileURL; self.reorderID = reorderID; self.invoke = invoke }
 }
 
-final class QuickPicker: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
+final class QuickPicker: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate, NSMenuDelegate {
     let input = NSSearchField()
     let table = ResponsiveTableView()
     private(set) var options: [PickerOption]
@@ -44,6 +44,41 @@ final class QuickPicker: NSWindowController, NSTableViewDataSource, NSTableViewD
                 table.setDraggingSourceOperationMask(.move,forLocal:true)
             }
         }
+    }
+    var rowActions: ((PickerOption) -> [PickerOption])? {
+        didSet { let menu = NSMenu(); menu.delegate = self; table.menu = rowActions == nil ? nil : menu }
+    }
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        guard results.indices.contains(table.clickedRow),let rowActions else { return }
+        for option in rowActions(results[table.clickedRow]) {
+            let item = NSMenuItem(title:option.title,action:#selector(invokeContextAction(_:)),keyEquivalent:"")
+            item.target = self; item.representedObject = option; menu.addItem(item)
+        }
+    }
+    @objc private func invokeContextAction(_ sender: NSMenuItem) { (sender.representedObject as? PickerOption)?.invoke() }
+    var selectionActions: [(String,([String]) -> Void)] = [] {
+        didSet {
+            table.allowsMultipleSelection = !selectionActions.isEmpty
+            selectionBar.arrangedSubviews.forEach { $0.removeFromSuperview() }
+            for (index,action) in selectionActions.enumerated() {
+                let button = NSButton(title:L.text(action.0),target:self,action:#selector(applySelection(_:)))
+                button.tag = index; selectionBar.addArrangedSubview(button)
+            }
+            selectionBar.isHidden = selectionActions.isEmpty
+            controlTextDidChange(Notification(name:NSControl.textDidChangeNotification,object:input))
+            tableViewSelectionDidChange(Notification(name:NSTableView.selectionDidChangeNotification,object:table))
+        }
+    }
+    private let selectionBar = NSStackView()
+    var selectedRepositoryIDs: [String] { table.selectedRowIndexes.compactMap { results.indices.contains($0) ? results[$0].reorderID : nil } }
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        selectionBar.arrangedSubviews.compactMap { $0 as? NSButton }.forEach { $0.isEnabled = !selectedRepositoryIDs.isEmpty }
+    }
+    @objc private func applySelection(_ sender: NSButton) {
+        let ids = selectedRepositoryIDs
+        guard !ids.isEmpty,selectionActions.indices.contains(sender.tag) else { return }
+        let action = selectionActions[sender.tag].1; dismiss(); action(ids)
     }
     var onDismiss: (() -> Void)?
     var onQuery: ((String,@escaping ([PickerOption]) -> Void) -> Void)? { didSet { controlTextDidChange(Notification(name:NSControl.textDidChangeNotification)) } }
@@ -64,7 +99,8 @@ final class QuickPicker: NSWindowController, NSTableViewDataSource, NSTableViewD
         table.setAccessibilityLabel(title+" results")
         let scroll = ResponsiveScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true
         let hint = Theme.label("↑↓ Navigate     ↵ Open     Esc Cancel",size:12,color:Theme.secondary)
-        let stack = Theme.stack([input,scroll,hint],orientation:.vertical,spacing:12)
+        selectionBar.spacing = 6; selectionBar.isHidden = true
+        let stack = Theme.stack([input,scroll,selectionBar,hint],orientation:.vertical,spacing:12)
         Theme.pin(stack,in:panel.contentView!,inset:18)
         table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false)
         owner.beginSheet(panel); panel.makeFirstResponder(input)
@@ -95,15 +131,20 @@ final class QuickPicker: NSWindowController, NSTableViewDataSource, NSTableViewD
     }
     func tableView(_ tableView: NSTableView,acceptDrop info: NSDraggingInfo,row: Int,
                    dropOperation: NSTableView.DropOperation) -> Bool {
-        guard let id = info.draggingPasteboard.string(forType:reorderType),row >= 0,row <= results.count else { return false }
-        return moveRepository(id,before:row < results.count ? results[row].reorderID : nil)
+        let ids = (info.draggingPasteboard.pasteboardItems ?? []).compactMap { $0.string(forType:reorderType) }
+        guard !ids.isEmpty,row >= 0,row <= results.count else { return false }
+        return moveRepositories(ids,before:row < results.count ? results[row].reorderID : nil)
     }
-    func moveRepository(_ id: String,before target: String?) -> Bool {
-        guard onReorder != nil,let source = options.firstIndex(where:{ $0.reorderID == id }) else { return false }
-        if target == id { return true }
-        let option = options.remove(at:source)
+    func moveRepository(_ id: String,before target: String?) -> Bool { moveRepositories([id],before:target) }
+    func moveRepositories(_ ids: [String],before target: String?) -> Bool {
+        let chosen = Set(ids)
+        guard onReorder != nil,!chosen.isEmpty else { return false }
+        let moving = options.filter { $0.reorderID.map(chosen.contains) == true }
+        guard moving.count == chosen.count else { return false }
+        if let target,chosen.contains(target) { return true }
+        options.removeAll { $0.reorderID.map(chosen.contains) == true }
         let destination = target.flatMap { id in options.firstIndex(where:{ $0.reorderID == id }) } ?? options.count
-        options.insert(option,at:min(destination,options.count))
+        options.insert(contentsOf:moving,at:destination)
         onReorder?(options.compactMap(\.reorderID))
         controlTextDidChange(Notification(name:NSControl.textDidChangeNotification))
         return true
@@ -122,7 +163,7 @@ final class QuickPicker: NSWindowController, NSTableViewDataSource, NSTableViewD
             }
             queryWork = work; DispatchQueue.main.asyncAfter(deadline:.now()+0.2,execute:work); return
         }
-        results = Array(options.lazy.filter { ProjectFiles.matches(query,$0.title+" "+$0.detail) }.prefix(80))
+        results = Array(options.lazy.filter { ProjectFiles.matches(query,$0.title+" "+$0.detail) }.prefix(selectionActions.isEmpty ? 80 : Int.max))
         table.reloadData(); if !results.isEmpty { table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false) }
     }
     func control(_ control: NSControl,textView: NSTextView,doCommandBy selector: Selector) -> Bool {
@@ -139,9 +180,11 @@ final class QuickPicker: NSWindowController, NSTableViewDataSource, NSTableViewD
         let index = min(max(row,0),results.count-1); table.selectRowIndexes(IndexSet(integer:index),byExtendingSelection:false); table.scrollRowToVisible(index)
     }
     func updateRepositoryOrder(_ ids: [String]) {
+        let selection = Set(selectedRepositoryIDs)
         let repositories = Dictionary(options.compactMap { option in option.reorderID.map { ($0,option) } },uniquingKeysWith:{ a,_ in a })
         options = options.filter { $0.reorderID == nil }+ids.compactMap { repositories[$0] }
         controlTextDidChange(Notification(name:NSControl.textDidChangeNotification,object:input))
+        if !selection.isEmpty { table.selectRowIndexes(IndexSet(results.indices.filter { results[$0].reorderID.map(selection.contains) == true }),byExtendingSelection:false) }
     }
     func dismiss() { queryGeneration = UUID(); queryWork?.cancel(); let callback = onDismiss; onDismiss = nil; callback?(); if let panel = window { if panel.sheetParent != nil { parentWindow?.endSheet(panel) }; panel.orderOut(nil) } }
     @objc private func choose() { guard table.selectedRow >= 0,table.selectedRow < results.count else { return }; let result = results[table.selectedRow]; dismiss(); result.invoke() }
