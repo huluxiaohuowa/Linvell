@@ -29,6 +29,7 @@ final class ResizablePanes: NSView {
     override func resizeSubviews(withOldSize oldSize: NSSize) { needsLayout = true }
     override func layout() {
         super.layout()
+        guard bounds.width > 0,bounds.height > 0 else { return }
         let panes = arrangedSubviews.filter { !$0.isHidden }
         guard !panes.isEmpty else { handle.isHidden = true; return }
         guard panes.count == 2 else { panes[0].frame = bounds; handle.isHidden = true; return }

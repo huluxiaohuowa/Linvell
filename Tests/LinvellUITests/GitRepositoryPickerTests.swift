@@ -8,9 +8,10 @@ final class GitRepositoryPickerTests: XCTestCase {
         _ = NSApplication.shared
         let defaults = UserDefaults.standard
         let keys = ["lastProject","git.repositoryAliases","git.archivedRepositories","git.repositoryOrder",
-                    "git.repositorySortByName","git.savedRepositories",WorkspaceSession.key,WorkspaceSession.recentKey]
+                    "git.repositoryGroups","git.repositoryGroupNames","git.repositorySortByName","git.repositorySort","git.repositorySortAscending","git.repositoryAdded","git.repositoryOpened","git.repositoryModified","git.savedRepositories",WorkspaceSession.key,WorkspaceSession.recentKey]
         let previous = keys.map { ($0,defaults.object(forKey:$0)) }
         defer { for (key,value) in previous { defaults.set(value,forKey:key) } }
+        defaults.set("manual",forKey:"git.repositorySort")
         let fixture = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).resolvingSymlinksInPath()
         let source = fixture.appendingPathComponent("source")
         let destination = fixture.appendingPathComponent("cloned")
@@ -45,5 +46,24 @@ final class GitRepositoryPickerTests: XCTestCase {
         picker.dismiss()
         archive.invoke()
         XCTAssertTrue(workspace.picker?.options.contains { $0.reorderID == previousRepo } == true)
+        workspace.picker?.dismiss()
+        workspace.manageGitGroups([.local(path:source.path),.local(path:destination.path)])
+        let groups = try XCTUnwrap(workspace.picker)
+        let add = try XCTUnwrap(groups.options.first { $0.title == L.text("New Group…") })
+        groups.dismiss(); add.invoke()
+        let sheet = try XCTUnwrap(workspace.window?.attachedSheet)
+        func descendants(_ view: NSView) -> [NSView] { [view]+view.subviews.flatMap(descendants) }
+        let controls = descendants(try XCTUnwrap(sheet.contentView))
+        let name = try XCTUnwrap(controls.compactMap { $0 as? NSTextField }.first { $0.placeholderString == L.text("Group Name") })
+        name.stringValue = "Fixture group"
+        let check = try XCTUnwrap(controls.compactMap { $0 as? NSButton }.first { $0.toolTip == source.path })
+        check.state = .on
+        let submit = try XCTUnwrap(controls.compactMap { $0 as? NSButton }.first { $0.title == L.text("Save") })
+        submit.performClick(nil)
+        let deadline = Date().addingTimeInterval(3)
+        while (defaults.dictionary(forKey:"git.repositoryGroups") as? [String:String])?[previousRepo] != "Fixture group",Date() < deadline {
+            RunLoop.current.run(until:Date().addingTimeInterval(0.02))
+        }
+        XCTAssertEqual((defaults.dictionary(forKey:"git.repositoryGroups") as? [String:String])?[previousRepo],"Fixture group")
     }
 }

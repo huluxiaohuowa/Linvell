@@ -26,7 +26,9 @@ final class TaskReviewTests: XCTestCase {
         let file = root.appendingPathComponent("a.swift")
         try "original\n".write(to:file,atomically:true,encoding:.utf8); _ = try repo.run(["add","."]); _ = try repo.run(["commit","-m","Initial"])
         try "replacement\n".write(to:file,atomically:true,encoding:.utf8)
-        let view = GitWorkspace(repository:repo); view.mode.selectedSegment = 0; view.reload()
+        let view = GitWorkspace(repository:repo)
+        view.diffMode.selectedSegment = 1; view.diffMode.sendAction(view.diffMode.action,to:view.diffMode.target)
+        view.mode.selectedSegment = 0; view.reload()
         let deadline = Date().addingTimeInterval(5)
         while !view.diff.string.contains("+replacement"),Date() < deadline { RunLoop.current.run(until:Date().addingTimeInterval(0.02)) }
         var captured: ReviewComment?; view.onReview = { captured = $0 }

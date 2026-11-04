@@ -163,8 +163,9 @@ final class GitLayoutTests: XCTestCase {
         let repo = GitRepository(root:root)
         _ = try repo.run(["init","-b","main"])
         let defaults = UserDefaults.standard
-        let oldWrap = defaults.object(forKey:"git.wrapDiff"),oldSnippets = defaults.object(forKey:"git.commitSnippets")
-        defer { defaults.set(oldWrap,forKey:"git.wrapDiff"); defaults.set(oldSnippets,forKey:"git.commitSnippets") }
+        let oldWrap = defaults.object(forKey:"git.wrapDiff"),oldSnippets = defaults.object(forKey:"git.commitSnippets"),oldEntries = defaults.object(forKey:"git.commitSnippetEntries")
+        defaults.removeObject(forKey:"git.commitSnippetEntries")
+        defer { defaults.set(oldWrap,forKey:"git.wrapDiff"); defaults.set(oldSnippets,forKey:"git.commitSnippets"); defaults.set(oldEntries,forKey:"git.commitSnippetEntries") }
         defaults.set(false,forKey:"git.wrapDiff")
         defaults.set(["Review ready"],forKey:"git.commitSnippets")
         let view = GitWorkspace(repository:repo)
@@ -189,6 +190,9 @@ final class GitLayoutTests: XCTestCase {
         let insert = try XCTUnwrap(picker.options.first { $0.title == "Review ready" })
         picker.dismiss()
         insert.invoke()
+        let actions = try XCTUnwrap(view.gitPicker)
+        let use = try XCTUnwrap(actions.options.first { $0.title == L.text("Insert Snippet") })
+        actions.dismiss(); use.invoke()
         XCTAssertEqual(view.message.stringValue,"Review ready")
     }
     func testInlineHighlightUsesUTF16OffsetsWithoutChangingPatch() throws {

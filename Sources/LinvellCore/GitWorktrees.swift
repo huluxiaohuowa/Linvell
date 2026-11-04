@@ -26,7 +26,7 @@ extension GitRepository {
     }
 
     @discardableResult
-    public func finishWorktree(_ entry: GitWorktreeEntry,into target: String,removeSource: Bool = true) throws -> GitWorktreeMerge? {
+    public func finishWorktree(_ entry: GitWorktreeEntry,into target: String,removeSource: Bool = true,deleteBranch: Bool = false) throws -> GitWorktreeMerge? {
         let liveEntries = try worktrees()
         guard !target.isEmpty,target != entry.branch,!entry.branch.isEmpty,entry.path != directory,
               liveEntries.first?.path != entry.path,
@@ -36,7 +36,7 @@ extension GitRepository {
         _ = try run(["show-ref","--verify","--","refs/heads/"+target])
         let source = try atWorktree(entry.path).revision("HEAD")
         let destination = liveEntries.first { $0.branch == target && !$0.prunable }.map { atWorktree($0.path) } ?? self
-        let merge = GitWorktreeMerge(source:entry,sourceCommit:source,targetBranch:target,destination:destination,removeAfterMerge:removeSource)
+        let merge = GitWorktreeMerge(source:entry,sourceCommit:source,targetBranch:target,destination:destination,removeAfterMerge:removeSource,deleteBranchAfterMerge:deleteBranch)
         if merge.pending { return merge }
         guard try atWorktree(entry.path).changes().isEmpty else {
             throw GitError.command("The source worktree must be clean, unlocked and on the selected branch.")
@@ -71,6 +71,7 @@ public struct GitWorktreeMerge {
     public let targetBranch: String
     public let destination: GitRepository
     public let removeAfterMerge: Bool
+    public let deleteBranchAfterMerge: Bool
 
     fileprivate var pending: Bool {
         (try? destination.revision("MERGE_HEAD")) == sourceCommit && (try? destination.currentBranch()) == targetBranch
@@ -113,6 +114,11 @@ public struct GitWorktreeMerge {
         }
     }
 
+    public func deleteConflict(_ path: String) throws {
+        guard try conflicts().contains(where:{ $0.path == path }) else { throw GitError.command("This file no longer has a merge conflict.") }
+        _ = try destination.run(["rm","-f","--",path])
+    }
+
     public func markResolved(_ path: String) throws {
         guard try conflicts().contains(where:{ $0.path == path }) else {
             throw GitError.command("This file no longer has a merge conflict.")
@@ -143,6 +149,7 @@ public struct GitWorktreeMerge {
         guard removeAfterMerge else { return }
         do {
             let sourceRepo = destination.atWorktree(source.path)
+            try sourceRepo.withLockedHead(sourceCommit) {
             guard try destination.currentBranch() == targetBranch,
                   try sourceRepo.currentBranch() == source.branch,
                   try sourceRepo.revision("HEAD") == sourceCommit,
@@ -151,8 +158,13 @@ public struct GitWorktreeMerge {
             }
             _ = try destination.run(["merge-base","--is-ancestor",sourceCommit,"HEAD"])
             _ = try destination.run(["worktree","remove","--",source.path],timeout:60)
+            }
+            if deleteBranchAfterMerge,
+               try destination.revision("refs/heads/"+source.branch) == sourceCommit {
+                _ = try destination.run(["branch","-d","--",source.branch])
+            }
         } catch {
-            throw GitError.command("The merge succeeded. The source worktree was kept. "+error.localizedDescription)
+            throw GitError.command("The merge succeeded, but source cleanup could not be completed. "+error.localizedDescription)
         }
     }
 
@@ -176,20 +188,28 @@ extension GitRepository {
         public let head: String
         public let ignored: [String]
         public let ancestor: Bool
+        public var lastActivity: Date? = nil
+        public var isUnstarted = false
+        public var selectedByDefault: Bool {
+            ignored.isEmpty && !isUnstarted && lastActivity.map { Date().timeIntervalSince($0) >= 15*60 } == true
+        }
     }
 
     public func cleanupCandidates(into target: String) throws -> [CleanupCandidate] {
         let ref = "refs/heads/"+target
         let targetHead = try revision(ref)
         return try worktrees().dropFirst().compactMap { entry in
-            guard entry.path != directory,entry.branch != target,!entry.branch.isEmpty,!entry.locked,!entry.prunable else { return nil }
+            guard entry.path != directory,entry.branch != target,!entry.locked,!entry.prunable else { return nil }
             let source = atWorktree(entry.path)
             guard let head = try? source.revision("HEAD"),
                   (try? source.worktreeState(entry)) == "Clean",
                   let ignored = try? source.run(["ls-files","-z","--others","--ignored","--exclude-standard"]) else { return nil }
             let ancestor = (try? run(["merge-base","--is-ancestor",head,targetHead])) != nil
             guard ancestor || contentMerged(head,into:targetHead) else { return nil }
-            return CleanupCandidate(entry:entry,head:head,ignored:ignored.split(separator:"\0").map(String.init),ancestor:ancestor)
+            let ref = entry.branch.isEmpty ? "HEAD" : "refs/heads/"+entry.branch
+            let reflog = (try? source.run(["log","--walk-reflogs","--format=%H","-n","200",ref,"--"]))?.split(whereSeparator:\.isNewline).map(String.init) ?? []
+            let unstarted = ancestor && !reflog.isEmpty && reflog.allSatisfy { $0 == head }
+            return CleanupCandidate(entry:entry,head:head,ignored:ignored.split(separator:"\0").map(String.init),ancestor:ancestor,lastActivity:try? source.lastActivity(),isUnstarted:unstarted)
         }
     }
 
@@ -212,13 +232,16 @@ extension GitRepository {
     }
 
     public func removeCleanupCandidate(_ candidate: CleanupCandidate,into target: String,deleteBranch: Bool) throws {
+        try atWorktree(candidate.entry.path).withLockedHead(candidate.head) {
         guard let live = try cleanupCandidates(into:target).first(where:{
             $0.entry.path == candidate.entry.path && $0.entry.branch == candidate.entry.branch && $0.head == candidate.head
         }),Set(live.ignored).isSubset(of:Set(candidate.ignored)) else {
             throw GitError.command("This worktree changed after the cleanup preview.")
         }
         _ = try run(["worktree","remove","--",live.entry.path],timeout:60)
-        if deleteBranch,live.ancestor,
+        }
+        let live = candidate
+        if deleteBranch,live.ancestor,!live.entry.branch.isEmpty,
            (try? revision("refs/heads/"+live.entry.branch)) == live.head,
            (try? run(["merge-base","--is-ancestor",live.head,"refs/heads/"+target])) != nil {
             // Git checks the merged state and any other checkout. Never force branch deletion.

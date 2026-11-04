@@ -80,10 +80,10 @@ public struct GitRepository {
     public func run(_ arguments: [String],timeout: TimeInterval = 30,input: Data? = nil) throws -> String {
         let started = Date()
         var succeeded = false
-        let safeCommands: Set<String> = ["add","branch","checkout","clone","commit","diff","fetch","log","merge","pull","push","restore","show","stash","status","switch","tag","worktree"]
+        let safeCommands: Set<String> = ["add","branch","checkout","clone","commit","diff","fetch","log","merge","pull","push","restore","show","stash","status","switch","tag","worktree","rev-list","rev-parse","ls-files","ls-tree","cat-file","merge-base","hash-object","show-ref","for-each-ref","config","update-ref"]
         let command = arguments.first.flatMap { safeCommands.contains($0) ? $0 : nil } ?? "operation"
         defer {
-            GitCommandJournal.shared.append(.init(operation:GitCommandJournal.operation,date:started,command:command,elapsed:Date().timeIntervalSince(started),succeeded:succeeded),scope:journalScope)
+            GitCommandJournal.shared.append(.init(operation:GitCommandJournal.operation,date:started,command:command,elapsed:Date().timeIntervalSince(started),succeeded:succeeded,readOnly:["diff","log","show","status","rev-list","rev-parse","ls-files","ls-tree","cat-file","merge-base","hash-object","show-ref","for-each-ref"].contains(command)),scope:journalScope)
         }
         if let executor {
             let value = try executor(directory,arguments,input,timeout)
@@ -91,7 +91,8 @@ public struct GitRepository {
             return value
         }
         let result = try ToolCommand.run(URL(fileURLWithPath:"/usr/bin/git"),arguments:Self.arguments(directory:directory,arguments:arguments),directory:root,timeout:timeout,input:input,trimOutput:false,maximumOutputBytes:16*1024*1024)
-        guard result.succeeded else { throw GitError.command(result.timedOut ? "Git operation timed out." : result.output) }
+        let expectedDifference = arguments.first == "diff" && arguments.contains("--no-index") && result.exitCode == 1 && !result.timedOut
+        guard result.succeeded || expectedDifference else { throw GitError.command(result.timedOut ? "Git operation timed out." : result.output) }
         succeeded = true
         return result.output
     }
@@ -122,21 +123,10 @@ public struct GitRepository {
     }
     public func diff(_ change: GitChange,staged: Bool) throws -> String {
         if change.index == "?" {
-            let file = root.appendingPathComponent(try checked(change.path))
-            if let remote {
-                let reply = try remote.request("read",path:file.path)
-                guard let content = reply.content,let data = Data(base64Encoded:content) else { throw GitError.command("The remote response is incomplete.") }
-                guard data.count <= 1024*1024 else { return "File too large for an untracked-file preview." }
-                guard !data.contains(0),let value = String(data:data,encoding:.utf8) else { return "Binary file" }
-                return "+++ \(change.path)\n"+value.components(separatedBy:"\n").map { "+"+$0 }.joined(separator:"\n")
-            }
-            let attrs = try file.resourceValues(forKeys:[.fileSizeKey])
-            guard (attrs.fileSize ?? 0) <= 1024*1024 else { return "File too large for an untracked-file preview." }
-            let data = try Data(contentsOf:file)
-            guard !data.contains(0),let value = String(data:data,encoding:.utf8) else { return "Binary file" }
-            return "+++ \(change.path)\n"+value.components(separatedBy:"\n").map { "+"+$0 }.joined(separator:"\n")
+            _ = try workingFileData(change.path)
+            return try run(["diff","--no-index","--no-ext-diff","--no-textconv","--full-index","--","/dev/null",checked(change.path)])
         }
-        return try run(["diff","--no-ext-diff","--no-textconv"]+(staged ? ["--cached"] : [])+["--",checked(change.path)])
+        return try run(["diff","--no-ext-diff","--no-textconv","--full-index"]+(staged ? ["--cached"] : [])+["--",checked(change.path)])
     }
     public func stage(_ change: GitChange) throws {
         var paths = [try checked(change.path)]
@@ -214,6 +204,6 @@ public struct GitRepository {
     }
     public func commitDiff(_ hash: String,path: String? = nil) throws -> String {
         guard [40,64].contains(hash.count),hash.allSatisfy(\.isHexDigit) else { throw GitError.invalidPath }
-        return try run(["show","--first-parent","--format=","--stat","--patch","--no-ext-diff","--no-textconv",hash,"--"] + (try path.map { [try checked($0)] } ?? []))
+        return try run(["show","--first-parent","--format=","--stat","--patch","--no-ext-diff","--no-textconv","--full-index",hash,"--"] + (try path.map { [try checked($0)] } ?? []))
     }
 }

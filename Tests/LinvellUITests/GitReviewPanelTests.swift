@@ -99,3 +99,42 @@ final class GitReviewPanelTests: XCTestCase {
         XCTAssertEqual(images.count,2)
     }
 }
+
+extension GitReviewPanelTests {
+    func testReviewActionsStageOnlySelectedLinesInSingleAndMultipleDiffs() throws {
+        _ = NSApplication.shared
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+        defer { try? FileManager.default.removeItem(at:root) }
+        let repo = GitRepository(root:root)
+        _ = try repo.run(["init","-b","main"])
+        _ = try repo.run(["config","user.name","Test"]); _ = try repo.run(["config","user.email","test@example.invalid"])
+        _ = try repo.run(["config","commit.gpgsign","false"])
+        let file = root.appendingPathComponent("a.txt")
+        try "one\ntwo\nthree\n".write(to:file,atomically:true,encoding:.utf8)
+        _ = try repo.run(["add","."]); try repo.commit("base")
+        try "one\n二\nthree\nextra\n".write(to:file,atomically:true,encoding:.utf8)
+        let change = try XCTUnwrap(repo.changes().first)
+        let owner = NSWindow(contentRect:NSRect(x:0,y:0,width:1200,height:750),styleMask:[.titled],backing:.buffered,defer:false)
+        let controller = GitReviewPanel(repository:repo,files:[.init(path:"a.txt",patch:{ try repo.diff(change,staged:false) },indexSide:false)],owner:owner)
+        defer { if let sheet = controller.window { owner.endSheet(sheet) }; owner.orderOut(nil) }
+        func descendants(_ view: NSView) -> [NSView] { [view]+view.subviews.flatMap(descendants) }
+        let content = try XCTUnwrap(controller.window?.contentView)
+        func wait(_ predicate: () -> Bool) {
+            let deadline = Date().addingTimeInterval(8)
+            while !predicate(),Date() < deadline { RunLoop.current.run(until:Date().addingTimeInterval(0.02)) }
+            XCTAssertTrue(predicate())
+        }
+        wait { descendants(content).compactMap { $0 as? GitPatchTextView }.contains { $0.string.contains("+extra") && $0.apply != nil } }
+        let view = try XCTUnwrap(descendants(content).compactMap { $0 as? GitPatchTextView }.first { $0.string.contains("+extra") && $0.apply != nil })
+        view.setSelectedRange((view.string as NSString).range(of:"+extra")); view.applyLines()
+        wait { (try? repo.run(["show",":a.txt"])) == "one\ntwo\nthree\nextra\n" }
+        let expand = try XCTUnwrap(descendants(content).compactMap { $0 as? NSButton }.first { $0.title == L.text("Expand Diffs") })
+        expand.performClick(nil)
+        wait { descendants(content).compactMap { $0 as? GitPatchTextView }.contains { $0.string.contains("+二") && !$0.string.contains("+extra") && $0.apply != nil } }
+        let remaining = try XCTUnwrap(descendants(content).compactMap { $0 as? GitPatchTextView }.first { $0.string.contains("+二") && !$0.string.contains("+extra") && $0.apply != nil })
+        remaining.applyFile()
+        wait { (try? repo.run(["show",":a.txt"])) == "one\n二\nthree\nextra\n" }
+        XCTAssertEqual(try String(contentsOf:file,encoding:.utf8),"one\n二\nthree\nextra\n")
+    }
+}

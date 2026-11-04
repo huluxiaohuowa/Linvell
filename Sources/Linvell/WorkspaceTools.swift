@@ -138,6 +138,11 @@ final class QuickPicker: NSWindowController, NSTableViewDataSource, NSTableViewD
         guard !results.isEmpty else { return }
         let index = min(max(row,0),results.count-1); table.selectRowIndexes(IndexSet(integer:index),byExtendingSelection:false); table.scrollRowToVisible(index)
     }
+    func updateRepositoryOrder(_ ids: [String]) {
+        let repositories = Dictionary(options.compactMap { option in option.reorderID.map { ($0,option) } },uniquingKeysWith:{ a,_ in a })
+        options = options.filter { $0.reorderID == nil }+ids.compactMap { repositories[$0] }
+        controlTextDidChange(Notification(name:NSControl.textDidChangeNotification,object:input))
+    }
     func dismiss() { queryGeneration = UUID(); queryWork?.cancel(); let callback = onDismiss; onDismiss = nil; callback?(); if let panel = window { if panel.sheetParent != nil { parentWindow?.endSheet(panel) }; panel.orderOut(nil) } }
     @objc private func choose() { guard table.selectedRow >= 0,table.selectedRow < results.count else { return }; let result = results[table.selectedRow]; dismiss(); result.invoke() }
 }

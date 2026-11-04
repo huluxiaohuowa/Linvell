@@ -19,7 +19,10 @@ final class GitSplitDiff: NSView {
             text.textContainer?.containerSize = NSSize(width:100_000,height:CGFloat.greatestFiniteMagnitude)
             text.textContainerInset = NSSize(width:8,height:8)
             text.setAccessibilityLabel(L.text(title))
-            scroll.documentView = text; scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true; scroll.drawsBackground = false
+            scroll.documentView = text
+            scroll.verticalRulerView = GitDiffLineRuler(scroll:scroll,editor:text,side:text === oldText ? 0 : 1)
+            scroll.hasVerticalRuler = true; scroll.rulersVisible = true
+            scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true; scroll.drawsBackground = false
             scroll.contentView.postsBoundsChangedNotifications = true
             NotificationCenter.default.addObserver(self,selector:#selector(syncScroll(_:)),name:NSView.boundsDidChangeNotification,object:scroll.contentView)
             let heading = Theme.label(title,size:11,color:Theme.secondary,weight:.semibold)
@@ -86,6 +89,7 @@ final class GitSplitDiff: NSView {
             text.textStorage?.setAttributedString(value)
             text.minSize = scroll.contentSize
             text.sizeToFit()
+            text.enclosingScrollView?.verticalRulerView?.needsDisplay = true
             text.scrollRangeToVisible(NSRange(location:0,length:0))
         }
     }

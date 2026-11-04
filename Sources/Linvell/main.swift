@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.applicationIconImage = icon
         }
         buildMenus(); Rendering.install()
+        GitAutoFetchScheduler.shared.start()
         NSApp.servicesProvider = self
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching:.keyDown) { [weak self] event in
             guard let self,let workspace = NSApp.keyWindow?.windowController as? WorkspaceController else { return event }

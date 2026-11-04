@@ -14,7 +14,7 @@ final class RemoteGitRoutingTests: XCTestCase {
                 if args.first == "rev-parse" { return path+"\n" }
                 if args.first == "status" { return " M source.swift\0" }
                 if args.first == "branch" { return "main\n" }
-                if args.first == "log" { return String(repeating:"a",count:40)+"\0\0Demo\0demo@example.invalid\02026-10-28\0Initial commit\0HEAD -> main\0\n" }
+                if args.first == "log" { return String(repeating:"a",count:40)+"\0\0Demo\0demo@example.invalid\02026-10-28\0Initial commit\0HEAD -> main\0Initial commit\n\nRemote body\0\n" }
                 if args.first == "show" { return "diff --git a/source.swift b/source.swift\n+fixture\n" }
                 return ""
             }
@@ -28,5 +28,6 @@ final class RemoteGitRoutingTests: XCTestCase {
         while git.changes.isEmpty,Date() < deadline { RunLoop.current.run(until:Date().addingTimeInterval(0.05)) }
         XCTAssertEqual(git.changes.first?.path,"source.swift")
         XCTAssertEqual(git.commits.first?.subject,"Initial commit")
+        XCTAssertTrue(git.commits.first?.message.contains("Remote body") == true)
     }
 }

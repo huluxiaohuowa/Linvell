@@ -8,7 +8,7 @@ final class LiveGitParityTests: XCTestCase {
         }
         let config = try JSONDecoder().decode([String:String].self,from:Data(contentsOf:URL(fileURLWithPath:fixture)))
         let remote = try SSHRemote(host:XCTUnwrap(config["host"]),configurationFile:XCTUnwrap(config["configurationFile"]))
-        let parent = try XCTUnwrap(config["root"])+"/../parity-"+UUID().uuidString
+        let parent = URL(fileURLWithPath:try XCTUnwrap(config["root"])).deletingLastPathComponent().appendingPathComponent("parity-"+UUID().uuidString).path
         _ = try GitRepository(remote:remote,directory:config["root"]!).run(["init",parent])
         let repo = GitRepository(remote:remote,directory:parent)
         defer { try? FileManager.default.removeItem(atPath:parent) }
@@ -58,6 +58,37 @@ final class LiveGitParityTests: XCTestCase {
         _ = try repo.run(["add","image.png"])
         try repo.commit("SSH binary preview")
         XCTAssertEqual(try repo.blobData(repo.resolvedRevision("HEAD"),path:"image.png"),binary)
+        let images = try repo.patchImages(repo.commitDiff(repo.resolvedRevision("HEAD"),path:"image.png"))
+        XCTAssertNil(images.0); XCTAssertEqual(images.1,binary)
+        // Selected lines travel through the production SSH stdin path, without changing the working file.
+        let selectedFile = parent+"/source.txt"
+        let beforeEdit = try remote.request("read",path:selectedFile)
+        _ = try remote.request("write",path:selectedFile,content:Data("edited 中文\nsecond addition\n".utf8),digest:beforeEdit.digest)
+        let change = try XCTUnwrap(repo.changes().first { $0.path == "source.txt" })
+        let patch = try repo.diff(change,staged:false)
+        let selected = try GitHunk.selection(in:patch,range:(patch as NSString).range(of:"+second addition"),unstage:false)
+        try repo.applyHunk(selected,unstage:false)
+        XCTAssertEqual(try repo.run(["show",":source.txt"]),"incoming 中文\nsecond addition\n")
+        let indexPatch = try repo.diff(change,staged:true)
+        try repo.applyHunk(GitHunk.selection(in:indexPatch,range:(indexPatch as NSString).range(of:"+second addition"),unstage:true),unstage:false)
+        XCTAssertEqual(try repo.run(["show",":source.txt"]),"incoming 中文\n")
+        XCTAssertEqual(try repo.workingFilePreview("source.txt"),"edited 中文\nsecond addition\n")
+        _ = try repo.run(["restore","--","source.txt"])
+        let head = try repo.resolvedRevision("HEAD")
+        try repo.withLockedHead(head) {
+            XCTAssertThrowsError(try repo.run(["update-ref","HEAD",head]))
+            XCTAssertThrowsError(try repo.run(["update-ref","refs/heads/main",head]))
+        }
+        XCTAssertNoThrow(try repo.run(["update-ref","HEAD",head]))
+        XCTAssertGreaterThan(try repo.lastActivity().timeIntervalSince1970,0)
+        XCTAssertGreaterThan(try repo.modificationDate().timeIntervalSince1970,0)
+        let detachedPath = parent+"-detached"
+        defer { try? FileManager.default.removeItem(atPath:detachedPath) }
+        _ = try repo.run(["worktree","add","--detach",detachedPath,head])
+        let candidate = try XCTUnwrap(repo.cleanupCandidates(into:"main").first { $0.entry.path == detachedPath })
+        XCTAssertFalse(candidate.selectedByDefault)
+        try repo.removeCleanupCandidate(candidate,into:"main",deleteBranch:true)
+        XCTAssertFalse(try repo.worktrees().contains { $0.path == detachedPath })
         _ = try repo.run(["worktree","prune"])
     }
 }

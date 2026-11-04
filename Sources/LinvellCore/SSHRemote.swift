@@ -117,7 +117,8 @@ public struct SSHRemote {
     public func git(_ arguments: [String],directory: String,input: Data? = nil,timeout: TimeInterval = 30) throws -> String {
         guard (directory.hasPrefix("/") || directory == "~"),!directory.utf8.contains(0) else { throw GitError.invalidPath }
         let result = try ToolCommand.run(URL(fileURLWithPath:"/usr/bin/ssh"),arguments:transportArguments(command:Self.gitCommand(arguments,directory:directory)),directory:nil,timeout:timeout+10,input:input,trimOutput:false,maximumOutputBytes:16*1024*1024)
-        guard result.succeeded else { throw GitError.command(result.timedOut ? "SSH Git operation timed out." : result.output) }
+        let expectedDifference = arguments.first == "diff" && arguments.contains("--no-index") && result.exitCode == 1 && !result.timedOut
+        guard result.succeeded || expectedDifference else { throw GitError.command(result.timedOut ? "SSH Git operation timed out." : result.output) }
         return result.output
     }
     // Fixed stdlib-only protocol. No server installation, shell interpolation or credentials are sent.
@@ -136,6 +137,29 @@ try:
                 if len(entries)>=20000: raise ValueError('Directory contains more than 20,000 entries; open a smaller directory.')
                 entries.append(dict(name=e.name,path=e.path,directory=e.is_dir()))
         reply=dict(path=path,entries=sorted(entries,key=lambda e:(not e['directory'],e['name'].lower())))
+    elif op=='git-modification':
+        import subprocess
+        result=subprocess.run(['git','-C',path,'ls-files','-z','--cached','--others','--exclude-standard'],capture_output=True,check=True)
+        if len(result.stdout)>16*1024*1024: raise ValueError('Repository file list exceeds preview limits.')
+        latest=0
+        for relative in result.stdout.split(b'\0'):
+            if not relative: continue
+            filename=os.path.join(path,os.fsdecode(relative))
+            try: modified=os.stat(filename).st_mtime
+            except OSError:
+                try: modified=os.stat(os.path.dirname(filename)).st_mtime
+                except OSError: continue
+            latest=max(latest,modified)
+        reply=dict(digest=str(latest))
+    elif op=='git-activity':
+        import subprocess
+        values=[]
+        for name in ('HEAD','index','logs/HEAD'):
+            result=subprocess.run(['git','-C',path,'rev-parse','--path-format=absolute','--git-path',name],capture_output=True,check=True)
+            filename=os.fsdecode(result.stdout).rstrip('\n')
+            try: values.append(os.stat(filename).st_mtime)
+            except FileNotFoundError: pass
+        reply=dict(digest=str(max(values,default=0)))
     elif op=='files':
         entries=[]
         excluded={'.git','node_modules','dist','build','.build','DerivedData','vendor','__pycache__','.venv'}
@@ -271,7 +295,7 @@ try:
     elif op=='review-blob':
         import subprocess,re
         spec=req.get('digest','')
-        if not re.match(r'^(?:[0-9a-f]{40}|[0-9a-f]{64})?:.+$',spec): raise ValueError('Invalid Git object.')
+        if not re.fullmatch(r'(?:(?:[0-9a-f]{40}|[0-9a-f]{64})?:.+|[0-9a-f]{40}|[0-9a-f]{64})',spec): raise ValueError('Invalid Git object.')
         size=subprocess.run(['git','--no-pager','-C',path,'cat-file','-s',spec],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         if size.returncode or int(size.stdout)>16*1024*1024: raise ValueError('File unavailable or too large for a preview.')
         run=subprocess.run(['git','--no-pager','-C',path,'cat-file','blob',spec],stdout=subprocess.PIPE,stderr=subprocess.PIPE)

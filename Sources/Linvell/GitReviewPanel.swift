@@ -1,11 +1,14 @@
 import AppKit
 import LinvellCore
+import ImageIO
+import UniformTypeIdentifiers
 
 /// The file list remains available while reviewing source, history and patches.
 final class GitReviewPanel: NSWindowController, NSWindowDelegate {
     struct File {
         let path: String
         let patch: (() throws -> String)?
+        var indexSide: Bool? = nil
         var images: (() throws -> (Data?,Data?))? = nil
     }
 
@@ -19,8 +22,9 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
     private let large = NSButton(title:L.text("Load Large Plain Text"),target:nil,action:nil)
     private let more = NSButton(title:L.text("Load More"),target:nil,action:nil)
     private let openFile: ((URL) -> Void)?
-    private let text = NSTextView.scrollableTextView()
+    private let text = GitPatchTextView.scrollableTextView()
     private let sections = NSStackView()
+    private let patchView = GitReviewDiffView(frame:NSRect(x:0,y:0,width:700,height:500))
     private let detail = NSView()
     private let multi = NSView()
     private let imagePane = NSView()
@@ -68,6 +72,7 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
             text.rulersVisible = true
         }
         Theme.pin(text,in:detail)
+        Theme.pin(patchView,in:detail); patchView.isHidden = true
         let multiple = scrolling(sections)
         Theme.pin(multiple,in:multi)
         multi.isHidden = true
@@ -75,15 +80,20 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
         Theme.pin(imagePane,in:detail); imagePane.isHidden = true
         toggle.target = self; toggle.action = #selector(toggleMultiple)
         toggle.isHidden = !files.contains { $0.patch != nil }
+        let expandFolders = NSButton(title:L.text("Expand Folders"),target:self,action:#selector(expandFolders))
+        let collapseFolders = NSButton(title:L.text("Collapse Folders"),target:self,action:#selector(collapseFolders))
         let expand = NSButton(title:L.text("Expand Diffs"),target:self,action:#selector(expandDiffs))
         let collapse = NSButton(title:L.text("Collapse Diffs"),target:self,action:#selector(collapseDiffs))
+        sidebar.addArrangedSubview(Theme.stack([expandFolders,collapseFolders],spacing:4))
         let close = NSButton(title:L.text("Close"),target:self,action:#selector(closeReview))
         expand.isHidden = toggle.isHidden; collapse.isHidden = toggle.isHidden
         let bar = Theme.stack([modes,large,NSView(),close],spacing:5)
         bar.heightAnchor.constraint(equalToConstant:30).isActive = true
+        let find = NSButton(title:L.text("Find in File"),target:self,action:#selector(findInFile))
+        find.keyEquivalent = "f"; find.keyEquivalentModifierMask = .command
         let open = NSButton(title:L.text("Open File"),target:self,action:#selector(openActiveFile))
         open.isHidden = onOpen == nil
-        let controls = Theme.stack([toggle,expand,collapse,revisions,more,NSView(),open],spacing:5)
+        let controls = Theme.stack([toggle,expand,collapse,revisions,more,NSView(),find,open],spacing:5)
         controls.heightAnchor.constraint(equalToConstant:30).isActive = true
         let right = Theme.stack([bar,controls,detail],orientation:.vertical,spacing:8)
         let panes = ResizablePanes(); panes.position = 280; panes.secondMinimum = 520
@@ -134,6 +144,12 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
         (outline.enclosingScrollView as? ReviewStackScroll)?.fitDocument()
     }
 
+    @objc private func expandFolders() { folders.removeAll(); renderFileList() }
+    @objc private func collapseFolders() {
+        folders = Set(files.map { ($0.path as NSString).deletingLastPathComponent }.filter { !$0.isEmpty })
+        renderFileList()
+    }
+
     @objc private func toggleFolder(_ sender: NSButton) {
         guard let path = sender.identifier?.rawValue else { return }
         if folders.remove(path) == nil { folders.insert(path) }
@@ -159,8 +175,10 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
         generation = UUID()
         large.isHidden = modes.selectedSegment != 0
         imagePane.isHidden = true
+        patchView.isHidden = true
         multi.isHidden = true; text.isHidden = false; revisions.isHidden = true; more.isHidden = true
         let repo = repository
+        if let view = text.documentView as? GitPatchTextView { configureIndexActions(view,file:active,enabled:modes.selectedSegment == 2) }
         switch modes.selectedSegment {
         case 0:
             if Self.isImage(active.path) { showImages { (nil,try repo.workingFileData(active.path,largeFile:true)) } }
@@ -168,7 +186,7 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
         case 1: readHistory(for:active,offset:0)
         default:
             if let images = active.images,Self.isImage(active.path) { showImages(images) }
-            else if let patch = active.patch { readText(patch) }
+            else if let patch = active.patch { showPatch(file:active,load:patch) }
             else { show(L.text("Select a revision in File History to view its diff.")) }
         }
     }
@@ -223,15 +241,31 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
         let repo = repository,hash = commits[index].hash
         if Self.isImage(active.path) {
             showImages {
-                let parent = try? repo.resolvedRevision(hash+"^")
-                return (parent.flatMap { try? repo.blobData($0,path:active.path) },try? repo.blobData(hash,path:active.path))
+                try repo.commitImages(hash,path:active.path)
             }
-        } else { readText { try repo.commitDiff(hash,path:active.path) } }
+        } else { showPatch(file:File(path:active.path,patch:nil),load:{ try repo.commitDiff(hash,path:active.path) }) }
+    }
+
+    private func showPatch(file: File,load: @escaping () throws -> String) {
+        let request = UUID(); generation = request
+        text.isHidden = true; imagePane.isHidden = true; patchView.isHidden = false
+        configureIndexActions(patchView.editor,file:file,enabled:true)
+        patchView.unstaging = file.indexSide == true
+        patchView.apply = patchView.editor.apply
+        DispatchQueue.global(qos:.userInitiated).async { [weak self] in
+            let result = Result(catching:load)
+            DispatchQueue.main.async {
+                guard let self,self.generation == request else { return }
+                self.paintPatch((try? result.get()) ?? self.errorText(result),in:self.patchView.editor)
+                if let value = self.patchView.editor.textStorage { self.patchView.render(value.copy() as! NSAttributedString) }
+            }
+        }
     }
 
     private func readText(sourcePath: String? = nil,_ load: @escaping () throws -> String) {
         let request = UUID()
         generation = request
+        patchView.isHidden = true
         show(L.text("Reading repository…"))
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
             let result = Result(catching:load)
@@ -269,12 +303,14 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
     }
 
     static func isImage(_ path: String) -> Bool {
-        ["png","jpg","jpeg","gif","tiff","bmp","heic","webp"].contains(URL(fileURLWithPath:path).pathExtension.lowercased())
+        guard let type = UTType(filenameExtension:URL(fileURLWithPath:path).pathExtension) else { return false }
+        return (CGImageSourceCopyTypeIdentifiers() as! [String]).contains(type.identifier)
     }
 
     private func showImages(_ load: @escaping () throws -> (Data?,Data?)) {
         let request = UUID()
         generation = request
+        patchView.isHidden = true
         imagePane.isHidden = false; text.isHidden = true; multi.isHidden = true
         imagePane.subviews.forEach { $0.removeFromSuperview() }
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
@@ -283,17 +319,7 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
                 guard let self,self.generation == request else { return }
                 switch result {
                 case .success(let (before,after)):
-                    let columns = [(L.text("Before"),before),(L.text("After"),after)].map { title,data -> NSView in
-                        let image = NSImageView()
-                        image.imageScaling = .scaleProportionallyUpOrDown
-                        image.image = data.flatMap(NSImage.init(data:))
-                        let column = Theme.stack([Theme.label(title),image],orientation:.vertical,spacing:6)
-                        column.frame = NSRect(x:0,y:0,width:max(120,self.imagePane.bounds.width/2),height:max(120,self.imagePane.bounds.height))
-                        return column
-                    }
-                    let split = ResizablePanes()
-                    columns.forEach(split.addArrangedSubview)
-                    Theme.pin(split,in:self.imagePane)
+                    Theme.pin(GitImageComparison(before:before,after:after),in:self.imagePane)
                 case .failure(let error):
                     self.imagePane.isHidden = true; self.text.isHidden = false
                     self.show(error.localizedDescription)
@@ -302,7 +328,38 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
         }
     }
 
+    private func configureIndexActions(_ view: GitPatchTextView,file: File,enabled: Bool) {
+        guard enabled,let staged = file.indexSide else { view.apply = nil; return }
+        view.unstaging = staged
+        view.apply = { [weak self,weak view] patch in
+            guard let self,let view else { return }
+            view.apply = nil
+            DispatchQueue.global(qos:.userInitiated).async {
+                let result = Result {
+                    if let patch { try self.repository.applyHunk(patch,unstage:false) }
+                    else if let change = try self.repository.changes().first(where:{ $0.path == file.path }) {
+                        guard !change.conflicted else { throw GitError.command("Resolve conflicts before staging this file.") }
+                        if staged { try self.repository.unstage(change) } else { try self.repository.stage(change) }
+                    }
+                }
+                DispatchQueue.main.async {
+                    if case .failure(let error) = result,let window = self.window { NSAlert(error:error).beginSheetModal(for:window) }
+                    self.configureIndexActions(view,file:file,enabled:true)
+                    if self.multi.isHidden { self.refreshDetail() } else { self.renderSections() }
+                }
+            }
+        }
+    }
+
+    @objc private func findInFile() {
+        guard let view = text.documentView as? NSTextView else { return }
+        window?.makeFirstResponder(view)
+        let item = NSMenuItem(); item.tag = NSTextFinder.Action.showFindInterface.rawValue
+        view.performFindPanelAction(item)
+    }
+
     private func configurePreview(_ view: NSTextView) {
+        view.usesFindBar = true; view.isIncrementalSearchingEnabled = true
         view.isEditable = false
         view.font = Theme.editorFont
         view.backgroundColor = Theme.canvas
@@ -357,36 +414,55 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
         modes.selectedSegment = 2
         large.isHidden = true
         imagePane.isHidden = true
+        patchView.isHidden = true
         revisions.isHidden = true; more.isHidden = true; text.isHidden = true; multi.isHidden = false
         sections.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        var pending: [((() throws -> String),NSTextView)] = []
+        var pending: [((() throws -> String),GitReviewDiffView)] = []
+        var imageLoads: [((() throws -> (Data?,Data?)),NSView)] = []
         for file in files {
             guard let patch = file.patch else { continue }
             let row = NSButton(title:(expanded.contains(file.path) ? "▾ " : "▸ ")+file.path,target:self,action:#selector(toggleSection(_:)))
             row.identifier = NSUserInterfaceItemIdentifier(file.path)
             sections.addArrangedSubview(row)
             if expanded.contains(file.path) {
-                let preview = NSTextView.scrollableTextView()
+                if Self.isImage(file.path),let load = file.images {
+                    let container = NSView(frame:NSRect(x:0,y:0,width:700,height:ReviewStackScroll.patchHeight))
+                    container.identifier = NSUserInterfaceItemIdentifier("review-image")
+                    container.heightAnchor.constraint(equalToConstant:ReviewStackScroll.patchHeight).isActive = true
+                    sections.addArrangedSubview(container)
+                    container.widthAnchor.constraint(equalTo:sections.widthAnchor).isActive = true
+                    imageLoads.append((load,container))
+                    continue
+                }
+                let preview = GitReviewDiffView(frame:NSRect(x:0,y:0,width:700,height:ReviewStackScroll.patchHeight))
                 preview.heightAnchor.constraint(equalToConstant:ReviewStackScroll.patchHeight).isActive = true
                 sections.addArrangedSubview(preview)
                 let width = preview.widthAnchor.constraint(equalTo:sections.widthAnchor)
-                width.priority = .defaultHigh
-                width.isActive = true
-                if let view = preview.documentView as? NSTextView {
-                    configurePreview(view)
-                    view.string = L.text("Reading repository…")
-                    pending.append((patch,view))
-                }
+                width.priority = .defaultHigh; width.isActive = true
+                configureIndexActions(preview.editor,file:file,enabled:true)
+                preview.unstaging = file.indexSide == true
+                preview.apply = preview.editor.apply
+                preview.editor.string = L.text("Reading repository…")
+                pending.append((patch,preview))
             }
         }
         (sections.enclosingScrollView as? ReviewStackScroll)?.fitDocument()
-        let request = generation,loads = pending
+        let request = generation,loads = pending,images = imageLoads
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
-            for (load,view) in loads {
+            for (load,container) in images {
                 let result = Result(catching:load)
                 DispatchQueue.main.async {
                     guard let self,self.generation == request else { return }
-                    self.paintPatch((try? result.get()) ?? self.errorText(result),in:view)
+                    if case .success(let (before,after)) = result { Theme.pin(GitImageComparison(before:before,after:after),in:container) }
+                    else { Theme.pin(Theme.label(self.errorText(result.map { _ in "" })),in:container) }
+                }
+            }
+            for (load,preview) in loads {
+                let result = Result(catching:load)
+                DispatchQueue.main.async {
+                    guard let self,self.generation == request else { return }
+                    self.paintPatch((try? result.get()) ?? self.errorText(result),in:preview.editor)
+                    if let value = preview.editor.textStorage { preview.render(value.copy() as! NSAttributedString) }
                 }
             }
         }
@@ -454,7 +530,7 @@ private final class ReviewStackScroll: NSScrollView {
         let width = max(0,contentSize.width)
         let rows = stack.arrangedSubviews
         let height = rows.reduce(CGFloat(0)) { total,row in
-            total + (row is NSScrollView ? Self.patchHeight : row.intrinsicContentSize.height)
+            total + (row is NSScrollView || row is GitReviewDiffView || row.identifier?.rawValue == "review-image" ? Self.patchHeight : max(24,row.intrinsicContentSize.height))
         } + CGFloat(max(0,rows.count-1))*stack.spacing
         let size = NSSize(width:width,height:max(contentSize.height,height+8))
         if documentView.frame.size != size { documentView.setFrameSize(size) }

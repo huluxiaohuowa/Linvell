@@ -8,6 +8,7 @@ public final class GitCommandJournal: @unchecked Sendable {
         public let command: String
         public let elapsed: TimeInterval
         public let succeeded: Bool
+        public var readOnly = false
     }
 
     @TaskLocal public static var operation: UUID?
@@ -20,6 +21,11 @@ public final class GitCommandJournal: @unchecked Sendable {
         defer { lock.unlock() }
         records[scope,default:[]].insert(entry,at:0)
         if records[scope,default:[]].count > 200 { records[scope]?.removeLast() }
+    }
+
+    public func clear(scope: String) {
+        lock.lock(); defer { lock.unlock() }
+        records.removeValue(forKey:scope)
     }
 
     public func entries(for scope: String) -> [Entry] {

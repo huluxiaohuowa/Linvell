@@ -41,16 +41,12 @@ final class GitFileCell: NSTableCellView {
 }
 
 final class GitHistoryCell: NSTableCellView {
-    init(commit: GitCommit,row: GitGraphRow?,lanes: Int) {
+    init(commit: GitCommit,row: GitGraphRow?,lanes: Int,incoming: Bool = false,outgoing: Bool = false) {
         super.init(frame:.zero); clipsToBounds = true
         let graph = row.map { GitGraphView($0) as NSView } ?? NSView()
         let title = Theme.label(commit.subject,size:13,weight:.medium)
-        var date = String(commit.date.prefix(10))
-        if UserDefaults.standard.bool(forKey:"git.relativeCommitTimes"),
-           let timestamp = ISO8601DateFormatter().date(from:commit.date) {
-            date = RelativeDateTimeFormatter().localizedString(for:timestamp,relativeTo:Date())
-        }
-        let detail = Theme.label(String(commit.hash.prefix(8))+" · "+commit.author+" · "+date+(commit.refs.isEmpty ? "" : " · "+commit.refs),size:11,color:Theme.secondary)
+        let date = GitCommitTimeMode.current.display(commit.date)
+        let detail = Theme.label(String(commit.hash.prefix(8))+" · "+commit.author+" · "+date+(incoming ? " · ↓ "+L.text("To Pull") : outgoing ? " · ↑ "+L.text("To Push") : "")+(commit.refs.isEmpty ? "" : " · "+commit.refs),size:11,color:Theme.secondary)
         for label in [title,detail] { label.maximumNumberOfLines = 1; label.usesSingleLineMode = true; label.lineBreakMode = .byTruncatingTail }
         for view in [graph,title,detail] { view.translatesAutoresizingMaskIntoConstraints = false; addSubview(view) }
         NSLayoutConstraint.activate([
@@ -58,7 +54,7 @@ final class GitHistoryCell: NSTableCellView {
             title.leadingAnchor.constraint(equalTo:leadingAnchor,constant:row == nil ? 12 : CGFloat(max(2,lanes))*14+30),title.trailingAnchor.constraint(equalTo:trailingAnchor,constant:-12),title.topAnchor.constraint(equalTo:topAnchor,constant:10),title.heightAnchor.constraint(equalToConstant:18),
             detail.leadingAnchor.constraint(equalTo:title.leadingAnchor),detail.trailingAnchor.constraint(equalTo:title.trailingAnchor),detail.topAnchor.constraint(equalTo:title.bottomAnchor,constant:3),detail.heightAnchor.constraint(equalToConstant:16)
         ])
-        toolTip = commit.refs+"\n"+commit.subject; setAccessibilityLabel(commit.subject+" · "+commit.author)
+        toolTip = commit.refs+"\n"+commit.author+" <"+commit.email+">\n"+commit.date+"\n"+commit.message; setAccessibilityLabel(commit.subject+" · "+commit.author)
     }
     required init?(coder: NSCoder) { fatalError() }
 }

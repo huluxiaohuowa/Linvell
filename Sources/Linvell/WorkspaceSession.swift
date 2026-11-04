@@ -10,6 +10,10 @@ enum WorkspaceSession: Codable, Equatable {
     static var shouldRestore: Bool { shouldRestore(defaults:.standard) }
     static func shouldRestore(defaults: UserDefaults) -> Bool { defaults.string(forKey:startupKey) != "empty" }
     static func save(_ location: Self,defaults: UserDefaults = .standard) {
+        GitRepositoryOrganization.register([location],defaults:defaults)
+        var opened = defaults.dictionary(forKey:"git.repositoryOpened") as? [String:Double] ?? [:]
+        opened[location.repositoryID] = Date().timeIntervalSince1970
+        defaults.set(opened,forKey:"git.repositoryOpened")
         var locations = recent(defaults:defaults)
         if let data = try? JSONEncoder().encode(location) { defaults.set(data,forKey:key) }
          locations.removeAll { $0 == location }; locations.insert(location,at:0)

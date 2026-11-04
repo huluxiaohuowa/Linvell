@@ -21,7 +21,8 @@ extension GitWorkspace {
         guard !running else { return }
         var options = [
             PickerOption(title:L.text("Compare References…"),detail:L.text("Compare any two branches or tags")) { [weak self] in self?.compareReferences() },
-            operationOption("Create Branch"), operationOption("Create Tag")
+            operationOption("Create Branch"), operationOption("Create Tag"),
+            PickerOption(title:L.text("Create & Push Tag…"),detail:"") { [weak self] in self?.createAndPushTag() }
         ]
         options += references.map { reference in
             PickerOption(title:reference.name,detail:L.text(reference.category)) { [weak self] in self?.referenceActions(reference) }
@@ -31,13 +32,16 @@ extension GitWorkspace {
 
     private func referenceActions(_ ref: GitReference) {
         var options = [
+            PickerOption(title:L.text("Copy Reference Name"),detail:ref.name) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(ref.name,forType:.string) },
             operationOption("Compare References",values:["Base":"HEAD","Target":ref.fullName]),
             operationOption("Merge",values:["Revision":ref.fullName]),
             operationOption("Create Branch",values:["Revision":ref.fullName]),
             operationOption("Create Tag",values:["Revision":ref.fullName])
         ]
         if ref.category == "Local Branches" {
-            options.insert(operationOption("Switch Branch",values:["Branch":ref.name]),at:0)
+            if let tree = worktrees.first(where:{ $0.branch == ref.name && $0.path != repository.directory && !$0.prunable }) {
+                options.insert(PickerOption(title:L.text("Open Worktree"),detail:tree.path) { [weak self] in self?.onOpenWorktree?(tree.path) },at:0)
+            } else { options.insert(operationOption("Switch Branch",values:["Branch":ref.name]),at:0) }
             options.append(operationOption("Rename Selected Branch",values:["Branch":ref.name]))
             options.append(operationOption("Delete Merged Branch",values:["Branch":ref.name]))
         } else if ref.category == "Tags" {
@@ -51,26 +55,21 @@ extension GitWorkspace {
     private func compareReferences() {
         guard let window else { return }
         let refs = ["HEAD"]+references.map(\.fullName)
-        let from = Theme.choiceButton(),to = Theme.choiceButton()
-        for picker in [from,to] { picker.addItems(withTitles:refs) }
-        if refs.count > 1 { to.selectItem(at:1) }
-        let fields = NSView(frame:NSRect(x:0,y:0,width:390,height:80))
-        Theme.pin(Theme.stack([
-            Theme.stack([Theme.label("Base"),from]),
-            Theme.stack([Theme.label("Target"),to])
-        ],orientation:.vertical,spacing:8),in:fields)
+        let selection = GitComparisonSelection(refs:refs)
+        let from = selection.from,to = selection.to
+        let fields = selection
         let alert = NSAlert(); alert.messageText = L.text("Compare References…"); alert.accessoryView = fields
         alert.addButton(withTitle:L.text("Compare")); alert.addButton(withTitle:L.text("Cancel"))
         alert.beginSheetModal(for:window) { [weak self] response in
             guard response == .alertFirstButtonReturn,let self,
-                  let base = from.titleOfSelectedItem,let target = to.titleOfSelectedItem else { return }
-            self.openComparison(base,target)
+                  !from.stringValue.isEmpty,!to.stringValue.isEmpty else { return }
+            self.openComparison(from.stringValue,to.stringValue)
         }
     }
 
     @objc func browseWorktrees() {
         guard !running else { return }
-        var options = [operationOption("Add Worktree"),operationOption("Prune Worktrees")]
+        var options = [operationOption("Add Worktree with New Branch"),operationOption("Add Worktree"),operationOption("Prune Worktrees")]
         if repository.remote == nil,let onNewTask {
             options.insert(PickerOption(title:L.text("New Task Workspace…"),detail:L.text("Isolate a task in its own branch and directory"),invoke:onNewTask),at:0)
         }
@@ -85,6 +84,9 @@ extension GitWorkspace {
 
     func worktreeOptions(_ entry: GitWorktreeEntry) -> [PickerOption] {
         var options: [PickerOption] = []
+        if repository.remote == nil,!entry.prunable {
+            options.append(PickerOption(title:L.text("Show in Finder"),detail:entry.path) { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath:entry.path)]) })
+        }
         let active = entry.path == repository.directory
         let isMain = worktrees.first?.path == entry.path
         if !active && !entry.prunable {
@@ -151,13 +153,16 @@ extension WorkspaceController {
         guard let window else { return }
         let defaults = UserDefaults.standard
         let groups = defaults.dictionary(forKey:"git.repositoryGroups") as? [String:String] ?? [:]
-        let sortByName = defaults.bool(forKey:"git.repositorySortByName")
+        let sortMode = defaults.string(forKey:"git.repositorySort").flatMap(GitRepositorySort.init(rawValue:))
+            ?? (defaults.bool(forKey:"git.repositorySortByName") ? .name : .manual)
+        let ascending = defaults.object(forKey:"git.repositorySortAscending") as? Bool ?? (sortMode == .name || sortMode == .manual)
         let aliases = defaults.dictionary(forKey:"git.repositoryAliases") as? [String:String] ?? [:]
         let archived = Set(defaults.stringArray(forKey:"git.archivedRepositories") ?? [])
         let order = defaults.stringArray(forKey:"git.repositoryOrder") ?? []
         let savedKey = "git.savedRepositories"
         let saved = defaults.data(forKey:savedKey).flatMap { try? JSONDecoder().decode([WorkspaceSession].self,from:$0) } ?? []
         func save(_ locations: [WorkspaceSession]) {
+            GitRepositoryOrganization.register(locations)
             if let encoded = try? JSONEncoder().encode(locations) { defaults.set(encoded,forKey:savedKey) }
         }
         var locations = WorkspaceSession.recent()
@@ -168,14 +173,10 @@ extension WorkspaceController {
             case .ssh(let host,let path): return "ssh:"+host+":"+path
             }
         }
-        if sortByName {
-            locations.sort { (aliases[key($0)] ?? $0.title).localizedStandardCompare(aliases[key($1)] ?? $1.title) == .orderedAscending }
-        } else if !order.isEmpty {
-            let ranks = Dictionary(uniqueKeysWithValues:order.enumerated().map { ($0.element,$0.offset) })
-            locations = locations.enumerated().sorted {
-                (ranks[key($0.element)] ?? order.count,$0.offset) < (ranks[key($1.element)] ?? order.count,$1.offset)
-            }.map(\.element)
-        }
+        GitRepositoryOrganization.register(locations)
+        let dateKey = sortMode == .recentlyAdded ? "git.repositoryAdded" : sortMode == .recentlyModified ? "git.repositoryModified" : "git.repositoryOpened"
+        let dates = defaults.dictionary(forKey:dateKey) as? [String:Double] ?? [:]
+        locations = GitRepositoryOrganization.sorted(locations,mode:sortMode,ascending:ascending,aliases:aliases,dates:dates,order:order)
         func option(_ location: WorkspaceSession,group: String) -> PickerOption {
             let display = aliases[key(location)] ?? location.title
             return PickerOption(title:group.isEmpty ? display : group+" / "+display,detail:location.path,reorderID:key(location)) { [weak self] in
@@ -189,6 +190,7 @@ extension WorkspaceController {
             }
         }
         var options = [
+            PickerOption(title:L.text("Manage Groups…"),detail:"") { [weak self] in self?.manageGitGroups(locations) },
             PickerOption(title:L.text("Clone Repository…"),detail:"") { [weak self] in self?.cloneGitRepository() },
             PickerOption(title:L.text("Open Repository…"),detail:"") { [weak self] in self?.openFolder() },
             PickerOption(title:L.text("Import Repository Folder…"),detail:L.text("Group Git repositories directly inside a folder")) { [weak self] in
@@ -213,9 +215,18 @@ extension WorkspaceController {
                     defaults.set(updated,forKey:"git.repositoryGroups")
                 }
             },
-            PickerOption(title:L.text(sortByName || !order.isEmpty ? "Sort by Recent" : "Sort by Name"),detail:"") { [weak self] in
-                defaults.set(!sortByName && order.isEmpty,forKey:"git.repositorySortByName")
-                defaults.removeObject(forKey:"git.repositoryOrder")
+            PickerOption(title:L.text("Sort Repositories…"),detail:L.text(sortMode.title)) { [weak self] in
+                guard let self else { return }
+                self.picker = QuickPicker(title:L.text("Sort Repositories…"),options:GitRepositorySort.allCases.map { mode in
+                    PickerOption(title:L.text(mode.title),detail:"") { [weak self] in
+                        defaults.set(mode.rawValue,forKey:"git.repositorySort")
+                        defaults.set(mode == .name || mode == .manual,forKey:"git.repositorySortAscending")
+                        self?.browseGitRepositories()
+                    }
+                },owner:window)
+            },
+            PickerOption(title:L.text(ascending ? "Sort Descending" : "Sort Ascending"),detail:"") { [weak self] in
+                defaults.set(!ascending,forKey:"git.repositorySortAscending")
                 self?.browseGitRepositories()
             }
         ]
@@ -278,6 +289,12 @@ extension WorkspaceController {
         browser.onReorder = { ids in
             defaults.set(ids,forKey:"git.repositoryOrder")
             defaults.set(false,forKey:"git.repositorySortByName")
+            defaults.set(GitRepositorySort.manual.rawValue,forKey:"git.repositorySort")
+        }
+        if sortMode == .recentlyModified {
+            let refresh = GitRepositoryPickerRefresh(picker:browser,locations:locations,aliases:aliases,ascending:ascending,order:order)
+            browser.onDismiss = { refresh.stop() }
+            refresh.start()
         }
         picker = browser
     }
@@ -323,6 +340,81 @@ extension WorkspaceController {
                     completion?(false)
                 }
             }
+        }
+    }
+}
+
+extension WorkspaceController {
+    func manageGitGroups(_ locations: [WorkspaceSession]) {
+        guard let window else { return }
+        let defaults = UserDefaults.standard
+        let groups = defaults.dictionary(forKey:"git.repositoryGroups") as? [String:String] ?? [:]
+        let names = Set(groups.values).union(defaults.stringArray(forKey:"git.repositoryGroupNames") ?? []).sorted()
+        let add = PickerOption(title:L.text("New Group…"),detail:"") { [weak self] in self?.editGitGroup(nil,locations:locations) }
+        picker = QuickPicker(title:L.text("Manage Groups…"),options:[add]+names.map { name in
+            PickerOption(title:name,detail:String(groups.values.filter { $0 == name }.count)) { [weak self] in
+                guard let self else { return }
+                self.picker = QuickPicker(title:name,options:[
+                    PickerOption(title:L.text("Manage Repositories…"),detail:"") { [weak self] in self?.editGitGroup(name,locations:locations) },
+                    PickerOption(title:L.text("Dissolve Group"),detail:"") { [weak self] in
+                        defaults.set(groups.filter { $0.value != name },forKey:"git.repositoryGroups")
+                        defaults.set(names.filter { $0 != name },forKey:"git.repositoryGroupNames")
+                        self?.browseGitRepositories()
+                    }
+                ],owner:window)
+            }
+        },owner:window)
+    }
+
+    private func editGitGroup(_ oldName: String?,locations: [WorkspaceSession]) {
+        guard let window else { return }
+        let defaults = UserDefaults.standard
+        let groups = defaults.dictionary(forKey:"git.repositoryGroups") as? [String:String] ?? [:]
+        let name = NSTextField(string:oldName ?? "")
+        name.placeholderString = L.text("Group Name")
+        let rows = NSStackView(); rows.orientation = .vertical; rows.alignment = .leading; rows.spacing = 6
+        let choices = locations.map { location -> NSButton in
+            let button = NSButton(checkboxWithTitle:location.title,target:nil,action:nil)
+            button.state = oldName != nil && groups[location.repositoryID] == oldName ? .on : .off
+            button.toolTip = location.path
+            rows.addArrangedSubview(button)
+            return button
+        }
+        rows.frame = NSRect(origin:.zero,size:rows.fittingSize)
+        let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.documentView = rows
+        let accessory = NSView(frame:NSRect(x:0,y:0,width:480,height:290))
+        Theme.pin(Theme.stack([name,scroll],orientation:.vertical,spacing:8),in:accessory)
+        let alert = NSAlert(); alert.messageText = L.text(oldName == nil ? "New Group…" : "Manage Repositories…")
+        alert.accessoryView = accessory
+        alert.addButton(withTitle:L.text("Save")); alert.addButton(withTitle:L.text("Cancel"))
+        alert.beginSheetModal(for:window) { [weak self] response in
+            let title = name.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)
+            guard response == .alertFirstButtonReturn,!title.isEmpty else { return }
+            var updated = groups.filter { oldName == nil || $0.value != oldName }
+            for (location,choice) in zip(locations,choices) where choice.state == .on { updated[location.repositoryID] = title }
+            var names = Set(defaults.stringArray(forKey:"git.repositoryGroupNames") ?? [])
+            if let oldName { names.remove(oldName) }; names.insert(title)
+            defaults.set(Array(names),forKey:"git.repositoryGroupNames")
+            defaults.set(updated,forKey:"git.repositoryGroups")
+            self?.browseGitRepositories()
+        }
+    }
+}
+
+extension GitWorkspace {
+    func createAndPushTag() {
+        guard let window else { return }
+        let name = NSTextField(string:""),revision = NSTextField(string:"HEAD"),remote = NSTextField(string:"origin")
+        let form = NSView(frame:NSRect(x:0,y:0,width:400,height:110))
+        Theme.pin(Theme.stack([Theme.stack([Theme.label("Name"),name]),
+                               Theme.stack([Theme.label("Revision"),revision]),
+                               Theme.stack([Theme.label("Remote"),remote])],orientation:.vertical,spacing:6),in:form)
+        let alert = NSAlert(); alert.messageText = L.text("Create & Push Tag…"); alert.accessoryView = form
+        alert.addButton(withTitle:L.text("Create & Push")); alert.addButton(withTitle:L.text("Cancel"))
+        alert.beginSheetModal(for:window) { [weak self] result in
+            guard let self,result == .alertFirstButtonReturn else { return }
+            let values = (name.stringValue,revision.stringValue,remote.stringValue)
+            self.performResult("Creating tag…",{ try self.repository.createAndPushTag(values.0,revision:values.1,remote:values.2) }) { _ in }
         }
     }
 }

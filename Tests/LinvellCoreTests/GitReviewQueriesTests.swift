@@ -78,9 +78,56 @@ final class GitReviewQueriesTests: XCTestCase {
         let target = try repo.resolvedRevision("HEAD")
         XCTAssertEqual(try repo.comparePaths(base,target),["image.png"])
         XCTAssertEqual(try repo.blobData(target,path:"image.png"),changed)
+        let pair = try repo.patchImages(repo.comparisonPatch(base,target,path:"image.png"))
+        XCTAssertEqual(pair.0,bytes); XCTAssertEqual(pair.1,changed)
+        _ = try repo.run(["mv","image.png","renamed.png"])
+        try repo.commit("Renamed image")
+        let rename = try repo.patchImages(repo.commitDiff(repo.resolvedRevision("HEAD"),path:"renamed.png"))
+        // A path-filtered rename may be emitted as an addition; the new side must remain available.
+        XCTAssertEqual(rename.1,changed)
+        let renamePair = try repo.commitImages(repo.resolvedRevision("HEAD"),path:"renamed.png")
+        XCTAssertEqual(renamePair.0,changed); XCTAssertEqual(renamePair.1,changed)
+        let remoteRoot = root.appendingPathComponent("remote.git")
+        _ = try repo.run(["init","--bare",remoteRoot.path])
+        try repo.createAndPushTag("release-test",revision:target,remote:remoteRoot.path)
+        XCTAssertEqual(try repo.run(["--git-dir="+remoteRoot.path,"rev-parse","refs/tags/release-test"]).trimmingCharacters(in:.newlines),target)
         let text = String(repeating:"line\n",count:220000)
         try text.write(to:root.appendingPathComponent("large.txt"),atomically:true,encoding:.utf8)
         XCTAssertThrowsError(try repo.workingFilePreview("large.txt"))
         XCTAssertEqual(try repo.workingFilePreview("large.txt",largeFile:true),text)
+    }
+}
+
+extension GitReviewQueriesTests {
+    func testPreviewDecodesBOMTextAndRejectsMalformedSurrogates() throws {
+        for encoding in [String.Encoding.utf16LittleEndian,.utf16BigEndian] {
+            let bom = encoding == .utf16LittleEndian ? Data([0xFF,0xFE]) : Data([0xFE,0xFF])
+            let data = bom+("中文 👩‍💻\n".data(using:encoding)!)
+            XCTAssertEqual(try GitPreviewText.decode(data,plain:false),"中文 👩‍💻\n")
+        }
+        XCTAssertThrowsError(try GitPreviewText.decode(Data([0xFF,0xFE,0,0xD8]),plain:false))
+        XCTAssertThrowsError(try GitPreviewText.decode(Data([0xFE,0xFF,0]),plain:false))
+        XCTAssertThrowsError(try GitPreviewText.decode(Data([0x41,0,0x42]),plain:false))
+        let long = Data(String(repeating:"x",count:20001).utf8)
+        XCTAssertThrowsError(try GitPreviewText.decode(long,plain:false))
+        XCTAssertEqual(try GitPreviewText.decode(long,plain:true).utf8.count,20001)
+    }
+}
+
+extension GitReviewQueriesTests {
+    func testModificationDateIncludesUntrackedFilesAndDeletedTrackedFiles() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+        defer { try? FileManager.default.removeItem(at:root) }
+        let repo = GitRepository(root:root)
+        _ = try repo.run(["init","-b","main"])
+        let file = root.appendingPathComponent("untracked.txt")
+        try "text".write(to:file,atomically:true,encoding:.utf8)
+        let future = Date().addingTimeInterval(100)
+        try FileManager.default.setAttributes([.modificationDate:future],ofItemAtPath:file.path)
+        XCTAssertEqual(try repo.modificationDate().timeIntervalSince1970,future.timeIntervalSince1970,accuracy:0.01)
+        _ = try repo.run(["add","."])
+        try FileManager.default.removeItem(at:file)
+        XCTAssertGreaterThan(try repo.modificationDate().timeIntervalSince1970,Date().timeIntervalSince1970-10)
     }
 }
