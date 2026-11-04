@@ -37,6 +37,7 @@ private final class WelcomePage: NSView {
         let description = NSTextField(wrappingLabelWithString:L.text("Open a project. Find your flow.\nA native workspace that stays out of your way."))
         description.font = .systemFont(ofSize:14); description.textColor = Theme.secondary
         hero = NSStackView(views:[eyebrow,brand,subtitle,description]); hero.orientation = .vertical; hero.alignment = .leading; hero.spacing = 16
+        hero.frame = NSRect(x:0,y:0,width:350,height:290)
         subtitle.widthAnchor.constraint(equalTo:hero.widthAnchor).isActive = true
         description.widthAnchor.constraint(equalTo:hero.widthAnchor).isActive = true
         actions = WelcomeActions(owner:owner); recents = WelcomeRecents(owner:owner)

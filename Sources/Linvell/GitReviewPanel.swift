@@ -6,30 +6,38 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
     struct File {
         let path: String
         let patch: (() throws -> String)?
+        var images: (() throws -> (Data?,Data?))? = nil
     }
 
     private let repository: GitRepository
-    private let files: [File]
+    private var files: [File]
     private let outline = NSStackView()
     private let search = NSSearchField()
     private let modes = NSSegmentedControl(labels:[L.text("File Content"),L.text("File History"),L.text("Diff")],
                                            trackingMode:.selectOne,target:nil,action:nil)
     private let revisions = NSPopUpButton()
+    private let large = NSButton(title:L.text("Load Large Plain Text"),target:nil,action:nil)
     private let more = NSButton(title:L.text("Load More"),target:nil,action:nil)
     private let openFile: ((URL) -> Void)?
     private let text = NSTextView.scrollableTextView()
     private let sections = NSStackView()
     private let detail = NSView()
     private let multi = NSView()
+    private let imagePane = NSView()
     private let toggle = NSButton(title:L.text("Multiple Diffs"),target:nil,action:nil)
     private var active: File?
     private var commits: [GitCommit] = []
     private var expanded: Set<String> = []
     private var folders: Set<String> = []
     private var generation = UUID()
+    private var refreshTimer: Timer?
+    private var refreshing = false
+    private var sourceFingerprint: String?
+    private let directoryMode: Bool
     private weak var parentWindow: NSWindow?
 
     init(repository: GitRepository,files: [File],owner: NSWindow,onOpen: ((URL) -> Void)? = nil) {
+        self.directoryMode = files.allSatisfy { $0.patch == nil }
         self.repository = repository
         self.files = files
         self.parentWindow = owner
@@ -47,24 +55,31 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
         modes.selectedSegment = files.contains { $0.patch != nil } ? 2 : 0
         revisions.target = self; revisions.action = #selector(showRevision)
         revisions.isHidden = true
+        large.target = self; large.action = #selector(loadLargePlainText)
         more.isHidden = true; more.target = self; more.action = #selector(loadMore)
         configure(outline)
         configure(sections)
         let sidebar = Theme.stack([search,scrolling(outline)],orientation:.vertical,spacing:8)
         search.heightAnchor.constraint(equalToConstant:26).isActive = true
-        if let view = text.documentView as? NSTextView { configurePreview(view) }
+        if let view = text.documentView as? NSTextView {
+            configurePreview(view)
+            text.verticalRulerView = GitReviewLineRuler(scroll:text,editor:view)
+            text.hasVerticalRuler = true
+            text.rulersVisible = true
+        }
         Theme.pin(text,in:detail)
         let multiple = scrolling(sections)
         Theme.pin(multiple,in:multi)
         multi.isHidden = true
         Theme.pin(multi,in:detail)
+        Theme.pin(imagePane,in:detail); imagePane.isHidden = true
         toggle.target = self; toggle.action = #selector(toggleMultiple)
         toggle.isHidden = !files.contains { $0.patch != nil }
         let expand = NSButton(title:L.text("Expand Diffs"),target:self,action:#selector(expandDiffs))
         let collapse = NSButton(title:L.text("Collapse Diffs"),target:self,action:#selector(collapseDiffs))
         let close = NSButton(title:L.text("Close"),target:self,action:#selector(closeReview))
         expand.isHidden = toggle.isHidden; collapse.isHidden = toggle.isHidden
-        let bar = Theme.stack([modes,NSView(),close],spacing:5)
+        let bar = Theme.stack([modes,large,NSView(),close],spacing:5)
         bar.heightAnchor.constraint(equalToConstant:30).isActive = true
         let open = NSButton(title:L.text("Open File"),target:self,action:#selector(openActiveFile))
         open.isHidden = onOpen == nil
@@ -81,9 +96,11 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
         if let first = files.first { select(first) }
         if !toggle.isHidden,UserDefaults.standard.bool(forKey:"git.expandReviewDiffs") { expandDiffs() }
         owner.beginSheet(panel)
+        refreshTimer = Timer.scheduledTimer(withTimeInterval:5,repeats:true) { [weak self] _ in self?.refreshFromDisk() }
     }
 
     required init?(coder: NSCoder) { fatalError() }
+    deinit { refreshTimer?.invalidate() }
 
     private func configure(_ stack: NSStackView) {
         stack.orientation = .vertical
@@ -129,6 +146,8 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
     }
 
     private func select(_ file: File) {
+        imagePane.isHidden = true
+        sourceFingerprint = nil
         active = file
         multi.isHidden = true
         text.isHidden = false
@@ -138,13 +157,18 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
     @objc private func refreshDetail() {
         guard let active else { return }
         generation = UUID()
+        large.isHidden = modes.selectedSegment != 0
+        imagePane.isHidden = true
         multi.isHidden = true; text.isHidden = false; revisions.isHidden = true; more.isHidden = true
         let repo = repository
         switch modes.selectedSegment {
-        case 0: readText(sourcePath:active.path) { try repo.workingFilePreview(active.path) }
+        case 0:
+            if Self.isImage(active.path) { showImages { (nil,try repo.workingFileData(active.path,largeFile:true)) } }
+            else { readText(sourcePath:active.path) { try repo.workingFilePreview(active.path) } }
         case 1: readHistory(for:active,offset:0)
         default:
-            if let patch = active.patch { readText(patch) }
+            if let images = active.images,Self.isImage(active.path) { showImages(images) }
+            else if let patch = active.patch { readText(patch) }
             else { show(L.text("Select a revision in File History to view its diff.")) }
         }
     }
@@ -153,6 +177,13 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
         guard let active else { return }
         closeReview()
         openFile?(repository.root.appendingPathComponent(active.path))
+    }
+
+    @objc private func loadLargePlainText() {
+        guard let active else { return }
+        let repo = repository
+        imagePane.isHidden = true; multi.isHidden = true; text.isHidden = false
+        readText { try repo.workingFilePreview(active.path,largeFile:true) }
     }
 
     @objc private func loadMore() {
@@ -190,7 +221,12 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
         let index = revisions.indexOfSelectedItem
         guard let active,commits.indices.contains(index) else { return }
         let repo = repository,hash = commits[index].hash
-        readText { try repo.commitDiff(hash,path:active.path) }
+        if Self.isImage(active.path) {
+            showImages {
+                let parent = try? repo.resolvedRevision(hash+"^")
+                return (parent.flatMap { try? repo.blobData($0,path:active.path) },try? repo.blobData(hash,path:active.path))
+            }
+        } else { readText { try repo.commitDiff(hash,path:active.path) } }
     }
 
     private func readText(sourcePath: String? = nil,_ load: @escaping () throws -> String) {
@@ -222,6 +258,7 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
                     styled.addAttribute(.foregroundColor,value:color,range:token.range)
                 }
                 view.textStorage?.setAttributedString(styled)
+                self.text.verticalRulerView?.needsDisplay = true
             }
         }
     }
@@ -229,6 +266,40 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
     private func errorText(_ result: Result<String,Error>) -> String {
         if case .failure(let error) = result { return error.localizedDescription }
         return ""
+    }
+
+    static func isImage(_ path: String) -> Bool {
+        ["png","jpg","jpeg","gif","tiff","bmp","heic","webp"].contains(URL(fileURLWithPath:path).pathExtension.lowercased())
+    }
+
+    private func showImages(_ load: @escaping () throws -> (Data?,Data?)) {
+        let request = UUID()
+        generation = request
+        imagePane.isHidden = false; text.isHidden = true; multi.isHidden = true
+        imagePane.subviews.forEach { $0.removeFromSuperview() }
+        DispatchQueue.global(qos:.userInitiated).async { [weak self] in
+            let result = Result(catching:load)
+            DispatchQueue.main.async {
+                guard let self,self.generation == request else { return }
+                switch result {
+                case .success(let (before,after)):
+                    let columns = [(L.text("Before"),before),(L.text("After"),after)].map { title,data -> NSView in
+                        let image = NSImageView()
+                        image.imageScaling = .scaleProportionallyUpOrDown
+                        image.image = data.flatMap(NSImage.init(data:))
+                        let column = Theme.stack([Theme.label(title),image],orientation:.vertical,spacing:6)
+                        column.frame = NSRect(x:0,y:0,width:max(120,self.imagePane.bounds.width/2),height:max(120,self.imagePane.bounds.height))
+                        return column
+                    }
+                    let split = ResizablePanes()
+                    columns.forEach(split.addArrangedSubview)
+                    Theme.pin(split,in:self.imagePane)
+                case .failure(let error):
+                    self.imagePane.isHidden = true; self.text.isHidden = false
+                    self.show(error.localizedDescription)
+                }
+            }
+        }
     }
 
     private func configurePreview(_ view: NSTextView) {
@@ -252,9 +323,13 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
         }
         InlineDiff.highlight(patch,removed:.systemRed,added:.systemGreen)
         view.textStorage?.setAttributedString(patch)
+        view.enclosingScrollView?.verticalRulerView?.needsDisplay = true
     }
 
-    private func show(_ value: String) { (text.documentView as? NSTextView)?.string = value }
+    private func show(_ value: String) {
+        (text.documentView as? NSTextView)?.string = value
+        text.verticalRulerView?.needsDisplay = true
+    }
 
     @objc private func toggleMultiple() {
         if multi.isHidden { renderSections() }
@@ -280,6 +355,8 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
     private func renderSections() {
         generation = UUID()
         modes.selectedSegment = 2
+        large.isHidden = true
+        imagePane.isHidden = true
         revisions.isHidden = true; more.isHidden = true; text.isHidden = true; multi.isHidden = false
         sections.arrangedSubviews.forEach { $0.removeFromSuperview() }
         var pending: [((() throws -> String),NSTextView)] = []
@@ -315,7 +392,36 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
         }
     }
 
-    @objc private func closeReview() { if let window { parentWindow?.endSheet(window) } }
+    private func refreshFromDisk() {
+        guard NSApp.isActive,window?.sheetParent != nil,!refreshing else { return }
+        refreshing = true
+        let repo = repository,path = active?.path,isSource = modes.selectedSegment == 0
+        let list = directoryMode
+        DispatchQueue.global(qos:.utility).async { [weak self] in
+            let updated = list ? try? repo.reviewFiles() : nil
+            let fingerprint = isSource ? path.flatMap { try? repo.run(["hash-object","--",$0]) } : nil
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.refreshing = false
+                if let updated,updated != self.files.map(\.path) {
+                    self.files = updated.map { File(path:$0,patch:nil) }
+                    self.renderFileList()
+                }
+                guard self.active?.path == path,self.modes.selectedSegment == 0 else { return }
+                if let fingerprint,fingerprint != self.sourceFingerprint {
+                    let previous = self.sourceFingerprint
+                    self.sourceFingerprint = fingerprint
+                    if previous != nil { self.refreshDetail() }
+                }
+            }
+        }
+    }
+
+    @objc private func closeReview() {
+        refreshTimer?.invalidate()
+        generation = UUID()
+        if let window { parentWindow?.endSheet(window) }
+    }
     func windowShouldClose(_ sender: NSWindow) -> Bool { closeReview(); return false }
 }
 

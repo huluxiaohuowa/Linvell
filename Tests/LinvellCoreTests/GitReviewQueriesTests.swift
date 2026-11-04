@@ -58,4 +58,29 @@ final class GitReviewQueriesTests: XCTestCase {
         XCTAssertEqual(entry.command,"show")
         XCTAssertFalse(entry.succeeded)
     }
+    func testBinaryRevisionComparisonAndLargePreview() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+        defer { try? FileManager.default.removeItem(at:root) }
+        let repo = GitRepository(root:root)
+        _ = try repo.run(["init","-b","main"])
+        _ = try repo.run(["config","user.name","Fixture"])
+        _ = try repo.run(["config","user.email","fixture@example.invalid"])
+        _ = try repo.run(["config","commit.gpgsign","false"])
+        let bytes = Data([0,1,2,128,255,10])
+        try bytes.write(to:root.appendingPathComponent("image.png"))
+        _ = try repo.run(["add","."]); try repo.commit("Binary revision")
+        let base = try repo.resolvedRevision("HEAD")
+        XCTAssertEqual(try repo.blobData(base,path:"image.png"),bytes)
+        let changed = bytes+Data([127])
+        try changed.write(to:root.appendingPathComponent("image.png"))
+        _ = try repo.run(["add","."]); try repo.commit("Changed image")
+        let target = try repo.resolvedRevision("HEAD")
+        XCTAssertEqual(try repo.comparePaths(base,target),["image.png"])
+        XCTAssertEqual(try repo.blobData(target,path:"image.png"),changed)
+        let text = String(repeating:"line\n",count:220000)
+        try text.write(to:root.appendingPathComponent("large.txt"),atomically:true,encoding:.utf8)
+        XCTAssertThrowsError(try repo.workingFilePreview("large.txt"))
+        XCTAssertEqual(try repo.workingFilePreview("large.txt",largeFile:true),text)
+    }
 }

@@ -1188,3 +1188,6 @@
 "Delete merged local branches" = "Delete merged local branches";
 "Remove Selected Worktrees" = "Remove Selected Worktrees";
 "Worktree Cleanup Details" = "Worktree Cleanup Details";
+"Load Large Plain Text" = "Load Large Plain Text";
+"File unavailable or too large for a preview." = "File unavailable or too large for a preview.";
+"This file does not exist in the selected revision." = "This file does not exist in the selected revision.";

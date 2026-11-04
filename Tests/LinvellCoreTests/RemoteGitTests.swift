@@ -5,7 +5,7 @@ final class RemoteGitTests: XCTestCase {
     func testLiveSSHReadWriteRoundTripWhenFixtureIsProvided() throws {
         guard let file = ProcessInfo.processInfo.environment["LINVELL_SSH_FIXTURE"] else { throw XCTSkip("A disposable SSH fixture was not selected.") }
         let object = try JSONSerialization.jsonObject(with:Data(contentsOf:URL(fileURLWithPath:file))) as! [String:String]
-        let connection = try SSHRemote(host:try XCTUnwrap(object["host"])),root = try XCTUnwrap(object["root"])
+        let connection = try object["configurationFile"].map { try SSHRemote(host:XCTUnwrap(object["host"]),configurationFile:$0) } ?? SSHRemote(host:XCTUnwrap(object["host"])),root = try XCTUnwrap(object["root"])
         let listed = try connection.request("list",path:root)
         XCTAssertTrue(listed.entries?.contains(where:{ $0.name == "sample.txt" }) == true)
         let path = root+"/sample.txt",read = try connection.request("read",path:path)

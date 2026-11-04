@@ -76,7 +76,7 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         wantsLayer = true; layer?.backgroundColor = Theme.canvas.cgColor
         appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua)
         kindPicker.addItems(withTitles:AgentKind.allCases.map(\.title)); kindPicker.target = self; kindPicker.action = #selector(selectionChanged)
-        kindPicker.widthAnchor.constraint(equalToConstant:170).isActive = true
+        kindPicker.widthAnchor.constraint(greaterThanOrEqualToConstant:170).isActive = true
         kindPicker.setAccessibilityLabel(L.text("Agent"))
         location.selectedSegment = remote == nil ? 0 : 1; location.isHidden = remote == nil
         location.target = self; location.action = #selector(selectionChanged)

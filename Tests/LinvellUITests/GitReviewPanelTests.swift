@@ -78,4 +78,24 @@ final class GitReviewPanelTests: XCTestCase {
         XCTAssertTrue(controls.compactMap { $0 as? NSButton }.contains { $0.title == L.text("Show Commit Graph") })
         XCTAssertTrue(controls.compactMap { $0 as? NSTextField }.contains { $0.stringValue.contains(L.text("Last successful Fetch")) })
     }
+    func testImageComparisonDisplaysBothRevisions() throws {
+        _ = NSApplication.shared
+        let png = try XCTUnwrap(Data(base64Encoded:"iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGUlEQVR4nGP4z8DwnxLMMGrAqAGjBgwXAwAwxP4QHCfkAAAAAABJRU5ErkJggg=="))
+        let owner = NSWindow(contentRect:NSRect(x:0,y:0,width:1100,height:720),styleMask:[.titled],backing:.buffered,defer:false)
+        let controller = GitReviewPanel(repository:GitRepository(root:FileManager.default.temporaryDirectory),
+                                        files:[.init(path:"image.png",patch:{ "Binary files differ" },images:{ (png,png) })],
+                                        owner:owner)
+        let sheet = try XCTUnwrap(controller.window)
+        defer { owner.endSheet(sheet); owner.orderOut(nil) }
+        func descendants(_ view: NSView) -> [NSView] { [view]+view.subviews.flatMap(descendants) }
+        let content = try XCTUnwrap(sheet.contentView)
+        let deadline = Date().addingTimeInterval(5)
+        var images: [NSImageView] = []
+        while Date() < deadline {
+            images = descendants(content).compactMap { $0 as? NSImageView }.filter { $0.image != nil }
+            if images.count == 2 { break }
+            RunLoop.current.run(until:Date().addingTimeInterval(0.02))
+        }
+        XCTAssertEqual(images.count,2)
+    }
 }

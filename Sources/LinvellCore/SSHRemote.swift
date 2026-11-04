@@ -64,6 +64,7 @@ public struct RemoteReply: Decodable {
 }
 public struct SSHRemote {
     public let host: String
+    private var configurationFile: String?
     private static let multiplexOptions: [String] = {
         let directory = FileManager.default.urls(for:.cachesDirectory,in:.userDomainMask)[0].appendingPathComponent("Linvell/ssh",isDirectory:true)
         let pattern = directory.appendingPathComponent("%C").path
@@ -78,6 +79,10 @@ public struct SSHRemote {
         guard SSHConfig.validAlias(host),!host.contains("*"),!host.contains("?"),!host.contains("!") else { throw GitError.command("Choose a concrete SSH host.") }
         self.host = host
     }
+    init(host: String,configurationFile: String) throws {
+        try self.init(host:host)
+        self.configurationFile = configurationFile
+    }
     public static func quote(_ value: String) -> String {
         // Quoted segments reconstruct the same argument in POSIX shells and fish.
         // fish interprets backslashes inside single quotes differently from POSIX.
@@ -90,7 +95,7 @@ public struct SSHRemote {
         return result+"'"
     }
     public func transportArguments(command: String) -> [String] {
-        ["-T","-o","BatchMode=yes","-o","ConnectTimeout=10","-o","ServerAliveInterval=10","-o","ServerAliveCountMax=2"]+Self.multiplexOptions+["--",host,command]
+        (configurationFile.map { ["-F",$0] } ?? [])+["-T","-o","BatchMode=yes","-o","ConnectTimeout=10","-o","ServerAliveInterval=10","-o","ServerAliveCountMax=2"]+Self.multiplexOptions+["--",host,command]
     }
     public func request(_ operation: String,path: String,content: Data? = nil,digest: String? = nil,repositoryRoot: String? = nil) throws -> RemoteReply {
         var request: [String:String] = ["operation":operation,"path":path]
@@ -263,13 +268,24 @@ try:
     elif op=='create':
         with open(path,'xb') as f: pass
         reply=dict(path=path,digest=digest(b''))
+    elif op=='review-blob':
+        import subprocess,re
+        spec=req.get('digest','')
+        if not re.match(r'^(?:[0-9a-f]{40}|[0-9a-f]{64})?:.+$',spec): raise ValueError('Invalid Git object.')
+        size=subprocess.run(['git','--no-pager','-C',path,'cat-file','-s',spec],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        if size.returncode or int(size.stdout)>16*1024*1024: raise ValueError('File unavailable or too large for a preview.')
+        run=subprocess.run(['git','--no-pager','-C',path,'cat-file','blob',spec],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        if run.returncode: raise ValueError('This file does not exist in the selected revision.')
+        if len(run.stdout)>16*1024*1024: raise ValueError('File too large for a preview.')
+        reply=dict(path=path,content=base64.b64encode(run.stdout).decode())
     elif op=='review-read':
         root=os.path.realpath(req['repositoryRoot'])
         resolved=os.path.realpath(path)
         if os.path.commonpath([root,resolved])!=root or os.path.islink(path) or not os.path.isfile(resolved):
             raise ValueError('The Git path is invalid.')
-        with open(resolved,'rb') as f: data=f.read(1024*1024+1)
-        if len(data)>1024*1024: raise ValueError('File too large for a preview.')
+        limit=16*1024*1024 if req.get('digest')=='large' else 1024*1024
+        with open(resolved,'rb') as f: data=f.read(limit+1)
+        if len(data)>limit: raise ValueError('File too large for a preview.')
         reply=dict(path=resolved,content=base64.b64encode(data).decode())
     elif op=='read':
         path=os.path.realpath(path)

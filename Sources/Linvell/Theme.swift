@@ -65,6 +65,7 @@ enum Theme {
     static func choiceButton() -> NSPopUpButton { ChoiceButton(frame:.zero,pullsDown:false) }
     static func activityButton(_ symbol: String,help: String,target: AnyObject,action: Selector) -> NSButton {
         let button = ActivityIconButton(image:NSImage(systemSymbolName:symbol,accessibilityDescription:nil)!,target:target,action:action)
+        button.translatesAutoresizingMaskIntoConstraints = false
         button.title = ""; button.imagePosition = .imageOnly; button.identifier = NSUserInterfaceItemIdentifier("Linvell.iconButton")
         button.isBordered = false; button.setButtonType(.pushOnPushOff); button.toolTip = L.text(help); button.setAccessibilityLabel(L.text(help))
         button.widthAnchor.constraint(equalToConstant:38).isActive = true; button.heightAnchor.constraint(equalToConstant:38).isActive = true
@@ -79,6 +80,11 @@ enum Theme {
         return s
     }
     static func pin(_ child: NSView, in parent: NSView, inset: CGFloat = 0) {
+        // Detached containers need a viable provisional size before AppKit installs constraints.
+        if parent.frame.width == 0 || parent.frame.height == 0 {
+            parent.setFrameSize(NSSize(width:parent.frame.width == 0 ? 1200 : parent.frame.width,
+                                       height:parent.frame.height == 0 ? 800 : parent.frame.height))
+        }
         child.translatesAutoresizingMaskIntoConstraints = false; parent.addSubview(child)
         NSLayoutConstraint.activate([
             child.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: inset),

@@ -208,7 +208,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         changeSide()
         reload()
         autoFetchTimer = Timer.scheduledTimer(withTimeInterval:15,repeats:true) { [weak self] _ in
-            guard let self,self.window?.isVisible == true,!self.isHiddenOrHasHiddenAncestor else { return }
+            guard let self,NSApp.isActive,self.window?.isVisible == true,!self.isHiddenOrHasHiddenAncestor else { return }
             self.fetchIfDue()
             self.refreshWorktreeStates()
         }
@@ -686,6 +686,20 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
     }
     @objc private func showFailedCommand() { showGitLog(failuresOnly:true,operation:failedOperation) }
 
+    func openComparison(_ base: String,_ target: String) {
+        let repo = repository
+        performResult("Reading repository…",{ try (repo.resolvedRevision(base),repo.resolvedRevision(target)) }) { [weak self] left,right in
+            guard let self else { return }
+            self.performResult("Reading repository…",{ try repo.comparePaths(left,right) }) { [weak self] paths in
+                self?.openReview(paths.map { path in
+                    GitReviewPanel.File(path:path,patch:{ try repo.comparisonPatch(left,right,path:path) },images:{
+                        (try? repo.blobData(left,path:path),try? repo.blobData(right,path:path))
+                    })
+                })
+            }
+        }
+    }
+
     func openRepositoryReview() { browseTrackedFiles() }
     func openChangesReview() { browseWorkingChanges() }
     func openGitJournal() { showGitLog() }
@@ -1137,7 +1151,10 @@ private extension GitWorkspace {
         let repo = repository
         performResult("Reading repository…",{ try repo.changedPaths(in:commit.hash) }) { [weak self] paths in
             self?.openReview(paths.map { path in
-                GitReviewPanel.File(path:path,patch:{ try repo.commitDiff(commit.hash,path:path) })
+                GitReviewPanel.File(path:path,patch:{ try repo.commitDiff(commit.hash,path:path) },images:{
+                    let parent = try? repo.resolvedRevision(commit.hash+"^")
+                    return (parent.flatMap { try? repo.blobData($0,path:path) },try? repo.blobData(commit.hash,path:path))
+                })
             })
         }
     }
@@ -1152,7 +1169,12 @@ private extension GitWorkspace {
     func browseWorkingChanges() {
         let repo = repository,staged = side.selectedSegment == 1
         openReview(visibleChanges.map { change in
-            GitReviewPanel.File(path:change.path,patch:{ try repo.diff(change,staged:staged) })
+            GitReviewPanel.File(path:change.path,patch:{ try repo.diff(change,staged:staged) },images:{
+                let head = try? repo.resolvedRevision("HEAD")
+                let before = staged ? head.flatMap { try? repo.blobData($0,path:change.originalPath ?? change.path) } : try? repo.blobData(":",path:change.path)
+                let after = staged ? try? repo.blobData(":",path:change.path) : try? repo.workingFileData(change.path,largeFile:true)
+                return (before,after)
+            })
         })
     }
 

@@ -6,7 +6,7 @@ final class RemoteGitTransportTests: XCTestCase {
         guard let file = ProcessInfo.processInfo.environment["LINVELL_SSH_FIXTURE"] else { throw XCTSkip("A disposable SSH Git fixture was not selected.") }
         let config = try JSONSerialization.jsonObject(with:Data(contentsOf:URL(fileURLWithPath:file))) as! [String:String]
         guard config["gitFixture"] == "ready" else { throw XCTSkip("The selected SSH fixture has no disposable Git repository.") }
-        let remote = try SSHRemote(host:try XCTUnwrap(config["host"])),root = try XCTUnwrap(config["root"])
+        let remote = try config["configurationFile"].map { try SSHRemote(host:XCTUnwrap(config["host"]),configurationFile:$0) } ?? SSHRemote(host:XCTUnwrap(config["host"])),root = try XCTUnwrap(config["root"])
         let repo = try GitRepository(remote:remote,directory:root+"/nested").resolvedWorkingTree()
         XCTAssertEqual(URL(fileURLWithPath:repo.directory).lastPathComponent,URL(fileURLWithPath:root).lastPathComponent); XCTAssertEqual(try repo.history().count,4)
         let path = root+"/git-hunk.txt",read = try remote.request("read",path:path)

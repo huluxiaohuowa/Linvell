@@ -202,7 +202,7 @@ public struct GitRepository {
     public func history(allRefs: Bool = true,limit: Int = 150,offset: Int = 0,includeMessage: Bool = false,path: String? = nil) throws -> [GitCommit] {
         let scope = allRefs ? ["--all"] : ["HEAD"]
         let format = "%H%x00%P%x00%an%x00%ae%x00%ad%x00%s%x00%D%x00"+(includeMessage ? "%B%x00" : "")
-        let paths = try path.map { ["--",try checked($0)] } ?? []
+        let paths = try path.map { ["--full-history","--first-parent","--",try checked($0)] } ?? []
         let text = try run(["log","-n",String(limit),"--skip="+String(offset)]+scope+["--topo-order","--date=iso-strict","--format="+format]+paths)
         let fields = includeMessage ? 8 : 7
         let parts = text.split(separator:"\0",omittingEmptySubsequences:false).map(String.init)

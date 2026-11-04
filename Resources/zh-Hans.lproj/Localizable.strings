@@ -1188,3 +1188,6 @@
 "Delete merged local branches" = "删除已合并的本地分支";
 "Remove Selected Worktrees" = "移除所选工作树";
 "Worktree Cleanup Details" = "工作树清理详情";
+"Load Large Plain Text" = "加载大文件纯文本";
+"File unavailable or too large for a preview." = "文件不存在或过大，无法预览。";
+"This file does not exist in the selected revision." = "所选版本中不存在此文件。";

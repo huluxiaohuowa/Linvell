@@ -64,8 +64,7 @@ extension GitWorkspace {
         alert.beginSheetModal(for:window) { [weak self] response in
             guard response == .alertFirstButtonReturn,let self,
                   let base = from.titleOfSelectedItem,let target = to.titleOfSelectedItem else { return }
-            self.openOperation("Compare References",values:["Base":base,"Target":target])
-            self.actionsPage?.execute()
+            self.openComparison(base,target)
         }
     }
 
@@ -115,6 +114,10 @@ extension GitWorkspace {
 
     func openOperation(_ title: String,path: String? = nil,values: [String:String] = [:]) {
         guard !running else { return }
+        if title == "Compare References",let base = values["Base"],let target = values["Target"] {
+            openComparison(base,target)
+            return
+        }
         showOperations()
         actionsPage?.selectOperation(title,path:path,values:values)
     }

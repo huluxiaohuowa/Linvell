@@ -210,7 +210,16 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
             button.contentTintColor = index == activeActivity ? Theme.accent : Theme.secondary
             activityButtons.append(button); controls.append(button)
         }
-        controls.append(NSView()); controls.append(Theme.button("gearshape",help:"Settings",target:self,action:#selector(showSettings)))
+        let settings = Theme.button("gearshape",help:"Settings",target:self,action:#selector(showSettings))
+        let settingsRow = NSView()
+        settingsRow.heightAnchor.constraint(equalToConstant:32).isActive = true
+        settings.translatesAutoresizingMaskIntoConstraints = false
+        settingsRow.addSubview(settings)
+        NSLayoutConstraint.activate([
+            settings.centerXAnchor.constraint(equalTo:settingsRow.centerXAnchor),
+            settings.centerYAnchor.constraint(equalTo:settingsRow.centerYAnchor)
+        ])
+        controls.append(NSView()); controls.append(settingsRow)
         let stack = Theme.stack(controls,orientation:.vertical,spacing:18); Theme.pin(stack,in:activity,inset:7)
     }
     @objc private func activityClicked(_ sender: NSButton) {
