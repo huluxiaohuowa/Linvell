@@ -1455,3 +1455,9 @@
 "Search repository history" = "Search repository history";
 "Expand / collapse review diffs" = "Expand / collapse review diffs";
 "Checkout Commit" = "Checkout Commit";
+
+"File preview · Read only" = "File preview · Read only";
+
+"PREVIEW" = "PREVIEW";
+
+"This file cannot be previewed." = "This file cannot be previewed.";

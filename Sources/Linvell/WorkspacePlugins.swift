@@ -124,7 +124,7 @@ extension WorkspaceController {
         }
         refreshPluginProviders()
         renderPluginStatus()
-        for document in documents where document.imageURL == nil { session.enqueue(pluginEvent(.open,document:document),workspace:pluginWorkspace) }
+        for document in documents where document.previewURL == nil { session.enqueue(pluginEvent(.open,document:document),workspace:pluginWorkspace) }
         PluginMenus.refresh(); NotificationCenter.default.post(name:PluginMenus.changed,object:self)
         status.stringValue = L.format("Plugin loaded: %@",package.manifest.name)
     }
@@ -135,7 +135,7 @@ extension WorkspaceController {
         return PluginDocumentEvent(kind:kind,documentID:document.buffer.id.uuidString,revision:version,document:snapshot)
     }
     func synchronizePluginDocuments() {
-        let textDocuments = documents.filter { $0.imageURL == nil },ids = Set(textDocuments.map { $0.buffer.id })
+        let textDocuments = documents.filter { $0.previewURL == nil },ids = Set(textDocuments.map { $0.buffer.id })
         for id in Array(pluginDocumentVersions.keys) where !ids.contains(id) {
             let event = PluginDocumentEvent(kind:.close,documentID:id.uuidString,revision:pluginDocumentVersions.removeValue(forKey:id)!)
             pluginSessions.values.forEach { $0.enqueue(event,workspace:pluginWorkspace) }

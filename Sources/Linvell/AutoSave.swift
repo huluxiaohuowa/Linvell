@@ -25,7 +25,7 @@ extension WorkspaceController {
     func scheduleAutoSave(_ document: OpenDocument) {
         let id = document.buffer.id
         autoSaveWork.removeValue(forKey:id)?.cancel()
-        guard PreferencesSync.value("autoSave") == "true",!document.externalChange,document.imageURL == nil,document.buffer.url != nil,document.buffer.isModified,!autoSaving.contains(id) else { return }
+        guard PreferencesSync.value("autoSave") == "true",!document.externalChange,document.previewURL == nil,document.buffer.url != nil,document.buffer.isModified,!autoSaving.contains(id) else { return }
         let work = DispatchWorkItem { [weak self,weak document] in
             guard let self,let document,!document.externalChange,self.documents.contains(where:{ $0 === document }),PreferencesSync.value("autoSave") == "true" else { return }
             self.autoSaveWork.removeValue(forKey:id)

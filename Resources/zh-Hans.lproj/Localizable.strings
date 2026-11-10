@@ -1455,3 +1455,9 @@
 "Search repository history" = "搜索仓库历史";
 "Expand / collapse review diffs" = "展开 / 折叠审查差异";
 "Checkout Commit" = "检出提交";
+
+"File preview · Read only" = "文件预览 · 只读";
+
+"PREVIEW" = "预览";
+
+"This file cannot be previewed." = "暂不支持预览此文件。";

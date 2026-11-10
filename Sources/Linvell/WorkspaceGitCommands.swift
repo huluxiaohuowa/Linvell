@@ -11,7 +11,7 @@ extension WorkspaceController {
             if host == nil { root = FileNode(URL(fileURLWithPath:new)) } else { remoteDirectory = new }
             for doc in documents {
                 if let remote = doc.remote,remote.path.hasPrefix(old+"/") { remote.path = new+String(remote.path.dropFirst(old.count)) }
-                else if let image = doc.imageURL,image.path.hasPrefix(old+"/") { doc.imageURL = URL(fileURLWithPath:new+String(image.path.dropFirst(old.count))) }
+                else if let image = doc.previewURL,image.path.hasPrefix(old+"/") { doc.previewURL = URL(fileURLWithPath:new+String(image.path.dropFirst(old.count))) }
                 else { doc.buffer.relocate(from:URL(fileURLWithPath:old),to:URL(fileURLWithPath:new)) }
             }
             projectTitle.stringValue = URL(fileURLWithPath:new).lastPathComponent

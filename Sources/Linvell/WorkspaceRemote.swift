@@ -86,7 +86,7 @@ extension WorkspaceController {
                 let reply = try connection.request("read",path:path)
                 guard let content = reply.content,let data = Data(base64Encoded:content),let digest = reply.digest else { throw GitError.command("The remote response is incomplete.") }
                 let remote = try RemoteDocument(connection:connection,path:reply.path ?? path,digest:digest,data:data)
-                let document = ImagePreview.supports(remote.localURL) ? OpenDocument(imageURL:remote.localURL) : OpenDocument(try DocumentBuffer(url:remote.localURL))
+                let document = try OpenDocument.load(remote.localURL)
                 document.remote = remote
                 return (document,remote)
             }

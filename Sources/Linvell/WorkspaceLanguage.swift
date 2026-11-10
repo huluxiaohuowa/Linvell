@@ -40,7 +40,7 @@ extension WorkspaceController {
         if let snapshot = codeSnapshot(document) { languageServices.saved(snapshot) }
     }
     func codeSnapshot(_ document: OpenDocument,forClosing: Bool = false) -> EditorCodeSnapshot? {
-        guard document.imageURL == nil,let path = document.remote?.path ?? document.fileURL?.path,forClosing || document.storage.length <= 2*1024*1024 else { return nil }
+        guard document.previewURL == nil,let path = document.remote?.path ?? document.fileURL?.path,forClosing || document.storage.length <= 2*1024*1024 else { return nil }
         let remote = document.remote?.connection
         let directory: String
         if let remote,remoteConnection?.host == remote.host,remoteDirectory.hasPrefix("/"),path.hasPrefix(remoteDirectory+"/") { directory = remoteDirectory }

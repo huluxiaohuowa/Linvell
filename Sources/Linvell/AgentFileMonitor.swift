@@ -33,7 +33,7 @@ final class AgentFileMonitor {
         let pollRemote = Date().timeIntervalSince(lastRemotePoll) >= 2
         if pollRemote { lastRemotePoll = Date() }
         let targets = workspace.documents.compactMap { document -> Target? in
-            guard document.imageURL == nil,let url = document.buffer.url,document.remote == nil || pollRemote else { return nil }
+            guard document.previewURL == nil,let url = document.buffer.url,document.remote == nil || pollRemote else { return nil }
             return Target(document:document,id:document.buffer.id,revision:document.buffer.revision,url:url,remote:document.remote?.connection,path:document.remote?.path ?? url.path,wantsReload:document.externalChange && !document.buffer.isModified)
         }
         let root = workspace.root

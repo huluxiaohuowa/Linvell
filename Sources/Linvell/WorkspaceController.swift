@@ -11,7 +11,7 @@ final class FileNode: NSObject {
         let urls = (try? FileManager.default.contentsOfDirectory(at:url,includingPropertiesForKeys:[.isDirectoryKey],options:[.skipsHiddenFiles])) ?? []
         return urls.map(FileNode.init).sorted { a,b in a.isDirectory != b.isDirectory ? a.isDirectory : a.url.lastPathComponent.localizedStandardCompare(b.url.lastPathComponent) == .orderedAscending }
     }()
-    init(_ url: URL) { self.url = url; isDirectory = (try? url.resourceValues(forKeys:[.isDirectoryKey]).isDirectory) == true }
+    init(_ url: URL) { self.url = url; isDirectory = (try? url.resourceValues(forKeys:[.isDirectoryKey]).isDirectory) == true && FilePreview.kind(for:url) == nil }
 }
 
 final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutlineViewDataSource, NSOutlineViewDelegate, NSSearchFieldDelegate {
@@ -454,21 +454,20 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         agentProjectDidChange()
     }
     func open(_ url: URL,completion: (() -> Void)? = nil) {
-        if (try? url.resourceValues(forKeys:[.isDirectoryKey]).isDirectory) == true { setProject(url); return }
+        if (try? url.resourceValues(forKeys:[.isDirectoryKey]).isDirectory) == true,FilePreview.kind(for:url) == nil { setProject(url); return }
         if let existing = documents.first(where: { $0.fileURL == url.resolvingSymlinksInPath() }) { activate(existing); completion?(); return }
         let resolved = url.resolvingSymlinksInPath()
-        if ImagePreview.supports(resolved) { latestOpenRequest = nil; activate(OpenDocument(imageURL:resolved)); completion?(); return }
+        if FilePreview.kind(for:resolved) != nil { latestOpenRequest = nil; activate(OpenDocument(previewURL:resolved)); completion?(); return }
         guard loading[resolved] == nil else { return }
         let request = UUID(); loading[resolved] = request; latestOpenRequest = request
         status.stringValue = L.format("Opening %@…",url.lastPathComponent)
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
             do {
-                let buffer = try DocumentBuffer(url:resolved),index = LineIndex(buffer.text)
+                let doc = try OpenDocument.load(resolved)
                 DispatchQueue.main.async { [weak self] in
                     guard let self,self.loading[resolved] == request else { return }
                     self.loading.removeValue(forKey:resolved)
                     guard self.window?.isVisible == true else { return }
-                    let doc = OpenDocument(buffer,lines:index)
                     if self.latestOpenRequest == request { self.activate(doc); completion?() }
                     else { self.documents.append(doc); self.renderTabs() }
                 }
@@ -484,7 +483,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         current = document
         editors.arrangedSubviews.forEach { $0.removeFromSuperview() }
         panes = []; activePane = nil; markdownView = nil
-        if let url = document.imageURL { editors.addArrangedSubview(ImagePreview(url:url)) }
+        if let url = document.previewURL { editors.addArrangedSubview(FilePreview(url:url)) }
         else {
             let pane = makePane(document); editors.addArrangedSubview(pane); activePane = pane
             if document.supportsPreview && document.markdownPreview {
@@ -584,7 +583,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     @objc func save() { if let current { _ = saveDocument(current) } }
     @objc func saveAs() { if let current { _ = saveDocument(current,asCopy:true) } }
     @discardableResult func saveDocument(_ doc: OpenDocument, asCopy: Bool = false) -> Bool {
-        guard doc.imageURL == nil else { return true }
+        guard doc.previewURL == nil else { return true }
         autoSaveWork.removeValue(forKey:doc.buffer.id)?.cancel()
         guard !autoSaving.contains(doc.buffer.id) else { status.stringValue = L.text("Saving changes…"); return false }
         if let remote = doc.remote,!asCopy {
@@ -674,7 +673,10 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         guard let current else { status.stringValue = L.text("Development preview"); breadcrumb.stringValue = L.text("Your next idea starts here"); previewButton.isHidden = true; markdownView = nil; return }
         breadcrumb.stringValue = current.remote.map { $0.connection.host+":"+$0.path } ?? current.displayName; previewButton.isHidden = !current.supportsPreview
         previewButton.title = L.text(current.markdownPreview ? "Hide Preview" : "Preview")
-        if current.imageURL != nil { status.stringValue = L.text("Image preview · Read only"); modeLabel.stringValue = L.text("IMAGE"); return }
+        if let url = current.previewURL {
+            status.stringValue = L.text(FilePreview.kind(for:url) == .image ? "Image preview · Read only" : "File preview · Read only")
+            modeLabel.stringValue = L.text(FilePreview.kind(for:url) == .pdf ? "PDF" : FilePreview.kind(for:url) == .image ? "IMAGE" : "PREVIEW"); return
+        }
         let p = min(activePane?.textView.selectedRange().location ?? 0,current.buffer.text.utf16.count)
         let row = current.lines.line(at:p),start = current.lines.starts[row]
         let line = row+1,column = (current.buffer.text as NSString).substring(with:NSRange(location:start,length:p-start)).count+1
@@ -690,7 +692,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     }
     @objc func toggleSidebar() { sidebar.isHidden.toggle(); body.adjustSubviews() }
     @objc func toggleSplit() {
-        guard let current,current.imageURL == nil else { return }
+        guard let current,current.previewURL == nil else { return }
         if current.markdownPreview { current.markdownPreview = false; activate(current); return }
         if panes.count > 1 { let last = panes.removeLast(); last.removeFromSuperview(); activePane = panes.first }
         else { editors.addArrangedSubview(makePane(current)); editors.setPosition(editors.bounds.width/2,ofDividerAt:0) }

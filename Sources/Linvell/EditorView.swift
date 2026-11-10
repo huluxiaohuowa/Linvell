@@ -7,24 +7,29 @@ final class OpenDocument: NSObject, NSTextStorageDelegate {
     let vim = VimEngine()
     let lines: LineIndex
     let syntax = EditorSyntaxState()
-    var imageURL: URL?
+    var previewURL: URL?
     var codeDiagnostics: [CodeDiagnostic] = []
     var markdownPreview = false
     var remote: RemoteDocument?
     var externalChange = false
     var lastScroll: DocumentScrollAnchor?
     var lastSelections: [NSRange]?
-    var fileURL: URL? { imageURL ?? buffer.url }
-    var displayName: String { remote.map { URL(fileURLWithPath:$0.path).lastPathComponent } ?? imageURL?.lastPathComponent ?? buffer.url?.lastPathComponent ?? L.text("Untitled") }
+    var fileURL: URL? { previewURL ?? buffer.url }
+    var displayName: String { remote.map { URL(fileURLWithPath:$0.path).lastPathComponent } ?? previewURL?.lastPathComponent ?? buffer.url?.lastPathComponent ?? L.text("Untitled") }
     var isMarkdown: Bool { ["md","markdown","mdown"].contains(fileURL?.pathExtension.lowercased() ?? "") }
     var isHTML: Bool { ["html","htm"].contains(fileURL?.pathExtension.lowercased() ?? "") }
     var supportsPreview: Bool { isMarkdown || isHTML }
     init(_ buffer: DocumentBuffer,lines: LineIndex? = nil) {
-        self.buffer = buffer; self.lines = lines ?? LineIndex(buffer.text); imageURL = nil; super.init()
+        self.buffer = buffer; self.lines = lines ?? LineIndex(buffer.text); previewURL = nil; super.init()
         storage.setAttributedString(NSAttributedString(string:buffer.text)); storage.delegate = self
     }
-    init(imageURL: URL) {
-        buffer = DocumentBuffer(); lines = LineIndex(""); self.imageURL = imageURL; super.init()
+    init(previewURL: URL) {
+        buffer = DocumentBuffer(); lines = LineIndex(""); self.previewURL = previewURL; super.init()
+    }
+    static func load(_ url: URL) throws -> OpenDocument {
+        if FilePreview.kind(for:url) != nil { return OpenDocument(previewURL:url) }
+        do { return OpenDocument(try DocumentBuffer(url:url)) }
+        catch DocumentError.unsupportedEncoding { return OpenDocument(previewURL:url) }
     }
     func textStorage(_ textStorage: NSTextStorage,didProcessEditing editedMask: NSTextStorageEditActions,range editedRange: NSRange,changeInLength delta: Int) {
         guard editedMask.contains(.editedCharacters) else { return }
