@@ -66,6 +66,8 @@ final class PreferencesController: NSWindowController {
             startup.selectItem(at:WorkspaceSession.shouldRestore ? 1 : 0); startup.target = self; startup.action = #selector(startupChanged(_:))
             rows.append(settingRow("On startup",startup))
             rows.append(text("Restore the last local project or SSH folder. Files and folders opened from Finder always take priority."))
+            rows.append(check("Restore project tabs",key:"restoreProjectTabs"))
+            rows.append(check("Pin parent folders while scrolling",key:"pinExplorerFolders"))
             rows.append(section("INTERFACE LANGUAGE"))
             let language = Theme.choiceButton()
             language.addItems(withTitles:[L.text("Follow macOS"),"English","简体中文"])
@@ -75,6 +77,7 @@ final class PreferencesController: NSWindowController {
             rows.append(settingRow("Language",language))
             rows.append(text("Language changes apply immediately. You can also choose its language in macOS System Settings → General → Language & Region → Applications."))
             rows.append(section("COLOR THEME"))
+            rows.append(check("Follow macOS light and dark appearance",key:"followSystemTheme"))
             if let selected = Theme.pluginTheme?.1 { rows.append(text(L.text("Plugin Theme")+": "+selected.title)) }
             let profiles = Theme.Profile.allCases
             for start in stride(from:0,to:profiles.count,by:2) {

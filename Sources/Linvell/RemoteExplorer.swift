@@ -11,9 +11,13 @@ final class RemoteTreeNode: NSObject {
     init(name: String,path: String,directory: Bool,ignored: Bool = false) { self.name = name; self.path = path; isDirectory = directory; isIgnored = ignored }
 }
 
-final class RemoteExplorer: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate, NSMenuDelegate {
+final class RemoteExplorer: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate, NSMenuDelegate, NSSearchFieldDelegate {
     let connection: SSHRemote
     let table = ResponsiveOutlineView()
+    let filter = Theme.searchField()
+    private var filtered: [RemoteTreeNode]?
+    private var filterWork: DispatchWorkItem?
+    private var filterGeneration = UUID()
     private let note = NSTextField(wrappingLabelWithString:"")
     private(set) var rootNode: RemoteTreeNode
     var directory: String { rootNode.path }
@@ -35,6 +39,7 @@ final class RemoteExplorer: NSView, NSOutlineViewDataSource, NSOutlineViewDelega
         let refresh = WorkspaceGlass.icon("arrow.clockwise",help:"Refresh Files",target:self,action:#selector(reload))
         let search = WorkspaceGlass.icon("magnifyingglass",help:"Search remote files by name",target:self,action:#selector(searchFiles))
         note.font = .systemFont(ofSize:11); note.textColor = Theme.liveSecondary; note.maximumNumberOfLines = 3
+        filter.placeholderString = L.text("Filter files"); filter.delegate = self
         let column = NSTableColumn(identifier:NSUserInterfaceItemIdentifier("remote-tree")); column.width = 300; column.resizingMask = .autoresizingMask
         table.addTableColumn(column); table.outlineTableColumn = column; table.headerView = nil
         table.dataSource = self; table.delegate = self; table.rowHeight = 23; table.indentationPerLevel = 15
@@ -43,14 +48,41 @@ final class RemoteExplorer: NSView, NSOutlineViewDataSource, NSOutlineViewDelega
         table.autoresizesOutlineColumn = true
         table.target = self; table.action = #selector(selected); table.doubleAction = #selector(toggled)
         let menu = NSMenu(); menu.delegate = self; table.menu = menu
+        table.openSelected = { [weak self] in
+            guard let self,let node = self.table.item(atRow:self.table.selectedRow) as? RemoteTreeNode else { return false }
+            if node.isDirectory {
+                if self.table.isItemExpanded(node) { self.table.collapseItem(node) } else { self.table.expandItem(node) }
+            } else { self.onOpen?(node.path) }
+            return true
+        }
+        table.renameSelected = { [weak self] in
+            guard let self,let node = self.table.item(atRow:self.table.selectedRow) as? RemoteTreeNode,node !== self.rootNode else { return false }
+            let sender = NSMenuItem()
+            sender.representedObject = node
+            self.renameItem(sender)
+            return true
+        }
+        table.trashSelected = { [weak self] in
+            guard let self,let node = self.table.item(atRow:self.table.selectedRow) as? RemoteTreeNode,node !== self.rootNode else { return false }
+            let sender = NSMenuItem()
+            sender.representedObject = node
+            self.trashItem(sender)
+            return true
+        }
         table.setAccessibilityLabel(L.text("Remote project files"))
-        let scroll = ResponsiveScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = false
-        Theme.pin(Theme.stack([title,Theme.stack([open,create,shell,search,NSView(),refresh],spacing:4),note,scroll],orientation:.vertical,spacing:6),in:self,inset:10)
+        let scroll = ExplorerScrollView()
+        scroll.folder = { item in
+            guard let node = item as? RemoteTreeNode,node.isDirectory else { return nil }
+            return (node.path,node.name)
+        }
+        scroll.canPin = { [weak self] in self?.filtered == nil }
+        scroll.documentView = table; scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = false
+        Theme.pin(Theme.stack([title,Theme.stack([open,create,shell,search,NSView(),refresh],spacing:4),filter,note,scroll],orientation:.vertical,spacing:6),in:self,inset:10)
         rootNode.wantsExpanded = true; load(rootNode)
     }
     required init?(coder: NSCoder) { fatalError() }
-    func outlineView(_ outlineView: NSOutlineView,numberOfChildrenOfItem item: Any?) -> Int { item == nil ? 1 : (item as? RemoteTreeNode)?.children?.count ?? 0 }
-    func outlineView(_ outlineView: NSOutlineView,child index: Int,ofItem item: Any?) -> Any { item == nil ? rootNode : (item as! RemoteTreeNode).children![index] }
+    func outlineView(_ outlineView: NSOutlineView,numberOfChildrenOfItem item: Any?) -> Int { item == nil ? (filtered?.count ?? 1) : (item as? RemoteTreeNode)?.children?.count ?? 0 }
+    func outlineView(_ outlineView: NSOutlineView,child index: Int,ofItem item: Any?) -> Any { item == nil ? (filtered?[index] ?? rootNode) : (item as! RemoteTreeNode).children![index] }
     func outlineView(_ outlineView: NSOutlineView,isItemExpandable item: Any) -> Bool { (item as? RemoteTreeNode)?.isDirectory == true }
     func outlineView(_ outlineView: NSOutlineView,shouldExpandItem item: Any) -> Bool {
         guard let node = item as? RemoteTreeNode else { return false }; node.wantsExpanded = true
@@ -63,21 +95,33 @@ final class RemoteExplorer: NSView, NSOutlineViewDataSource, NSOutlineViewDelega
     }
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        guard let node = table.item(atRow:table.clickedRow) as? RemoteTreeNode,node !== rootNode else { return }
-        for (title,action) in [("Rename…",#selector(renameItem(_:))),("Move to Trash…",#selector(trashItem(_:)))] {
-            let item = NSMenuItem(title:L.text(title),action:action,keyEquivalent:"")
-            item.target = self; item.representedObject = node; menu.addItem(item)
+        let node = table.item(atRow:table.clickedRow) as? RemoteTreeNode ?? rootNode
+        if !node.isDirectory { menu.addItem(ExplorerActions.item("Open") { [weak self] in self?.onOpen?(node.path) }) }
+        menu.addItem(ExplorerActions.item("New File Here…") { [weak self] in self?.promptCreate(directory:false,at:node) })
+        menu.addItem(ExplorerActions.item("New Folder Here…") { [weak self] in self?.promptCreate(directory:true,at:node) })
+        if node !== rootNode {
+            menu.addItem(ExplorerActions.item("Duplicate") { [weak self] in
+                guard let self else { return }
+                self.runFileOperation("duplicate",path:node.path,parent:(node.path as NSString).deletingLastPathComponent)
+            })
+            for (title,action) in [("Rename…",#selector(renameItem(_:))),("Move to Trash…",#selector(trashItem(_:)))] {
+                let item = NSMenuItem(title:L.text(title),action:action,keyEquivalent:"")
+                item.target = self; item.representedObject = node; menu.addItem(item)
+            }
         }
+        menu.addItem(.separator())
+        for item in ExplorerActions.pathItems(node.path,relative:ExplorerActions.relative(node.path,under:directory)) { menu.addItem(item) }
     }
     @objc private func renameItem(_ sender: NSMenuItem) {
         guard let node = sender.representedObject as? RemoteTreeNode,let window else { return }
         let alert = ThemedAlert(); alert.messageText = L.text("Rename…")
-        let field = NSTextField(string:node.name)
+        let original = (node.path as NSString).lastPathComponent
+        let field = NSTextField(string:original)
         field.frame.size = NSSize(width:310,height:26)
         alert.accessoryView = field; alert.window.initialFirstResponder = field
         alert.addButton(withTitle:L.text("Rename")); alert.addButton(withTitle:L.text("Cancel"))
         alert.beginSheetModal(for:window) { [weak self] response in
-            guard response == .alertFirstButtonReturn,field.stringValue != node.name else { return }
+            guard response == .alertFirstButtonReturn,field.stringValue != original else { return }
             self?.onMutation?(node.path,field.stringValue)
         }
     }
@@ -102,7 +146,35 @@ final class RemoteExplorer: NSView, NSOutlineViewDataSource, NSOutlineViewDelega
     @objc private func searchFiles() { onSearch?() }
     @objc private func chooseFolder() { onChooseFolder?() }
     @objc private func terminal() { onTerminal?() }
-    @objc func reload() { rootNode.wantsExpanded = true; refreshDirectories(Set(visibleDirectories)) }
+    deinit { filterWork?.cancel() }
+    @objc func reload() {
+        rootNode.wantsExpanded = true
+        refreshDirectories(Set(visibleDirectories))
+        if !filter.stringValue.isEmpty { updateFilter() }
+    }
+    func controlTextDidChange(_ notification: Notification) { updateFilter() }
+    func updateFilter() {
+        filterWork?.cancel()
+        let generation = UUID(); filterGeneration = generation
+        let needle = filter.stringValue.trimmingCharacters(in:.whitespaces),remote = connection,root = directory
+        guard !needle.isEmpty else {
+            filtered = nil; table.reloadData(); table.expandItem(rootNode); return
+        }
+        let work = DispatchWorkItem { [weak self] in
+            let result = Result { try remote.request("filter-files",path:root,content:Data(needle.utf8)) }
+            DispatchQueue.main.async {
+                guard let self,self.filterGeneration == generation else { return }
+                switch result {
+                case .success(let reply):
+                    self.filtered = (reply.entries ?? []).map { RemoteTreeNode(name:$0.name,path:$0.path,directory:$0.directory,ignored:$0.isIgnored) }
+                    self.table.reloadData()
+                case .failure(let error): self.note.stringValue = error.localizedDescription
+                }
+            }
+        }
+        filterWork = work
+        DispatchQueue.global(qos:.userInitiated).asyncAfter(deadline:.now()+0.2,execute:work)
+    }
     var visibleDirectories: [String] {
         [rootNode.path]+(0..<table.numberOfRows).compactMap { row in
             guard let node = table.item(atRow:row) as? RemoteTreeNode,node !== rootNode,node.isDirectory,table.isItemExpanded(node) else { return nil }; return node.path
@@ -157,28 +229,41 @@ final class RemoteExplorer: NSView, NSOutlineViewDataSource, NSOutlineViewDelega
             }
         }
     }
-    @objc func createFile() {
-        let alert = ThemedAlert(); alert.messageText = L.text("New remote file")
-        let name = NSTextField(frame:NSRect(x:0,y:0,width:340,height:28)); name.placeholderString = L.text("File name")
-        alert.accessoryView = name; alert.window.initialFirstResponder = name
+    @objc func createFile() { promptCreate(directory:false) }
+
+    func promptCreate(directory: Bool,at item: RemoteTreeNode? = nil) {
+        guard let window else { return }
+        let selected = item ?? table.item(atRow:table.selectedRow) as? RemoteTreeNode ?? rootNode
+        let base = selected.isDirectory ? selected.path : (selected.path as NSString).deletingLastPathComponent
+        let alert = ThemedAlert()
+        alert.messageText = L.text(directory ? "New remote folder" : "New remote file")
+        let field = NSTextField(frame:NSRect(x:0,y:0,width:340,height:28))
+        field.placeholderString = L.text("Name")
+        alert.accessoryView = field; alert.window.initialFirstResponder = field
         alert.addButton(withTitle:L.text("Create")); alert.addButton(withTitle:L.text("Cancel"))
-        guard alert.runModal() == .alertFirstButtonReturn,!name.stringValue.isEmpty else { return }
-        let selected = table.item(atRow:table.selectedRow) as? RemoteTreeNode
-        let nameValue = name.stringValue
-        guard nameValue != ".",nameValue != "..",!nameValue.contains("/"),!nameValue.utf8.contains(0),
-              !nameValue.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else {
-            note.stringValue = L.text("Enter a single file name.")
-            return
+        alert.beginSheetModal(for:window) { [weak self] response in
+            guard let self,response == .alertFirstButtonReturn else { return }
+            let name = field.stringValue
+            guard name != ".",name != "..",name != ".git",!name.contains("/"),!name.utf8.contains(0),
+                  !name.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else {
+                self.note.stringValue = L.text("Enter a single file or folder name.")
+                return
+            }
+            self.runFileOperation(directory ? "mkdir" : "create",path:(base as NSString).appendingPathComponent(name),parent:base)
         }
-        let target = selected?.isDirectory == true ? selected! : rootNode
-        let base = target.path
-        let path = (base as NSString).appendingPathComponent(nameValue),remote = connection
+    }
+
+    private func runFileOperation(_ operation: String,path: String,parent: String) {
+        let remote = connection,root = directory
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
-            let result = Result { try remote.request("create",path:path) }
+            let result = Result { try remote.request(operation,path:path,repositoryRoot:root) }
             DispatchQueue.main.async {
                 guard let self else { return }
                 switch result {
-                case .success(let reply): self.load(target,force:true); self.onOpen?(reply.path ?? path)
+                case .success(let reply):
+                    self.refreshDirectories([parent])
+                    if self.filtered != nil { self.updateFilter() }
+                    if operation == "create" { self.onOpen?(reply.path ?? path) }
                 case .failure(let error): self.note.stringValue = error.localizedDescription
                 }
             }

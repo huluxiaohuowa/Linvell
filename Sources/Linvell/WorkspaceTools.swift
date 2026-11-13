@@ -15,7 +15,21 @@ enum ProjectFiles {
         }
         return urls
     }
-    static func relative(_ url: URL,root: URL) -> String { String(url.path.dropFirst(root.path.count+1)) }
+    static func searchable(_ root: URL) -> [URL] {
+        guard let reply = try? ToolCommand.run(URL(fileURLWithPath:"/usr/bin/git"),
+                    arguments:["--no-optional-locks","-c","core.fsmonitor=false","-C",root.path,"ls-files","-z","--cached","--others","--exclude-standard","--","."],
+                    directory:nil,timeout:5,trimOutput:false,maximumOutputBytes:16*1024*1024),
+              reply.succeeded else { return list(root) }
+        var seen = Set<String>()
+        return reply.output.split(separator:"\0").lazy.filter { seen.insert(String($0)).inserted }.compactMap { path -> URL? in
+            let url = root.appendingPathComponent(String(path))
+            guard let info = try? url.resourceValues(forKeys:[.isRegularFileKey,.isSymbolicLinkKey]),
+                  info.isRegularFile == true,info.isSymbolicLink != true,
+                  ExplorerActions.relative(url.resolvingSymlinksInPath().path,under:root.resolvingSymlinksInPath().path) != nil else { return nil }
+            return url
+        }.prefix(20_000).map { $0 }
+    }
+    static func relative(_ url: URL,root: URL) -> String { ExplorerActions.relative(url.path,under:root.path) ?? url.lastPathComponent }
     static func matches(_ query: String,_ text: String) -> Bool {
         if query.isEmpty { return true }
         var characters = query.lowercased().makeIterator()
@@ -34,6 +48,7 @@ struct PickerOption {
     let fileURL: URL?
     let reorderID: String?
     let invoke: () -> Void
+    var openAtLine: ((Int) -> Void)?
     init(title: String,detail: String,fileURL: URL? = nil,reorderID: String? = nil,invoke: @escaping () -> Void) { self.title = title; self.detail = detail; self.fileURL = fileURL; self.reorderID = reorderID; self.invoke = invoke }
 }
 
@@ -51,6 +66,14 @@ final class QuickPicker: NSWindowController, NSTableViewDataSource, NSTableViewD
     let table = ResponsiveTableView()
     private(set) var options: [PickerOption]
     private let compact: Bool
+    var goToCurrentLine: ((Int) -> Void)?
+    private var supportsLineTarget: Bool { goToCurrentLine != nil || options.contains { $0.openAtLine != nil } }
+    static func fileQuery(_ query: String) -> (name: String,line: Int?) {
+        guard let colon = query.lastIndex(of:":") else { return (query,nil) }
+        let digits = query[query.index(after:colon)...]
+        guard let number = Int(digits),number > 0,digits.utf8.allSatisfy({ (48...57).contains($0) }) else { return (query,nil) }
+        return (String(query[..<colon]),number)
+    }
     private let reorderType = NSPasteboard.PasteboardType("com.linvell.repository-order")
     var onReorder: (([String]) -> Void)? {
         didSet {
@@ -182,7 +205,12 @@ final class QuickPicker: NSWindowController, NSTableViewDataSource, NSTableViewD
         return true
     }
     func controlTextDidChange(_ notification: Notification) {
-        let query = input.stringValue
+        let raw = input.stringValue
+        let parsed = supportsLineTarget ? Self.fileQuery(raw) : (name:raw,line:nil)
+        let query = parsed.name
+        if parsed.line != nil,query.isEmpty,goToCurrentLine != nil {
+            results = []; table.reloadData(); return
+        }
         queryWork?.cancel(); queryGeneration = UUID()
         if let onQuery {
             let generation = queryGeneration
@@ -236,114 +264,222 @@ final class QuickPicker: NSWindowController, NSTableViewDataSource, NSTableViewD
         if !selection.isEmpty { table.selectRowIndexes(IndexSet(results.indices.filter { results[$0].reorderID.map(selection.contains) == true }),byExtendingSelection:false) }
     }
     func dismiss() { queryGeneration = UUID(); queryWork?.cancel(); let callback = onDismiss; onDismiss = nil; callback?(); if let panel = window { if panel.sheetParent != nil { parentWindow?.endSheet(panel) }; panel.orderOut(nil) } }
-    @objc private func choose() { guard table.selectedRow >= 0,table.selectedRow < results.count else { return }; let result = results[table.selectedRow]; dismiss(); result.invoke() }
+    @objc private func choose() {
+        let target = supportsLineTarget ? Self.fileQuery(input.stringValue) : (name:input.stringValue,line:nil)
+        if target.name.isEmpty,let line = target.line,let goToCurrentLine {
+            dismiss(); goToCurrentLine(line); return
+        }
+        guard results.indices.contains(table.selectedRow) else { return }
+        let result = results[table.selectedRow]
+        dismiss()
+        if let line = target.line,let openAtLine = result.openAtLine { openAtLine(line) }
+        else { result.invoke() }
+    }
+}
+
+final class ProjectSearchTable: ResponsiveTableView {
+    override func keyDown(with event: NSEvent) {
+        if (event.keyCode == 36 || event.keyCode == 76),selectedRow >= 0,let action {
+            NSApp.sendAction(action,to:target,from:self)
+        } else { super.keyDown(with:event) }
+    }
 }
 
 final class ToolSidebar: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
-    struct Result { let title: String; let detail: String; let url: URL; let line: Int }
+    struct Match {
+        let title: String
+        let detail: String
+        let url: URL
+        let line: Int
+        let range: NSRange
+        let highlight: NSRange
+        let originalLine: String?
+    }
+    private enum Row { case file(URL,Int), match(Match) }
     let query = Theme.searchField()
-    let table = ResponsiveTableView()
+    let table = ProjectSearchTable()
+    let caseToggle = NSButton(checkboxWithTitle:L.text("Match case"),target:nil,action:nil)
     let caption = Theme.label("",size:11,color:Theme.secondary)
-    var results: [Result] = []
-    var onSelect: ((URL,Int) -> Void)?
+    private(set) var results: [Match] = []
+    private var rows: [Row] = []
+    private var collapsed: Set<URL> = []
+    var onSelect: ((Match) -> Void)?
+    var unsavedTexts: (() -> [URL:String])?
     private var generation = UUID()
+    private var displayedQuery = ""
     let project: URL
-    let kind: String
     private let remote: (connection: SSHRemote,directory: String)?
     private var searchWork: DispatchWorkItem?
-    private static let remoteSearchQueue = DispatchQueue(label:"top.fuluwa.linvell.remote-search",qos:.userInitiated)
-    init(kind: String,project: URL,remote: (SSHRemote,String)? = nil) {
-        self.project = project; self.kind = kind; self.remote = remote
+    private let searchQueue = DispatchQueue(label:"top.fuluwa.linvell.project-search",qos:.userInitiated)
+    private static let limit = 2000
+
+    init(project: URL,remote: (SSHRemote,String)? = nil) {
+        self.project = project; self.remote = remote
         super.init(frame:.zero)
-        let heading = Theme.label(kind == "search" ? "SEARCH" : "SOURCE CONTROL",size:11,color:Theme.secondary,weight:.semibold)
-        let refreshButton = NSButton(title:L.text("Refresh"),target:self,action:#selector(refresh)); refreshButton.bezelStyle = .inline
-        let row = Theme.stack([heading,NSView(),refreshButton]); row.heightAnchor.constraint(equalToConstant:36).isActive = true
+        let heading = Theme.label("SEARCH",size:11,color:Theme.secondary,weight:.semibold)
+        let refreshButton = WorkspaceGlass.icon("arrow.clockwise",help:"Refresh",target:self,action:#selector(refresh))
+        let row = Theme.stack([heading,NSView(),refreshButton])
+        row.heightAnchor.constraint(equalToConstant:28).isActive = true
         query.placeholderString = L.text("Search project text"); query.delegate = self; query.font = .systemFont(ofSize:13)
-        let c = NSTableColumn(identifier:NSUserInterfaceItemIdentifier("results")); table.addTableColumn(c); table.headerView = nil
-        table.rowHeight = 48; table.dataSource = self; table.delegate = self; table.backgroundColor = Theme.panel
-        table.target = self; table.action = #selector(selected); table.setAccessibilityLabel(L.text(kind == "search" ? "Project search results" : "Changed files"))
+        caseToggle.target = self; caseToggle.action = #selector(refresh)
+        table.addTableColumn(NSTableColumn(identifier:NSUserInterfaceItemIdentifier("results")))
+        table.headerView = nil; table.rowHeight = 26; table.dataSource = self; table.delegate = self; table.backgroundColor = .clear
+        table.target = self; table.action = #selector(selected); table.setAccessibilityLabel(L.text("Project search results"))
         let scroll = ResponsiveScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true; scroll.drawsBackground = false
-        let stack = Theme.stack(kind == "search" ? [row,query,caption,scroll] : [row,caption,scroll],orientation:.vertical,spacing:12)
-        Theme.pin(stack,in:self,inset:16)
-        if kind == "search" { caption.stringValue = L.text("Search is literal and case-insensitive.") } else { refresh() }
+        Theme.pin(Theme.stack([row,query,caseToggle,caption,scroll],orientation:.vertical,spacing:8),in:self,inset:12)
+        caption.stringValue = L.text("Search project text")
     }
     required init?(coder: NSCoder) { fatalError() }
-    func numberOfRows(in tableView: NSTableView) -> Int { results.count }
-    func tableView(_ tableView: NSTableView,viewFor tableColumn: NSTableColumn?,row: Int) -> NSView? {
-        let item = results[row], a = Theme.label(item.title,size:13), b = Theme.label(item.detail,size:11,color:Theme.secondary)
-        a.lineBreakMode = .byTruncatingTail; b.lineBreakMode = .byTruncatingMiddle
-        let s = NSStackView(views:[a,b]); s.orientation = .vertical; s.alignment = .leading; s.spacing = 3
-        return Theme.stack([FileIcon.view(for:item.url),s],spacing:9)
-    }
-    @objc func selected() { guard results.indices.contains(table.selectedRow) else { return }; let r = results[table.selectedRow]; onSelect?(r.url,r.line) }
-    func controlTextDidChange(_ notification: Notification) { refresh() }
     deinit { searchWork?.cancel() }
+
+    private func rebuildRows() {
+        var grouped: [URL:[Match]] = [:]
+        var order: [URL] = []
+        for match in results {
+            if grouped[match.url] == nil { order.append(match.url) }
+            grouped[match.url,default:[]].append(match)
+        }
+        rows = order.flatMap { url -> [Row] in
+            let matches = grouped[url] ?? []
+            let header = Row.file(url,matches.count)
+            return collapsed.contains(url) ? [header] : [header]+matches.map(Row.match)
+        }
+        table.reloadData()
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
+    func tableView(_ tableView: NSTableView,viewFor tableColumn: NSTableColumn?,row: Int) -> NSView? {
+        switch rows[row] {
+        case .file(let url,let count):
+            let arrow = NSImageView(image:NSImage(systemSymbolName:collapsed.contains(url) ? "chevron.right" : "chevron.down",accessibilityDescription:nil) ?? NSImage())
+            arrow.contentTintColor = Theme.liveSecondary
+            arrow.widthAnchor.constraint(equalToConstant:11).isActive = true
+            let name = Theme.label(ProjectFiles.relative(url,root:project),size:12,weight:.semibold)
+            name.lineBreakMode = .byTruncatingMiddle
+            return Theme.stack([arrow,FileIcon.view(for:url),name,Theme.label(String(count),size:10,color:Theme.secondary)],spacing:5)
+        case .match(let match):
+            let line = Theme.label(String(match.line),size:10,color:Theme.secondary)
+            line.alignment = .right
+            line.widthAnchor.constraint(equalToConstant:31).isActive = true
+            let snippet = Theme.label("",size:11)
+            snippet.lineBreakMode = .byTruncatingTail
+            let styled = NSMutableAttributedString(string:match.title,attributes:[.foregroundColor:Theme.liveForeground,.font:NSFont.monospacedSystemFont(ofSize:11,weight:.regular)])
+            if match.highlight.length > 0,NSMaxRange(match.highlight) <= styled.length {
+                styled.addAttributes([.backgroundColor:Theme.selection,.foregroundColor:Theme.liveAccent],range:match.highlight)
+            }
+            snippet.attributedStringValue = styled
+            return Theme.stack([line,snippet],spacing:6)
+        }
+    }
+    @objc func selected() {
+        guard rows.indices.contains(table.selectedRow) else { return }
+        switch rows[table.selectedRow] {
+        case .file(let url,_):
+            if !collapsed.insert(url).inserted { collapsed.remove(url) }
+            rebuildRows()
+        case .match(let match): onSelect?(match)
+        }
+    }
+    func controlTextDidChange(_ notification: Notification) { refresh() }
+    func control(_ control: NSControl,textView: NSTextView,doCommandBy selector: Selector) -> Bool {
+        if selector == #selector(NSResponder.moveDown(_:)),table.numberOfRows > 0 {
+            window?.makeFirstResponder(table)
+            table.selectRowIndexes(IndexSet(integer:table.numberOfRows > 1 ? 1 : 0),byExtendingSelection:false)
+            return true
+        }
+        if selector == #selector(NSResponder.insertNewline(_:)),table.numberOfRows > 0 {
+            if table.selectedRow < 0 { table.selectRowIndexes(IndexSet(integer:table.numberOfRows > 1 ? 1 : 0),byExtendingSelection:false) }
+            selected(); return true
+        }
+        return false
+    }
+
     @objc func refresh() {
         searchWork?.cancel()
         let request = UUID(); generation = request
-        let needle = query.stringValue, project = self.project, kind = self.kind
-        if kind == "search" && needle.isEmpty { results = []; table.reloadData(); caption.stringValue = L.text("Search is literal and case-insensitive."); return }
-        caption.stringValue = L.text(kind == "search" ? "Searching…" : "Reading repository status…")
-        if let remote, kind == "search" {
-            results = []; table.reloadData()
-            let work = DispatchWorkItem { [weak self] in
-                let result = Swift.Result { try remote.connection.searchText(needle,directory:remote.directory) }
-                DispatchQueue.main.async {
-                    guard let self,self.generation == request else { return }
-                    switch result {
-                    case .success(let reply):
-                        self.results = (reply.matches ?? []).map { match in
-                            Result(title:match.text,detail:"\(match.relative):\(match.line)",url:URL(fileURLWithPath:match.path),line:match.line)
-                        }
-                        self.caption.stringValue = L.format("%@ matches · UTF-8 files under 2 MB",String(self.results.count))
-                            + (reply.truncated == true ? " · "+L.text("limit reached") : "")
-                    case .failure(let error): self.caption.stringValue = error.localizedDescription
-                    }
-                    self.table.reloadData()
-                }
-            }
-            searchWork = work
-            Self.remoteSearchQueue.asyncAfter(deadline:.now()+0.25,execute:work)
-            return
+        let needle = query.stringValue, project = self.project, exact = caseToggle.state == .on, remote = self.remote
+        guard !needle.isEmpty else {
+            results = []; collapsed = []; rebuildRows(); caption.stringValue = L.text("Search project text"); return
         }
-        DispatchQueue.global(qos:.userInitiated).async { [weak self] in
-            var found: [Result] = [], note = ""
-            if kind == "search" {
-                let files = ProjectFiles.list(project)
-                for url in files {
-                    let size = (try? url.resourceValues(forKeys:[.fileSizeKey]).fileSize) ?? Int.max
-                    guard size < 2_000_000,
-                          let data = try? Data(contentsOf:url), !data.contains(0),let content = String(data:data,encoding:.utf8) else { continue }
-                    for (i,line) in content.components(separatedBy:.newlines).enumerated() where line.localizedCaseInsensitiveContains(needle) {
-                        found.append(Result(title:String(line.trimmingCharacters(in:.whitespaces).prefix(160)),detail:ProjectFiles.relative(url,root:project)+":\(i+1)",url:url,line:i+1))
-                        if found.count >= 500 { break }
+        if displayedQuery != needle {
+            displayedQuery = needle
+            results = []; rebuildRows()
+        }
+        let overrides = unsavedTexts?() ?? [:]
+        caption.stringValue = L.text("Searching…")
+        let work = DispatchWorkItem { [weak self] in
+            let outcome = Result { () throws -> ([Match],Bool) in
+                var matches: [Match] = []
+                var truncated = false
+                if let remote {
+                    let reply = try remote.connection.searchText(needle,directory:remote.directory,caseSensitive:exact)
+                    truncated = reply.truncated == true
+                    matches = (reply.matches ?? []).compactMap { match in
+                        let url = URL(fileURLWithPath:match.path)
+                        guard overrides[url] == nil else { return nil }
+                        return Match(title:match.text,detail:"\(match.relative):\(match.line)",url:url,line:match.line,
+                                     range:NSRange(location:match.column,length:match.length),
+                                     highlight:NSRange(location:match.previewColumn,length:match.previewLength),originalLine:nil)
                     }
-                    if found.count >= 500 { break }
+                } else {
+                    for url in ProjectFiles.searchable(project) where overrides[url] == nil {
+                        let size = (try? url.resourceValues(forKeys:[.fileSizeKey]).fileSize) ?? Int.max
+                        guard size < 5*1024*1024,let data = try? Data(contentsOf:url),!data.contains(0),
+                              let content = String(data:data,encoding:.utf8) ?? String(data:data,encoding:.isoLatin1) else { continue }
+                        let text = content.hasPrefix("\u{FEFF}") ? String(content.dropFirst()) : content
+                        matches += Self.matches(in:text,url:url,project:project,query:needle,exact:exact,limit:Self.limit-matches.count)
+                        if matches.count >= Self.limit { truncated = true; break }
+                    }
                 }
-                note = "\(found.count) matches · UTF-8 files under 2 MB" + (found.count >= 500 ? " · limit reached" : "")
-            } else {
-                let process = Process(), output = Pipe(), errors = Pipe()
-                process.executableURL = URL(fileURLWithPath:"/usr/bin/git"); process.arguments = ["-C",project.path,"status","--porcelain=v1","-z","--untracked-files=normal"]
-                process.standardOutput = output; process.standardError = errors
-                do {
-                    try process.run(); let bytes = output.fileHandleForReading.readDataToEndOfFile(); process.waitUntilExit()
-                    if process.terminationStatus == 0 {
-                        let fields = String(decoding:bytes,as:UTF8.self).split(separator:"\0").map(String.init)
-                        var i = 0
-                        while i < fields.count {
-                            let field = fields[i]; i += 1; guard field.count >= 4 else { continue }
-                            let state = String(field.prefix(2)), path = String(field.dropFirst(3))
-                            if state.contains("R") || state.contains("C") { i += 1 }
-                            found.append(Result(title:state+"  "+URL(fileURLWithPath:path).lastPathComponent,detail:path,url:project.appendingPathComponent(path),line:1))
-                        }
-                        note = found.isEmpty ? "Working tree is clean" : "\(found.count) changed files · read-only status"
-                    } else { note = "This folder is not an available Git repository." }
-                } catch { note = "Git could not be started." }
+                // Unsaved buffers replace on-disk matches, including files opened before indexing.
+                var edited: [Match] = []
+                for url in overrides.keys.sorted(by:{ $0.path < $1.path }) {
+                    guard let content = overrides[url] else { continue }
+                    edited += Self.matches(in:content,url:url,project:project,query:needle,exact:exact,limit:Self.limit-edited.count)
+                    if edited.count >= Self.limit { truncated = true; break }
+                }
+                let combined = edited+matches
+                return (Array(combined.prefix(Self.limit)),truncated || combined.count > Self.limit)
             }
-            DispatchQueue.main.async { [weak self] in
+            DispatchQueue.main.async {
                 guard let self,self.generation == request else { return }
-                self.results = found; self.caption.stringValue = note; self.table.reloadData()
+                switch outcome {
+                case .success(let (matches,truncated)):
+                    self.results = matches
+                    self.caption.stringValue = L.format("%@ matches",String(matches.count))+(truncated ? " · "+L.text("limit reached") : "")
+                case .failure(let error):
+                    self.results = []
+                    self.caption.stringValue = error.localizedDescription
+                }
+                self.rebuildRows()
             }
         }
+        searchWork = work
+        searchQueue.asyncAfter(deadline:.now()+0.2,execute:work)
+    }
+
+    static func matches(in source: String,url: URL,project: URL,query: String,exact: Bool,limit: Int) -> [Match] {
+        guard !query.isEmpty,limit > 0 else { return [] }
+        let normalized = source.replacingOccurrences(of:"\r\n",with:"\n").replacingOccurrences(of:"\r",with:"\n")
+        let options: NSString.CompareOptions = exact ? [.literal] : [.caseInsensitive]
+        var matches: [Match] = []
+        for (index,line) in normalized.components(separatedBy:"\n").enumerated() {
+            let text = line as NSString
+            var start = 0
+            while start < text.length {
+                let range = text.range(of:query,options:options,range:NSRange(location:start,length:text.length-start))
+                guard range.location != NSNotFound,range.length > 0 else { break }
+                let context = max(0,range.location-20)
+                let previewRange = text.rangeOfComposedCharacterSequences(for:NSRange(location:context,length:min(160,text.length-context)))
+                let prefix = previewRange.location > 0 ? "…" : ""
+                let preview = prefix+text.substring(with:previewRange)
+                let highlight = NSIntersectionRange(range,previewRange)
+                matches.append(Match(title:preview,detail:ProjectFiles.relative(url,root:project)+":\(index+1)",url:url,line:index+1,range:range,
+                                     highlight:NSRange(location:highlight.location-previewRange.location+prefix.utf16.count,length:highlight.length),originalLine:line))
+                if matches.count >= limit { return matches }
+                start = NSMaxRange(range)
+            }
+        }
+        return matches
     }
 }

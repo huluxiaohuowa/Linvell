@@ -4,8 +4,7 @@ import LinvellCore
 extension EditorTextView {
     private func editLines(_ action: LineEditing.Action) {
         guard !hasMarkedText() else { return }
-        let width = Int(PreferencesSync.value("tabWidth")) ?? 4
-        let result = LineEditing.apply(action,text:string,selections:editingSelections,indent:PreferencesSync.value("useSpaces") == "true" ? String(repeating:" ",count:width) : "\t")
+        let result = LineEditing.apply(action,text:string,selections:editingSelections,indent:indentation.unit,tabWidth:indentation.width)
         guard result.text != string else { return }
         restoreMultiEdit(result.text,selections:result.selections.map(NSValue.init(range:)))
         scrollRangeToVisible(selectedRange()); statusChanged?()
@@ -18,9 +17,10 @@ extension EditorTextView {
     @objc func indentLines(_ sender: Any?) { editLines(.indent) }
     @objc func outdentLines(_ sender: Any?) { editLines(.outdent) }
     @objc func toggleLineComment(_ sender: Any?) {
-        let ext = document?.fileURL?.pathExtension.lowercased() ?? ""
-        let marker = ["py","sh","bash","zsh","fish","rb","yaml","yml","toml","r","pl"].contains(ext) ? "#" : ["sql","lua","hs"].contains(ext) ? "--" : "//"
-        editLines(.comment(marker))
+        let path = document?.remote?.path ?? document?.fileURL?.path ?? ""
+        let comment = SourceSyntax.commentDelimiters(for:path)
+        if let close = comment.close { editLines(.blockComment(comment.open,close)) }
+        else { editLines(.comment(comment.open)) }
     }
     @objc func insertLineBelow(_ sender: Any?) { insertAdjacentLine(above:false) }
     @objc func insertLineAbove(_ sender: Any?) { insertAdjacentLine(above:true) }

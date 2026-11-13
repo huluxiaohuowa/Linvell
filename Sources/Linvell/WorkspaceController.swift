@@ -16,10 +16,37 @@ final class FileNode: NSObject {
         isDirectory = (try? url.resourceValues(forKeys:[.isDirectoryKey]).isDirectory) == true && FilePreview.kind(for:url) == nil
     }
     init(_ url: URL, isDirectory: Bool) { self.url = url; self.isDirectory = isDirectory }
+    static func filteredTree(_ urls: [URL],under root: URL) -> [FileNode] {
+        var folders: [String:FileNode] = [:]
+        let top = FileNode(root,isDirectory:true)
+        top.children = []
+        folders[root.path] = top
+        func parent(at url: URL) -> FileNode {
+            if let existing = folders[url.path] { return existing }
+            let node = FileNode(url,isDirectory:true)
+            node.children = []
+            folders[url.path] = node
+            parent(at:url.deletingLastPathComponent()).children.append(node)
+            return node
+        }
+        for url in urls where ExplorerActions.relative(url.path,under:root.path) != nil {
+            parent(at:url.deletingLastPathComponent()).children.append(FileNode(url,isDirectory:false))
+        }
+        for folder in folders.values {
+            folder.children.sort {
+                if $0.isDirectory != $1.isDirectory { return $0.isDirectory }
+                return $0.url.lastPathComponent.localizedStandardCompare($1.url.lastPathComponent) == .orderedAscending
+            }
+        }
+        return top.children
+    }
+
 }
 
 final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutlineViewDataSource, NSOutlineViewDelegate, NSSearchFieldDelegate {
     var documents: [OpenDocument] = []
+    var recentQuickFiles: [WorkspaceSession] = []
+    var quickFileIndex: [URL] = []
     var pluginSessions: [String:PluginSession] = [:]
     let installedPluginStore: PluginStore
     let managedPluginAutoload: Bool
@@ -219,9 +246,24 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         outline.dataSource = self; outline.delegate = self; outline.rowHeight = 23
         outline.backgroundColor = .clear; outline.style = .sourceList; outline.intercellSpacing = NSSize(width:0,height:2)
         outline.target = self; outline.action = #selector(fileClicked)
+        outline.openSelected = { [weak self] in
+            guard let self,let node = self.outline.item(atRow:self.outline.selectedRow) as? FileNode else { return false }
+            if node.isDirectory {
+                if self.outline.isItemExpanded(node) { self.outline.collapseItem(node) } else { self.outline.expandItem(node) }
+            } else { self.open(node.url) }
+            return true
+        }
+        outline.renameSelected = { [weak self] in self?.renameSelectedExplorerItem() ?? false }
+        outline.trashSelected = { [weak self] in self?.trashSelectedExplorerItem() ?? false }
         outline.setAccessibilityLabel("Workspace files")
         let fileMenu = NSMenu(); fileMenu.delegate = self; outline.menu = fileMenu
-        let scroll = ResponsiveScrollView(); scroll.documentView = outline; scroll.hasVerticalScroller = true
+        let scroll = ExplorerScrollView()
+        scroll.folder = { item in
+            guard let node = item as? FileNode,node.isDirectory else { return nil }
+            return (node.url.path,node.url.lastPathComponent)
+        }
+        scroll.canPin = { [weak self] in self?.isFilteringFiles == false }
+        scroll.documentView = outline; scroll.hasVerticalScroller = true
         scroll.drawsBackground = false; scroll.borderType = .noBorder
         let stack = Theme.stack([row,search,scroll],orientation:.vertical,spacing:6)
         Theme.pin(stack,in:sidebar,inset:10)
@@ -268,15 +310,19 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         else if kind == "files" { setupSidebar() }
         else if kind == "search",let connection = remoteConnection {
             let directory = remoteDirectory
-            let tool = ToolSidebar(kind:kind,project:URL(fileURLWithPath:directory),remote:(connection,directory))
-            tool.onSelect = { [weak self] url,line in
+            let tool = ToolSidebar(project:URL(fileURLWithPath:directory),remote:(connection,directory))
+            tool.unsavedTexts = { [weak self] in self?.searchOverrides(root:directory,host:connection.host) ?? [:] }
+            tool.onSelect = { [weak self] match in
                 guard let self,self.remoteConnection?.host == connection.host,self.remoteDirectory == directory else { return }
-                self.openRemote(url.path,connection:connection) { [weak self] in self?.goToLine(line) }
+                self.openRemote(match.url.path,connection:connection) { [weak self] in self?.selectSearchMatch(match) }
             }
             Theme.pin(tool,in:sidebar)
-        } else if let project = root?.url {
-            let tool = ToolSidebar(kind:kind,project:project)
-            tool.onSelect = { [weak self] url,line in self?.open(url) { [weak self] in self?.goToLine(line) } }
+        } else if kind == "search",let project = root?.url {
+            let tool = ToolSidebar(project:project)
+            tool.unsavedTexts = { [weak self] in self?.searchOverrides(root:project.path,host:nil) ?? [:] }
+            tool.onSelect = { [weak self] match in
+                self?.open(match.url) { [weak self] in self?.selectSearchMatch(match) }
+            }
             Theme.pin(tool,in:sidebar)
         } else {
             let label = Theme.label("Open a folder to get started.",size:13,color:Theme.secondary)
@@ -457,12 +503,15 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     }
 
     @objc func newFile() {
-        if remoteConnection != nil { remoteBrowser?.createFile(); return }
         latestOpenRequest = nil; activate(OpenDocument(DocumentBuffer()))
     }
     @objc func openFile() {
-        let p = Theme.openPanel(); p.allowsMultipleSelection = true; p.canChooseDirectories = false
-        p.beginSheetModal(for:window!) { [weak self] result in if result == .OK { p.urls.forEach { self?.open($0) } } }
+        let p = Theme.openPanel(); p.allowsMultipleSelection = true; p.canChooseDirectories = true
+        p.beginSheetModal(for:window!) { [weak self] result in
+            guard result == .OK else { return }
+            if let app = NSApp.delegate as? AppDelegate { app.openExternal(p.urls,preferred:self) }
+            else { p.urls.forEach { self?.open($0) } }
+        }
     }
     @objc func openFolder() {
         if remoteConnection != nil { openRemoteFolder(); return }
@@ -487,16 +536,13 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         tabRestoreGeneration = UUID()
         remoteConnection = nil; remoteBrowser = nil
         if pluginWorkspace?.identityKey != PluginWorkspace(root:url.path).identityKey { stopPlugins(); resetLanguageServices() }
-        search.stringValue = ""; fileMatches = []; fileIndex = []; ignoredFiles = []
+        search.stringValue = ""; fileMatches = []; fileIndex = []; quickFileIndex = []; ignoredFiles = []
         let project = FileNode(url.resolvingSymlinksInPath())
         root = project; updateIgnoredFiles(for:project); syncManagedPlugins(); projectTitle.stringValue = url.lastPathComponent
         if let task = AgentTaskStore().task(at:root!.url.path) { projectTitle.stringValue = task.title }
         outline.reloadData(); UserDefaults.standard.set(url.path,forKey:"lastProject")
         WorkspaceSession.save(.local(path:project.url.path))
-        DispatchQueue.global(qos:.userInitiated).async { [weak self] in
-            let files = ProjectFiles.list(project.url)
-            DispatchQueue.main.async { [weak self] in if self?.root === project { self?.fileIndex = files } }
-        }
+        indexProjectFiles(project)
         if wasRemote || sidebarKind != "files" { showSidebar(wasRemote ? "files" : sidebarKind) }
         agentProjectDidChange()
     }
@@ -528,6 +574,11 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         preserveEditorPosition()
         if !documents.contains(where: { $0 === document }) { documents.append(document) }
         current = document
+        if let location = quickFileLocation(document) {
+            recentQuickFiles.removeAll { $0 == location }
+            recentQuickFiles.insert(location,at:0)
+            if recentQuickFiles.count > 30 { recentQuickFiles.removeLast() }
+        }
         editors.arrangedSubviews.forEach { $0.removeFromSuperview() }
         panes = []; activePane = nil; markdownView = nil
         if let url = document.previewURL { editors.addArrangedSubview(FilePreview(url:url)) }
@@ -561,7 +612,13 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         pane.translatesAutoresizingMaskIntoConstraints = false
         pane.onFocus = { [weak self,weak pane] in self?.activePane = pane }
         pane.onChange = { [weak self] in self?.updateStatus(); self?.updateTabTitles() }
-        pane.onTextChanged = { [weak self] in self?.markdownView?.render(document.buffer.text); self?.scheduleAutoSave(document); self?.languageDocumentChanged(document); self?.synchronizePluginDocuments() }
+        pane.onTextChanged = { [weak self] in
+            self?.markdownView?.render(document.buffer.text)
+            self?.scheduleAutoSave(document)
+            self?.languageDocumentChanged(document)
+            self?.synchronizePluginDocuments()
+            (self?.sidebar.subviews.first as? ToolSidebar)?.refresh()
+        }
         pane.textView.exCommand = { [weak self] prefix in self?.showEx(prefix) }
         pane.textView.reviewAction = { [weak self,weak pane] in if let pane { self?.addEditorReview(pane) } }
         configureLanguageEditor(pane)
@@ -626,6 +683,8 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     }
     @objc private func tabClicked(_ sender: NSButton) { if documents.indices.contains(sender.tag) { activate(documents[sender.tag]) } }
     @objc private func closeTab(_ sender: NSButton) { closeDocument(documents[sender.tag]) }
+    @objc func closeWorkspaceWindow() { window?.performClose(nil) }
+    @objc func openWelcomeWindow() { (NSApp.delegate as? AppDelegate)?.newWorkspace() }
     @objc func closeCurrent() { if let current { closeDocument(current) } }
     func closeDocument(_ doc: OpenDocument) {
         autoSaveWork.removeValue(forKey:doc.buffer.id)?.cancel()
@@ -866,7 +925,8 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         pluginDataViews.values.forEach { $0.refreshAppearance() }; pluginWindows.values.forEach { $0.refreshAppearance() }; renderPluginStatus()
         if let terminal { configureTerminal(terminal) }
         if let current,let markdownView { markdownView.render(current.buffer.text) }
-        if sidebarKind != "files" { showSidebar(sidebarKind) }
+        if let search = sidebar.subviews.first as? ToolSidebar { search.table.reloadData() }
+        else if sidebarKind != "files" { showSidebar(sidebarKind) }
         selectActivity(selectedActivity)
     }
     func relocalize() {
@@ -983,25 +1043,60 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         let end = row+1 < current.lines.starts.count ? current.lines.starts[row+1] : current.storage.length
         v.setSelections([NSRange(location:start,length:end-start)])
     }
+    private func searchOverrides(root: String,host: String?) -> [URL:String] {
+        var overrides: [URL:String] = [:]
+        for doc in documents where doc.buffer.isModified && doc.remote?.connection.host == host {
+            guard let path = doc.remote?.path ?? doc.fileURL?.path,ExplorerActions.relative(path,under:root) != nil else { continue }
+            overrides[URL(fileURLWithPath:path)] = doc.buffer.text
+        }
+        return overrides
+    }
+
+    private func selectSearchMatch(_ match: ToolSidebar.Match) {
+        goToLine(match.line)
+        guard let pane = activePane,pane.document.lines.starts.indices.contains(match.line-1) else { return }
+        let start = pane.document.lines.starts[match.line-1]
+        let next = match.line < pane.document.lines.starts.count ? pane.document.lines.starts[match.line] : pane.document.storage.length
+        let source = pane.document.storage.string as NSString
+        guard next >= start,NSMaxRange(match.range) <= next-start else { return }
+        if let original = match.originalLine,
+           source.substring(with:NSRange(location:start,length:next-start)).trimmingCharacters(in:.newlines) != original { return }
+        let range = NSRange(location:start+match.range.location,length:match.range.length)
+        pane.textView.setSelectedRange(range)
+        pane.textView.scrollRangeToVisible(range)
+    }
+
     @objc func projectSearch() {
-        showSidebar("search")
+        if sidebarKind != "search" || sidebar.isHidden { showSidebar("search") }
         if let search = sidebar.subviews.first(where:{ $0 is ToolSidebar }) as? ToolSidebar { window?.makeFirstResponder(search.query) }
     }
     @objc func documentSymbols() { showSymbols() }
     @objc func replaceInFile() { activePane?.textView.performFindPanelAction(menuItem(tag:Int(NSTextFinder.Action.showReplaceInterface.rawValue))) }
-    @objc func refreshFiles() {
-        guard let url = root?.url else { return }
-        let project = FileNode(url)
-        root = project
-        updateIgnoredFiles(for:project)
-        outline.reloadData()
+    @objc func showExplorer() { if sidebarKind != "files" || sidebar.isHidden { showSidebar("files") } }
+
+    func indexProjectFiles(_ project: FileNode) {
         DispatchQueue.global(qos:.utility).async { [weak self] in
-            let files = ProjectFiles.list(url)
-            DispatchQueue.main.async { if self?.root === project { self?.fileIndex = files } }
+            let files = ProjectFiles.list(project.url),quick = ProjectFiles.searchable(project.url)
+            DispatchQueue.main.async {
+                guard let self,self.root === project else { return }
+                self.fileIndex = files; self.quickFileIndex = quick
+                if self.isFilteringFiles { self.filterChanged() }
+            }
         }
     }
+    @objc func refreshFiles() {
+        if let remoteBrowser { remoteBrowser.reload(); return }
+        guard let project = root else { return }
+        updateExternalDirectory(project,children:FileNode(project.url).children)
+        updateIgnoredFiles(for:project)
+        indexProjectFiles(project)
+    }
     @objc func focusFileFilter() {
-        if let remoteConnection { quickOpenRemote(remoteConnection); return }
+        if remoteConnection != nil {
+            showExplorer()
+            if let field = remoteBrowser?.filter { window?.makeFirstResponder(field) }
+            return
+        }
         guard root != nil else { return }
         if sidebarKind != "files" || sidebar.isHidden { showSidebar("files") }
         window?.makeFirstResponder(search)
@@ -1009,13 +1104,15 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     @objc private func filterChanged() {
         let query = search.stringValue.trimmingCharacters(in:.whitespaces)
         if let root, !query.isEmpty {
-            fileMatches = fileIndex.lazy.filter {
+            let urls = fileIndex.lazy.filter {
                 ProjectFiles.relative($0,root:root.url).localizedCaseInsensitiveContains(query)
-            }.prefix(500).map { FileNode($0,isDirectory:false) }
+            }.prefix(500)
+            fileMatches = FileNode.filteredTree(Array(urls),under:root.url)
         } else {
             fileMatches = []
         }
         outline.reloadData()
+        if !query.isEmpty { outline.expandItem(nil,expandChildren:true) }
     }
     private var isFilteringFiles: Bool { !search.stringValue.trimmingCharacters(in:.whitespaces).isEmpty }
     private var filtered: [FileNode] { isFilteringFiles ? fileMatches : (root?.children ?? []) }
@@ -1024,9 +1121,14 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     func outlineView(_ outlineView: NSOutlineView,isItemExpandable item: Any) -> Bool { (item as? FileNode)?.isDirectory == true }
     func outlineView(_ outlineView: NSOutlineView,viewFor tableColumn: NSTableColumn?,item: Any) -> NSView? {
         guard let node = item as? FileNode else { return nil }
-        let title = isFilteringFiles ? root.map { ProjectFiles.relative(node.url,root:$0.url) } ?? node.url.lastPathComponent : node.url.lastPathComponent
+        let title = node.url.lastPathComponent
         let label = Theme.label(title,size:12,color:Theme.foreground)
         label.lineBreakMode = .byTruncatingMiddle
+        if isFilteringFiles,let match = title.range(of:search.stringValue.trimmingCharacters(in:.whitespaces),options:[.caseInsensitive,.diacriticInsensitive]) {
+            let styled = NSMutableAttributedString(string:title,attributes:[.font:label.font ?? NSFont.systemFont(ofSize:12),.foregroundColor:Theme.liveForeground])
+            styled.addAttribute(.foregroundColor,value:Theme.liveAccent,range:NSRange(match,in:title))
+            label.attributedStringValue = styled
+        }
         let image = FileIcon.view(for:node.url,folder:node.isDirectory,expanded:outlineView.isItemExpanded(node))
         let row = Theme.stack([image,label],spacing:8)
         row.alphaValue = isIgnored(node) ? 0.55 : 1
@@ -1039,13 +1141,58 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     }
     func show(_ error: Error) { let alert = Theme.errorAlert(error); alert.messageText = L.text(alert.messageText); alert.informativeText = L.text(alert.informativeText); if let window { alert.beginSheetModal(for:window) } }
 
+    func quickFileLocation(_ document: OpenDocument) -> WorkspaceSession? {
+        if let remote = document.remote { return .ssh(host:remote.connection.host,path:remote.path) }
+        return document.fileURL.map { .local(path:$0.path) }
+    }
     @objc func quickOpen() {
         if let connection = remoteConnection { quickOpenRemote(connection); return }
         guard let root else { openFile(); return }
-        let options = fileIndex.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }.map { url in
-            PickerOption(title:url.lastPathComponent,detail:ProjectFiles.relative(url,root:root.url),fileURL:url,invoke:{ [weak self] in self?.open(url) })
+        let recent = recentQuickFiles.compactMap { location -> URL? in
+            guard case .local(let path) = location,FileManager.default.fileExists(atPath:path),
+                  ExplorerActions.relative(path,under:root.url.path) != nil else { return nil }
+            return URL(fileURLWithPath:path)
         }
-        picker = QuickPicker(title:L.text("Search files by name"),options:options,owner:window!,compact:true)
+        var seen = Set<URL>()
+        let urls = (recent+quickFileIndex.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }).filter { seen.insert($0).inserted }
+        let options = urls.map { url in
+            var option = PickerOption(title:url.lastPathComponent,detail:ProjectFiles.relative(url,root:root.url),fileURL:url,invoke:{ [weak self] in self?.openFromFilePicker(url,line:nil) })
+            option.openAtLine = { [weak self] line in self?.openFromFilePicker(url,line:line) }
+            return option
+        }
+        presentQuickFiles(options)
+    }
+
+    func revealLocalFile(_ url: URL) {
+        guard let root,let relative = ExplorerActions.relative(url.path,under:root.url.path),!isFilteringFiles else { return }
+        let components = relative.split(separator:"/")
+        var node = root
+        for (index,name) in components.enumerated() {
+            guard let child = node.children.first(where:{ $0.url.lastPathComponent == name }) else { return }
+            node = child
+            if index < components.count-1 { outline.expandItem(node) }
+        }
+        let row = outline.row(forItem:node)
+        guard row >= 0 else { return }
+        outline.selectRowIndexes(IndexSet(integer:row),byExtendingSelection:false)
+        outline.scrollRowToVisible(row)
+    }
+
+    private func openFromFilePicker(_ url: URL,line: Int?) {
+        open(url) { [weak self] in
+            self?.revealLocalFile(url)
+            if let line { self?.goToLine(line) }
+        }
+    }
+
+    func presentQuickFiles(_ options: [PickerOption]) {
+        if let picker,picker.window?.sheetParent != nil,picker.goToCurrentLine != nil {
+            picker.dismiss(); self.picker = nil; return
+        }
+        guard let window else { return }
+        let panel = QuickPicker(title:L.text("Search files by name or file:line"),options:options,owner:window,compact:true)
+        panel.goToCurrentLine = { [weak self] in self?.goToLine($0) }
+        picker = panel
     }
     @objc func commandPalette() {
         var options: [PickerOption] = []

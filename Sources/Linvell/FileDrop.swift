@@ -7,7 +7,9 @@ enum FileDrop {
     static func perform(_ sender: NSDraggingInfo,in window: NSWindow?) -> Bool {
         let urls = urls(sender.draggingPasteboard)
         guard !urls.isEmpty,let workspace = window?.windowController as? WorkspaceController else { return false }
-        urls.forEach { workspace.open($0) }; window?.makeKeyAndOrderFront(nil); return true
+        if let app = NSApp.delegate as? AppDelegate { app.openExternal(urls,preferred:workspace) }
+        else { urls.forEach { workspace.open($0) }; window?.makeKeyAndOrderFront(nil) }
+        return true
     }
 }
 

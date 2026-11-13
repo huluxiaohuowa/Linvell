@@ -1471,3 +1471,24 @@
 "Moved to remote Trash: %@" = "Moved to remote Trash: %@";
 "Remote item renamed." = "Remote item renamed.";
 "Move to Trash" = "Move to Trash";
+
+"New File in Project…" = "New File in Project…";
+"New Folder in Project…" = "New Folder in Project…";
+"Duplicate" = "Duplicate";
+"Copy Relative Path" = "Copy Relative Path";
+"New remote folder" = "New remote folder";
+"Enter a single file or folder name." = "Enter a single file or folder name.";
+"Open Recent" = "Open Recent";
+"Clear Menu" = "Clear Menu";
+"Remove from Recents" = "Remove from Recents";
+"Clear" = "Clear";
+"Select Next Tab" = "Select Next Tab";
+"Select Previous Tab" = "Select Previous Tab";
+"Refresh Explorer" = "Refresh Explorer";
+"Welcome Window" = "Welcome Window";
+"Restore project tabs" = "Restore project tabs";
+"Pin parent folders while scrolling" = "Pin parent folders while scrolling";
+"Follow macOS light and dark appearance" = "Follow macOS light and dark appearance";
+"Search files by name or file:line" = "Search files by name or file:line";
+"Match case" = "Match case";
+"%@ matches" = "%@ matches";

@@ -123,6 +123,7 @@ extension WorkspaceController {
         let visible = panes.filter { $0.document === document }
         let positions = visible.map { ($0,$0.textView.editingSelections,$0.scrollAnchor) }
         guard document.buffer.adoptExternal(buffer) else { return }
+        document.detectedIndentation = EditorIndentation.detect(buffer.text)
         document.storage.replaceCharacters(in:NSRange(location:0,length:document.storage.length),with:buffer.text)
         document.externalChange = false
         if let remote = document.remote,let remoteDigest {
@@ -132,7 +133,7 @@ extension WorkspaceController {
         for (pane,selections,anchor) in positions {
             pane.textView.undoManager?.removeAllActions(withTarget:pane.textView)
             pane.textView.applySelections(selections.map { NSRange(location:min($0.location,document.storage.length),length:min($0.length,max(0,document.storage.length-$0.location))) })
-            pane.refreshCodePresentation(); pane.scrollFromPreview(anchor)
+            pane.updateFont(); pane.refreshCodePresentation(); pane.scrollFromPreview(anchor)
         }
         if current === document { markdownView?.render(buffer.text); updateStatus() }
         synchronizeLanguage(document); synchronizePluginDocuments(); updateTabTitles()
@@ -151,11 +152,8 @@ extension WorkspaceController {
         if let selected { let row = outline.row(forItem:selected); if row >= 0 { outline.selectRowIndexes(IndexSet(integer:row),byExtendingSelection:false) } }
         if let root {
             updateIgnoredFiles(for:root)
-            let url = root.url
-            DispatchQueue.global(qos:.utility).async { [weak self] in
-                let files = ProjectFiles.list(url)
-                DispatchQueue.main.async { if self?.root === root { self?.fileIndex = files } }
-            }
+            indexProjectFiles(root)
         }
+        (sidebar.subviews.first as? ToolSidebar)?.refresh()
     }
 }

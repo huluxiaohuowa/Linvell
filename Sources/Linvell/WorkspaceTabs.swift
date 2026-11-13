@@ -14,7 +14,24 @@ extension WorkspaceController {
             item.representedObject = document.buffer.id
             menu.addItem(item)
         }
+        if let path = document.remote?.path ?? document.fileURL?.path {
+            menu.addItem(.separator())
+            let project = document.remote == nil ? root?.url.path : remoteDirectory
+            for item in ExplorerActions.pathItems(path,relative:ExplorerActions.relative(path,under:project),reveal:document.remote == nil ? document.fileURL : nil) { menu.addItem(item) }
+        }
         return menu
+    }
+
+    @objc func selectNextTab() { selectTab(offset:1) }
+    @objc func selectPreviousTab() { selectTab(offset:-1) }
+
+    private func selectTab(offset: Int) {
+        guard !documents.isEmpty else { return }
+        guard let index = documents.firstIndex(where:{ $0 === current }) else {
+            activate(offset > 0 ? documents[0] : documents[documents.count-1]); return
+        }
+        let next = (index+offset+documents.count)%documents.count
+        if next != index { activate(documents[next]) }
     }
 
     func moveTab(_ id: UUID,by offset: Int) {

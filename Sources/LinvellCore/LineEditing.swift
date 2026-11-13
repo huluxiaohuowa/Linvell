@@ -1,8 +1,8 @@
 import Foundation
 
 public enum LineEditing {
-    public enum Action { case moveUp,moveDown,copyUp,copyDown,delete,indent,outdent,comment(String) }
-    public static func apply(_ action: Action,text: String,selections: [NSRange],indent: String = "    ") -> MultiEdit.Result {
+    public enum Action { case moveUp,moveDown,copyUp,copyDown,delete,indent,outdent,comment(String),blockComment(String,String) }
+    public static func apply(_ action: Action,text: String,selections: [NSRange],indent: String = "    ",tabWidth: Int? = nil) -> MultiEdit.Result {
         let source = text as NSString,index = LineIndex(text)
         var rows = text.components(separatedBy:"\n").enumerated().map { (id:$0.offset,text:$0.element) }
         var selected = IndexSet()
@@ -36,19 +36,44 @@ public enum LineEditing {
             for row in selected { rows[row].text = indent+rows[row].text; prefixes[row] = indent.utf16.count }
         case .outdent:
             for row in selected {
-                let value = rows[row].text,amount = value.hasPrefix("\t") ? 1 : value.prefix(indent.count).prefix { $0 == " " }.count
+                let value = rows[row].text,amount = value.hasPrefix("\t") ? 1 : value.prefix(tabWidth ?? indent.count).prefix { $0 == " " }.count
                 let removed = String(value.prefix(amount)).utf16.count
                 rows[row].text = String(value.dropFirst(amount)); prefixes[row] = -removed
             }
         case .comment(let marker):
-            let uncomment = selected.allSatisfy { rows[$0].text.trimmingCharacters(in:.whitespaces).hasPrefix(marker) }
-            for row in selected {
-                let value = rows[row].text,leading = value.prefix { $0 == " " || $0 == "\t" },tail = value.dropFirst(leading.count)
+            let nonBlank = selected.filter { !rows[$0].text.trimmingCharacters(in:.whitespaces).isEmpty }
+            let uncomment = nonBlank.allSatisfy { rows[$0].text.trimmingCharacters(in:.whitespaces).hasPrefix(marker) }
+            for row in nonBlank {
+                let value = rows[row].text,leading = value.prefix { $0 == " " || $0 == "\t" }
                 if uncomment {
-                    var rest = String(tail.dropFirst(marker.count)),removed = marker.utf16.count
+                    var rest = String(value.dropFirst(leading.count+marker.count))
+                    var removed = marker.utf16.count
                     if rest.hasPrefix(" ") { rest.removeFirst(); removed += 1 }
                     rows[row].text = leading+rest; prefixes[row] = -removed
-                } else { rows[row].text = leading+marker+" "+tail; prefixes[row] = marker.utf16.count+1 }
+                } else {
+                    rows[row].text = leading+marker+" "+value.dropFirst(leading.count)
+                    prefixes[row] = marker.utf16.count+1
+                }
+            }
+        case .blockComment(let open,let close):
+            let nonBlank = selected.filter { !rows[$0].text.trimmingCharacters(in:.whitespaces).isEmpty }
+            let uncomment = nonBlank.allSatisfy {
+                let body = rows[$0].text.trimmingCharacters(in:.whitespaces)
+                return body.count >= open.count+close.count && body.hasPrefix(open) && body.hasSuffix(close)
+            }
+            for row in nonBlank {
+                let value = rows[row].text,leading = value.prefix { $0 == " " || $0 == "\t" }
+                if uncomment {
+                    let trimmed = value.trimmingCharacters(in:.whitespaces)
+                    var inner = String(trimmed.dropFirst(open.count).dropLast(close.count))
+                    if inner.hasPrefix(" ") { inner.removeFirst() }
+                    if inner.hasSuffix(" ") { inner.removeLast() }
+                    rows[row].text = leading+inner
+                    prefixes[row] = -open.utf16.count-1
+                } else {
+                    rows[row].text = leading+open+" "+value.dropFirst(leading.count)+" "+close
+                    prefixes[row] = open.utf16.count+1
+                }
             }
         }
         let output = rows.map(\.text).joined(separator:"\n"),newIndex = LineIndex(output)

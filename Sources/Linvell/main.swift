@@ -1,17 +1,23 @@
 import AppKit
 import LinvellCore
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, NSMenuDelegate {
     var workspaces: [WorkspaceController] = []
     var keyMonitor: Any?
     var chordDeadline: Date?
     var receivedOpenFiles = false
+    private var appearanceObserver: NSKeyValueObservation?
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         if let icon = Bundle.main.url(forResource:"AppIcon",withExtension:"icns").flatMap({ NSImage(contentsOf:$0) }) {
             NSApp.applicationIconImage = icon
         }
         buildMenus(); Rendering.install()
+        appearanceObserver = NSApp.observe(\.effectiveAppearance,options:[.new]) { [weak self] _,_ in
+            DispatchQueue.main.async {
+                if UserDefaults.standard.bool(forKey:"followSystemTheme") { self?.preferencesApplied() }
+            }
+        }
         GitAutoFetchScheduler.shared.start()
         NSApp.servicesProvider = self
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching:.keyDown) { [weak self] event in
@@ -97,18 +103,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         workspaces.first(where:{ $0.window?.isKeyWindow == true })
             ?? workspaces.last(where:{ $0.window?.isVisible == true }) ?? newWorkspace()
     }
+    static func projectFolder(for file: URL,recent: [WorkspaceSession]) -> URL {
+        let containing = recent.compactMap { location -> URL? in
+            guard case .local(let path) = location else { return nil }
+            let root = URL(fileURLWithPath:path).resolvingSymlinksInPath()
+            return ExplorerActions.relative(file.path,under:root.path) == nil ? nil : root
+        }.max { $0.pathComponents.count < $1.pathComponents.count }
+        if let containing { return containing }
+        let folder = file.deletingLastPathComponent()
+        var ancestor = folder
+        let home = FileManager.default.homeDirectoryForCurrentUser.resolvingSymlinksInPath()
+        while ancestor.path != "/",ancestor != home {
+            if FileManager.default.fileExists(atPath:ancestor.appendingPathComponent(".git").path) { return ancestor }
+            ancestor.deleteLastPathComponent()
+        }
+        return folder
+    }
+
+    func openExternal(_ urls: [URL],preferred: WorkspaceController? = nil) {
+        for url in urls {
+            let file = url.resolvingSymlinksInPath()
+            let isFolder = (try? file.resourceValues(forKeys:[.isDirectoryKey]).isDirectory) == true && FilePreview.kind(for:file) == nil
+            let existing = workspaces.filter { controller in
+                guard controller.window?.isVisible == true,controller.remoteConnection == nil,let root = controller.root?.url else { return false }
+                return isFolder ? root == file : ExplorerActions.relative(file.path,under:root.path) != nil
+            }.max { ($0.root?.url.pathComponents.count ?? 0) < ($1.root?.url.pathComponents.count ?? 0) }
+            let empty = ([preferred].compactMap { $0 }+workspaces.reversed()).first {
+                $0.window?.isVisible == true && $0.root == nil && $0.remoteConnection == nil && $0.documents.isEmpty
+            }
+            let controller = existing ?? empty ?? newWorkspace()
+            if existing == nil {
+                let project = isFolder ? file : Self.projectFolder(for:file,recent:WorkspaceSession.recent())
+                // The explicit file takes priority over the saved active tab.
+                controller.openRecentProject(.local(path:project.path),restoreSavedTabs:isFolder)
+            }
+            if !isFolder { controller.open(file) { [weak controller] in controller?.revealLocalFile(file) } }
+            controller.window?.makeKeyAndOrderFront(nil)
+        }
+    }
+
     func application(_ sender: NSApplication,openFiles filenames: [String]) {
         receivedOpenFiles = true
-        let controller = workspaceForOpening()
-        filenames.forEach { controller.open(URL(fileURLWithPath:$0)) }; sender.reply(toOpenOrPrint:.success)
+        openExternal(filenames.map { URL(fileURLWithPath:$0) })
+        sender.reply(toOpenOrPrint:.success)
     }
     @objc func openInLinvell(_ pasteboard: NSPasteboard,userData: String?,error: AutoreleasingUnsafeMutablePointer<NSString?>) {
         let urls = FileDrop.urls(pasteboard)
         guard !urls.isEmpty else { return }
         receivedOpenFiles = true
-        let controller = workspaceForOpening()
-        urls.forEach { controller.open($0) }
-        controller.window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps:true)
+        openExternal(urls)
+        NSApp.activate(ignoringOtherApps:true)
     }
     func applicationShouldHandleReopen(_ sender: NSApplication,hasVisibleWindows flag: Bool) -> Bool {
         if !flag { workspaceForOpening().window?.makeKeyAndOrderFront(nil) }; return true
@@ -155,6 +199,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         if NSApp.keyWindow?.windowController is PreferencesController,action == NSStringFromSelector(#selector(WorkspaceController.closeCurrent)) {
             NSApp.keyWindow?.performClose(nil); return
         }
+        if action == NSStringFromSelector(#selector(WorkspaceController.closeWorkspaceWindow)) {
+            NSApp.keyWindow?.performClose(nil); return
+        }
+        if action == NSStringFromSelector(#selector(WorkspaceController.openWelcomeWindow)) {
+            if let welcome = workspaces.first(where:{ $0.window?.isVisible == true && $0.root == nil && $0.remoteConnection == nil && $0.documents.isEmpty }) {
+                welcome.window?.makeKeyAndOrderFront(nil)
+            } else { newWorkspace() }
+            return
+        }
         let controller = (NSApp.keyWindow?.windowController as? WorkspaceController) ?? (NSApp.keyWindow?.windowController as? PluginOwnedWindow)?.workspaceOwner ?? workspaces.last ?? newWorkspace()
         controller.perform(NSSelectorFromString(action))
     }
@@ -171,6 +224,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     @objc func about() {
         NSApp.orderFrontStandardAboutPanel(options:[.applicationName:"Linvell",.applicationVersion:UpdateManager.currentVersion,.credits:NSAttributedString(string:"Native Swift editor\nFull Vim and expanded IDE features are in development.\nlinvell.fuluwa.top")])
     }
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu.identifier?.rawValue == "Linvell.OpenRecentProjects" else { return }
+        menu.removeAllItems()
+        let locations = WorkspaceSession.recent()
+        for location in locations {
+            menu.addItem(ExplorerActions.item(location.title) { [weak self] in self?.workspaceForOpening().openRecentProject(location) })
+        }
+        if !locations.isEmpty { menu.addItem(.separator()) }
+        let clear = ExplorerActions.item("Clear Menu") { WorkspaceSession.clearRecents() }
+        menu.autoenablesItems = false
+        clear.isEnabled = !locations.isEmpty; menu.addItem(clear)
+    }
+
     private func buildMenus() {
         let bar = NSMenu(); NSApp.mainMenu = bar
         func menu(_ title: String) -> NSMenu { let item = NSMenuItem(); let m = NSMenu(title:L.text(title)); item.submenu = m; bar.addItem(item); return m }
@@ -189,12 +255,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         item(file,"New File",#selector(WorkspaceController.newFile),"n",route:true)
         let nw = NSMenuItem(title:L.text("New Window"),action:#selector(newWindow(_:)),keyEquivalent:"n"); nw.target = self; nw.keyEquivalentModifierMask = [.command,.shift]; file.addItem(nw)
         item(file,"Open…",#selector(WorkspaceController.openFile),"o",route:true)
+        let recentItem = NSMenuItem(title:L.text("Open Recent"),action:nil,keyEquivalent:"")
+        let recentMenu = NSMenu(title:recentItem.title)
+        recentMenu.identifier = NSUserInterfaceItemIdentifier("Linvell.OpenRecentProjects")
+        recentMenu.delegate = self; recentItem.submenu = recentMenu; file.addItem(recentItem)
         item(file,"Open Folder…",#selector(WorkspaceController.openFolder),route:true)
         item(file,"Open Local Folder…",#selector(WorkspaceController.openLocalFolder),route:true)
         item(file,"Open Remote Folder…",#selector(WorkspaceController.openRemoteFolder),route:true)
         item(file,"Connect to SSH Host…",#selector(WorkspaceController.connectSSH),route:true)
+        item(file,"New File in Project…",#selector(WorkspaceController.newProjectFile),route:true)
+        item(file,"New Folder in Project…",#selector(WorkspaceController.newProjectFolder),"n",[.command,.option],route:true)
         file.addItem(.separator())
         item(file,"Close File",#selector(WorkspaceController.closeCurrent),"w",route:true)
+        item(file,"Close Window",#selector(WorkspaceController.closeWorkspaceWindow),"w",[.command,.shift],route:true)
         item(file,"Save",#selector(WorkspaceController.save),"s",route:true)
         item(file,"Save As…",#selector(WorkspaceController.saveAs),"s",[.command,.shift],route:true)
         item(file,"Save All",#selector(WorkspaceController.saveAll),"s",[.command,.option],route:true)
@@ -259,6 +332,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         item(view,"Command Palette",#selector(WorkspaceController.commandPalette),"p",[.command,.shift],route:true)
         item(view,"Open Quickly…",#selector(WorkspaceController.quickOpen),"p",route:true)
         item(view,"Go to Line…",#selector(WorkspaceController.promptGoToLine),"l",route:true)
+        item(view,"Explorer",#selector(WorkspaceController.showExplorer),"e",[.command,.shift],route:true)
+        item(view,"Refresh Explorer",#selector(WorkspaceController.refreshFiles),"r",[.command,.shift],route:true)
+        item(view,"Select Next Tab",#selector(WorkspaceController.selectNextTab),"\t",[.control],route:true)
+        item(view,"Select Previous Tab",#selector(WorkspaceController.selectPreviousTab),"\t",[.control,.shift],route:true)
+        item(view,"Select Next Tab",#selector(WorkspaceController.selectNextTab),"]",[.command,.shift],route:true)
+        view.items.last?.isHidden = true; view.items.last?.allowsKeyEquivalentWhenHidden = true
+        item(view,"Select Previous Tab",#selector(WorkspaceController.selectPreviousTab),"[",[.command,.shift],route:true)
+        view.items.last?.isHidden = true; view.items.last?.allowsKeyEquivalentWhenHidden = true
         item(view,"Filter Files",#selector(WorkspaceController.focusFileFilter),"j",[.command,.option],route:true)
         item(view,"Go to Symbol…",#selector(WorkspaceController.documentSymbols),"o",[.command,.shift],route:true)
         item(view,"Toggle Preview",#selector(WorkspaceController.toggleMarkdownPreview),"v",[.command,.shift],route:true)
@@ -270,6 +351,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         item(view,"Run & Preview",#selector(WorkspaceController.runWorkspace),"b",[.command,.shift],route:true)
         view.addItem(.separator())
         item(view,"Toggle Sidebar",#selector(WorkspaceController.toggleSidebar),"b",route:true)
+        item(view,"Toggle Sidebar",#selector(WorkspaceController.toggleSidebar),"s",[.command,.control],route:true)
+        view.items.last?.isHidden = true; view.items.last?.allowsKeyEquivalentWhenHidden = true
+        item(view,"Welcome Window",#selector(WorkspaceController.openWelcomeWindow),"1",[.command,.shift],route:true)
         item(view,"Split Editor",#selector(WorkspaceController.toggleSplit),"\\",route:true)
         item(view,"Toggle Terminal",#selector(WorkspaceController.toggleTerminal),"`",[.control],route:true)
         item(view,"Toggle Word Wrap",#selector(WorkspaceController.toggleWordWrap),"z",[.option],route:true)

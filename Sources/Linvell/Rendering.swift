@@ -23,6 +23,16 @@ class ResponsiveTableView: NSTableView {
 class ResponsiveOutlineView: NSOutlineView {
     override class var isCompatibleWithResponsiveScrolling: Bool { true }
     override init(frame: NSRect) { super.init(frame:frame); wantsLayer = true; usesAutomaticRowHeights = false }
+    var renameSelected: (() -> Bool)?
+    var openSelected: (() -> Bool)?
+    var trashSelected: (() -> Bool)?
+    override func keyDown(with event: NSEvent) {
+        let flags = event.modifierFlags.intersection([.shift,.control,.command,.option])
+        if event.keyCode == 36,flags.isEmpty,renameSelected?() == true { return }
+        if (event.keyCode == 76 && flags.isEmpty || event.keyCode == 36 && flags == .command),openSelected?() == true { return }
+        if event.keyCode == 51,flags == .command,trashSelected?() == true { return }
+        super.keyDown(with:event)
+    }
     required init?(coder: NSCoder) { fatalError() }
 }
 

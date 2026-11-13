@@ -1,12 +1,40 @@
 import AppKit
 import LinvellCore
 
+struct EditorIndentation {
+    let width: Int
+    let usesTabs: Bool
+    var unit: String { usesTabs ? "\t" : String(repeating:" ",count:width) }
+    static var preference: EditorIndentation {
+        EditorIndentation(width:max(1,Int(PreferencesSync.value("tabWidth")) ?? 4),usesTabs:PreferencesSync.value("useSpaces") != "true")
+    }
+    static func detect(_ text: String) -> EditorIndentation? {
+        let fallback = preference
+        var tabs = 0,spaces = 0,previous = 0
+        var steps: [Int:Int] = [:]
+        for line in text.split(separator:"\n",maxSplits:2000).prefix(2000) {
+            let leading = line.prefix { $0 == " " || $0 == "\t" }
+            guard leading.count < line.count else { continue }
+            if leading.first == "\t" { tabs += 1 }
+            if leading.first == " " { spaces += 1 }
+            let step = leading.count-previous
+            if [2,4,8].contains(step) { steps[step,default:0] += 1 }
+            previous = leading.count
+        }
+        if tabs > spaces { return EditorIndentation(width:fallback.width,usesTabs:true) }
+        guard spaces > 0 else { return nil }
+        let width = [2,4,8].max { steps[$0,default:0] < steps[$1,default:0] } ?? fallback.width
+        return EditorIndentation(width:steps[width,default:0] > 0 ? width : fallback.width,usesTabs:false)
+    }
+}
+
 final class OpenDocument: NSObject, NSTextStorageDelegate {
     let buffer: DocumentBuffer
     let storage = NSTextStorage()
     let vim = VimEngine()
     let lines: LineIndex
     let syntax = EditorSyntaxState()
+    var detectedIndentation: EditorIndentation?
     var previewURL: URL?
     var codeDiagnostics: [CodeDiagnostic] = []
     var markdownPreview = false
@@ -20,7 +48,7 @@ final class OpenDocument: NSObject, NSTextStorageDelegate {
     var isHTML: Bool { ["html","htm"].contains(fileURL?.pathExtension.lowercased() ?? "") }
     var supportsPreview: Bool { isMarkdown || isHTML }
     init(_ buffer: DocumentBuffer,lines: LineIndex? = nil) {
-        self.buffer = buffer; self.lines = lines ?? LineIndex(buffer.text); previewURL = nil; super.init()
+        self.buffer = buffer; self.lines = lines ?? LineIndex(buffer.text); previewURL = nil; detectedIndentation = buffer.url == nil ? nil : EditorIndentation.detect(buffer.text); super.init()
         storage.setAttributedString(NSAttributedString(string:buffer.text)); storage.delegate = self
     }
     init(previewURL: URL) {
@@ -66,6 +94,7 @@ final class EditorTextView: NSTextView {
     var hoverWork: DispatchWorkItem?
     var codeTracking: NSTrackingArea?
     var document: OpenDocument?
+    var indentation: EditorIndentation { document?.detectedIndentation ?? .preference }
     var vimEnabled = false
     var statusChanged: (() -> Void)?
     var pluginSnippet: PluginSnippetCursor?
@@ -206,7 +235,7 @@ final class EditorTextView: NSTextView {
         let visible = rect.offsetBy(dx:-origin.x,dy:-origin.y)
         let glyphs = manager.glyphRange(forBoundingRect:visible,in:container)
         let text = string as NSString
-        let tab = max(1,Int(PreferencesSync.value("tabWidth")) ?? 4)
+        let tab = indentation.width
         let advance = (" " as NSString).size(withAttributes:[.font:Theme.editorFont]).width
         Theme.secondary.withAlphaComponent(0.22).setFill()
         manager.enumerateLineFragments(forGlyphRange:glyphs) { fragment,_,_,range,_ in
@@ -279,7 +308,7 @@ final class EditorTextView: NSTextView {
             let selection = replacementRange.location == NSNotFound ? selectedRange() : replacementRange
             let start = document?.lines.starts[document!.lines.line(at:selection.location)] ?? 0
             let prefix = (string as NSString).substring(with:NSRange(location:start,length:selection.location-start))
-            let unit = PreferencesSync.value("useSpaces") == "true" ? String(repeating:" ",count:max(1,Int(PreferencesSync.value("tabWidth")) ?? 4)) : "\t"
+            let unit = indentation.unit
             if selection.length == 0,prefix.hasSuffix(unit),prefix.allSatisfy({ $0 == " " || $0 == "\t" }) {
                 super.insertText(String(prefix.dropLast(unit.count))+value,replacementRange:NSRange(location:start,length:selection.location-start)); return
             }
@@ -343,15 +372,17 @@ final class EditorTextView: NSTextView {
     }
     override func insertTab(_ sender: Any?) {
         if editingSelections.count > 1,!hasMarkedText() {
-            performMultiEdit(editingSelections,replacement:PreferencesSync.value("useSpaces") == "true" ? String(repeating:" ",count:Int(PreferencesSync.value("tabWidth")) ?? 4) : "\t"); return
+            performMultiEdit(editingSelections,replacement:indentation.unit); return
         }
-        if PreferencesSync.value("useSpaces") == "true" {
-            let width = Int(PreferencesSync.value("tabWidth")) ?? 4
+        if selectedRange().length > 0,!hasMarkedText() { indentLines(sender); return }
+        if !indentation.usesTabs {
+            let width = indentation.width
             let offset = selectedRange().location,start = document.map { $0.lines.starts[$0.lines.line(at:offset)] } ?? 0
             let column = (string as NSString).substring(with:NSRange(location:start,length:offset-start)).count
             insertText(String(repeating:" ",count:width-column%width),replacementRange:selectedRange())
         } else { super.insertTab(sender) }
     }
+    override func insertBacktab(_ sender: Any?) { if hasMarkedText() { super.insertBacktab(sender) } else { outdentLines(sender) } }
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 { pluginSnippet = nil }
         if let snippet = pluginSnippet { let range = selectedRange(); if range.location < snippet.current.location || NSMaxRange(range) > NSMaxRange(snippet.current) { pluginSnippet = nil } }
@@ -533,7 +564,7 @@ final class EditorPane: NSView, NSTextViewDelegate {
     func updateFont() {
         textView.font = Theme.editorFont
         let paragraph = NSMutableParagraphStyle(); paragraph.minimumLineHeight = ceil(Theme.fontSize*1.45)
-        paragraph.defaultTabInterval = Theme.editorFont.maximumAdvancement.width*CGFloat(Int(PreferencesSync.value("tabWidth")) ?? 4)
+        paragraph.defaultTabInterval = Theme.editorFont.maximumAdvancement.width*CGFloat(textView.indentation.width)
         paragraph.tabStops = []; textView.defaultParagraphStyle = paragraph
         document.storage.addAttribute(.paragraphStyle,value:paragraph,range:NSRange(location:0,length:document.storage.length))
         textView.typingAttributes[.paragraphStyle] = paragraph; gutter.needsDisplay = true

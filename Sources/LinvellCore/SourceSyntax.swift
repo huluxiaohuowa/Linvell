@@ -163,6 +163,18 @@ public enum SourceSyntax {
         return result
     }
 
+    public static func commentDelimiters(for path: String) -> (open: String,close: String?) {
+        let url = URL(fileURLWithPath:path)
+        if let language = SilicaLanguage(url:url) {
+            if let block = language.blockComment { return (block.open,block.close) }
+            if let line = language.lineComment { return (line,nil) }
+        }
+        let name = url.pathExtension.lowercased()
+        if hashComments(name) { return ("#",nil) }
+        if dashComments(name) { return ("--",nil) }
+        return ("//",nil)
+    }
+
     public static func fencedHighlights(_ code: String,language: String) -> [SourceToken] {
         if let grammar = SilicaLanguage(fenceName:language)?.grammar {
             return highlights(grammar,text:code as NSString,cancelled:{ false })

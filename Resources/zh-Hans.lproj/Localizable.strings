@@ -1495,3 +1495,24 @@
 "Moved to remote Trash: %@" = "已移到远程废纸篓：%@";
 "Remote item renamed." = "远程项目已重命名。";
 "Move to Trash" = "移到废纸篓";
+
+"New File in Project…" = "在项目中新建文件…";
+"New Folder in Project…" = "在项目中新建文件夹…";
+"Duplicate" = "复制一份";
+"Copy Relative Path" = "复制相对路径";
+"New remote folder" = "新建远程文件夹";
+"Enter a single file or folder name." = "请输入单个文件或文件夹名称。";
+"Open Recent" = "打开最近项目";
+"Clear Menu" = "清空菜单";
+"Remove from Recents" = "从最近项目中移除";
+"Clear" = "清空";
+"Select Next Tab" = "切换到下一个标签页";
+"Select Previous Tab" = "切换到上一个标签页";
+"Refresh Explorer" = "刷新文件浏览器";
+"Welcome Window" = "欢迎窗口";
+"Restore project tabs" = "恢复项目标签页";
+"Pin parent folders while scrolling" = "滚动文件树时固定父文件夹";
+"Follow macOS light and dark appearance" = "跟随 macOS 的浅色和深色外观";
+"Search files by name or file:line" = "按文件名或文件名:行号搜索";
+"Match case" = "区分大小写";
+"%@ matches" = "%@ 条匹配";

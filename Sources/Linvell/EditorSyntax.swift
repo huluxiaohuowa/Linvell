@@ -128,7 +128,7 @@ extension EditorPane {
 extension EditorTextView {
     func insertIndentedNewline(_ sender: Any?) {
         guard !hasMarkedText() else { super.insertNewline(sender); return }
-        let unit = PreferencesSync.value("useSpaces") == "true" ? String(repeating:" ",count:max(1,Int(PreferencesSync.value("tabWidth")) ?? 4)) : "\t"
+        let unit = indentation.unit
         let source = string,path = document?.remote?.path ?? document?.fileURL?.path ?? ""
         let selections = editingSelections
         func insertion(_ range: NSRange) -> (String,Int) {

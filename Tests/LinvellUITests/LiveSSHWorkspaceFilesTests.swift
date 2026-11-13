@@ -55,14 +55,40 @@ final class LiveSSHWorkspaceFilesTests: XCTestCase {
         XCTAssertEqual(search.results.first?.detail,"nested/child/note.swift:2")
         search.table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false)
         search.selected()
+        XCTAssertEqual(search.table.numberOfRows,1)
+        search.table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false); search.selected()
+        XCTAssertEqual(search.table.numberOfRows,2)
+        search.table.selectRowIndexes(IndexSet(integer:1),byExtendingSelection:false); search.selected()
         let original = root+"/nested/child/note.swift"
         wait("Clicking the result opens the source and navigates to line 2") {
-            workspace.current?.remote?.path == original && workspace.activePane?.textView.selectedRange().location == 11
+            workspace.current?.remote?.path == original && workspace.activePane?.textView.selectedRange() == (workspace.current?.storage.string as NSString?)?.range(of:"Straße NEEDLE [.*]")
         }
         let doc = try XCTUnwrap(workspace.current)
         wait("Silica rules run on remote file contents") {
             doc.syntax.analysis.tokens.contains { $0.kind == .string } && doc.syntax.analysis.tokens.contains { $0.kind == .comment }
         }
+
+        search.caseToggle.state = .on; search.refresh()
+        wait("Exact-case search does not return folded matches") { search.results.isEmpty }
+        let rootListing = try remote.request("quick-files",path:root)
+        XCTAssertFalse(rootListing.entries?.contains { $0.name == "loose.skip" } == true)
+        XCTAssertTrue(rootListing.entries?.contains { $0.name == "tracked.skip" } == true)
+        tree.filter.stringValue = "LOOSE"
+        tree.controlTextDidChange(Notification(name:NSControl.textDidChangeNotification,object:tree.filter))
+        wait("Remote explorer filters and retains Git ignore state") {
+            (tree.table.item(atRow:0) as? RemoteTreeNode)?.isIgnored == true
+        }
+        let copy = try XCTUnwrap(remote.request("duplicate",path:original,repositoryRoot:root).path)
+        let secondCopy = try XCTUnwrap(remote.request("duplicate",path:original,repositoryRoot:root).path)
+        XCTAssertTrue(copy.hasSuffix("note copy.swift"))
+        XCTAssertTrue(secondCopy.hasSuffix("note copy 2.swift"))
+        XCTAssertEqual(try remote.request("read",path:copy).content,try remote.request("read",path:original).content)
+        let newFolder = root+"/new project folder"
+        _ = try remote.request("mkdir",path:newFolder,repositoryRoot:root)
+        _ = try remote.request("create",path:newFolder+"/child.txt",repositoryRoot:root)
+        let copiedFolder = try XCTUnwrap(remote.request("duplicate",path:newFolder,repositoryRoot:root).path)
+        XCTAssertEqual(try remote.request("read",path:copiedFolder+"/child.txt").content,"")
+        XCTAssertThrowsError(try remote.request("mkdir",path:newFolder,repositoryRoot:root))
 
         func mutate(_ path: String,name: String?) throws -> String {
             var outcome: Result<String,Error>?
@@ -81,6 +107,8 @@ final class LiveSSHWorkspaceFilesTests: XCTestCase {
         let updated = "let updated = true\n"
         defaults.set("true",forKey:"autoSave")
         try doc.buffer.replace(NSRange(location:0,length:doc.buffer.text.utf16.count),with:updated)
+        search.query.stringValue = "updated"; search.refresh()
+        wait("Search sees unsaved SSH edits") { search.results.first?.url.path == movedFile }
         workspace.scheduleAutoSave(doc)
         wait("The existing editor buffer saves at the renamed remote path") { !doc.buffer.isModified }
         let savedRemote = try remote.request("read",path:movedFile)

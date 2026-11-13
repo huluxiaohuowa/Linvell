@@ -20,6 +20,16 @@ enum WorkspaceSession: Codable, Equatable {
         if let data = try? JSONEncoder().encode(Array(locations.prefix(12))) { defaults.set(data,forKey:recentKey) }
         NotificationCenter.default.post(name:changed,object:nil)
     }
+    static func removeRecent(_ location: Self,defaults: UserDefaults = .standard) {
+        storeRecents(recent(defaults:defaults).filter { $0 != location },defaults:defaults)
+    }
+    static func clearRecents(defaults: UserDefaults = .standard) {
+        storeRecents([],defaults:defaults)
+    }
+    private static func storeRecents(_ locations: [Self],defaults: UserDefaults) {
+        if let data = try? JSONEncoder().encode(locations) { defaults.set(data,forKey:recentKey) }
+        NotificationCenter.default.post(name:changed,object:nil)
+    }
     static func recent(defaults: UserDefaults = .standard) -> [Self] {
         if let data = defaults.data(forKey:recentKey),let values = try? JSONDecoder().decode([Self].self,from:data) { return Array(values.prefix(12)) }
         return load(defaults:defaults).map { [$0] } ?? []

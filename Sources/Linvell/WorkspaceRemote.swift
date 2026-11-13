@@ -3,18 +3,35 @@ import LinvellCore
 
 extension WorkspaceController {
     func quickOpenRemote(_ connection: SSHRemote) {
+        if let picker,picker.window?.sheetParent != nil,picker.goToCurrentLine != nil {
+            picker.dismiss(); self.picker = nil; return
+        }
         let directory = remoteDirectory
         status.stringValue = L.text("Indexing remote files…")
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
-            let result = Result { try connection.request("files",path:directory) }
+            let result = Result { try connection.request("quick-files",path:directory) }
             DispatchQueue.main.async {
-                guard let self,let window = self.window else { return }
+                guard let self,self.window != nil else { return }
                 switch result {
                 case .success(let reply):
-                    let options = (reply.entries ?? []).map { entry in
-                        PickerOption(title:(entry.name as NSString).lastPathComponent,detail:entry.name,invoke:{ [weak self] in self?.openRemote(entry.path,connection:connection) })
+                    guard self.remoteConnection?.host == connection.host,self.remoteDirectory == directory else { return }
+                    let indexed = (reply.entries ?? []).map { ($0.path,$0.name) }
+                    let paths = Set(indexed.map { $0.0 })
+                    let openPaths = Set(self.documents.compactMap { $0.remote?.connection.host == connection.host ? $0.remote?.path : nil })
+                    let recent = self.recentQuickFiles.compactMap { location -> (String,String)? in
+                        guard case .ssh(let host,let path) = location,host == connection.host,
+                              paths.contains(path) || openPaths.contains(path),
+                              let relative = ExplorerActions.relative(path,under:directory) else { return nil }
+                        return (path,relative)
                     }
-                    self.picker = QuickPicker(title:L.text("Search remote files by name"),options:options,owner:window,compact:true)
+                    var seen = Set<String>()
+                    let files = (recent+indexed).filter { seen.insert($0.0).inserted }
+                    let options = files.map { path,name in
+                        var option = PickerOption(title:(name as NSString).lastPathComponent,detail:name,fileURL:URL(fileURLWithPath:path),invoke:{ [weak self] in self?.openRemote(path,connection:connection) })
+                        option.openAtLine = { [weak self] line in self?.openRemote(path,connection:connection) { [weak self] in self?.goToLine(line) } }
+                        return option
+                    }
+                    self.presentQuickFiles(options)
                 case .failure(let error): self.show(error)
                 }
             }
@@ -126,6 +143,11 @@ extension WorkspaceController {
                 for pane in self.panes where affected.contains(where:{ $0 === pane.document }) && trash { pane.textView.isEditable = true }
                 switch result {
                 case .success(let destination):
+                    self.recentQuickFiles = self.recentQuickFiles.compactMap { location in
+                        guard case .ssh(let host,let old) = location,host == connection.host,
+                              self.containsRemotePath(old,under:path) else { return location }
+                        return trash ? nil : .ssh(host:host,path:destination+String(old.dropFirst(path.count)))
+                    }
                     if trash {
                         affected.filter { document in self.documents.contains { $0 === document } }.forEach { self.closeDocument($0) }
                         self.status.stringValue = L.format("Moved to remote Trash: %@",destination)
@@ -149,7 +171,10 @@ extension WorkspaceController {
                         self.status.stringValue = L.text("Remote item renamed.")
                     }
                     if self.remoteConnection?.host == connection.host,self.remoteDirectory == directory {
-                        self.remoteBrowser?.refreshDirectories([(path as NSString).deletingLastPathComponent])
+                        if let browser = self.remoteBrowser {
+                            browser.refreshDirectories([(path as NSString).deletingLastPathComponent])
+                            if !browser.filter.stringValue.isEmpty { browser.updateFilter() }
+                        }
                     }
                     if let search = self.sidebar.subviews.first(where:{ $0 is ToolSidebar }) as? ToolSidebar,
                        self.remoteConnection?.host == connection.host,self.remoteDirectory == directory { search.refresh() }

@@ -21,6 +21,15 @@ enum Theme {
         case gruvboxDark = "Gruvbox Dark"
         case solarizedDark = "Solarized Dark"
 
+        func matching(dark: Bool) -> Profile {
+            let pairs: [(Profile,Profile)] = [(.light,.dark),(.oneLight,.oneDark),(.githubLight,.githubDark),
+                (.xcodeLight,.xcodeDark),(.solarized,.solarizedDark),(.catppuccinLatte,.catppuccinMocha),
+                (.gruvboxLight,.gruvboxDark),(.tokyoNightDay,.tokyoNight),(.rosePineDawn,.rosePine),(.alucard,.dracula)]
+            if let pair = pairs.first(where:{ $0.0 == self || $0.1 == self }) { return dark ? pair.1 : pair.0 }
+            if isDark == dark { return self }
+            return dark ? .dark : .light
+        }
+
         var isDark: Bool {
             switch self {
             case .light, .solarized, .catppuccinLatte, .tokyoNightDay, .rosePineDawn, .alucard, .seaGlass, .oneLight, .githubLight, .xcodeLight, .gruvboxLight: return false
@@ -62,7 +71,12 @@ enum Theme {
     static var isDark: Bool { pluginTheme?.1.isDark ?? profile.isDark }
     static var palette: [UInt32] { pluginPalette ?? profile.colors }
     static var profile: Profile {
-        get { Profile(rawValue:UserDefaults.standard.string(forKey:"theme") ?? "") ?? .dark }
+        get {
+            let selected = Profile(rawValue:UserDefaults.standard.string(forKey:"theme") ?? "") ?? .dark
+            guard UserDefaults.standard.bool(forKey:"followSystemTheme") else { return selected }
+            let dark = NSApp?.effectiveAppearance.bestMatch(from:[.aqua,.darkAqua]) == .darkAqua
+            return selected.matching(dark:dark)
+        }
         set { pluginTheme = nil; UserDefaults.standard.set(newValue.rawValue,forKey:"theme") }
     }
     static func selectProfile(_ value: Profile,store: PluginStore) {

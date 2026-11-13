@@ -58,6 +58,10 @@ public struct RemoteTextMatch: Decodable {
     public let relative: String
     public let line: Int
     public let text: String
+    public let column: Int
+    public let length: Int
+    public let previewColumn: Int
+    public let previewLength: Int
 }
 public struct RemoteReply: Decodable {
     public let matches: [RemoteTextMatch]?
@@ -118,11 +122,11 @@ public struct SSHRemote {
         guard let line = result.output.components(separatedBy:.newlines).last(where:{ $0.hasPrefix("LINVELL_JSON:") }) else { throw GitError.command("The remote host needs Python 3 to browse and edit files. Open its SSH terminal to check authentication and Python availability.") }
         let reply = try JSONDecoder().decode(RemoteReply.self,from:Data(line.dropFirst("LINVELL_JSON:".count).utf8))
         if let error = reply.error { throw GitError.command(error) }
-        if ["create","settings-write","rename","trash"].contains(operation) { RemoteDirectoryCache.shared.invalidate(host:host) }
+        if ["create","mkdir","duplicate","settings-write","rename","trash"].contains(operation) { RemoteDirectoryCache.shared.invalidate(host:host) }
         return reply
     }
-    public func searchText(_ query: String,directory: String) throws -> RemoteReply {
-        try request("search-text",path:directory,content:Data(query.utf8))
+    public func searchText(_ query: String,directory: String,caseSensitive: Bool = false) throws -> RemoteReply {
+        try request("search-text",path:directory,content:Data(query.utf8),digest:caseSensitive ? "exact" : nil)
     }
     public func renameItem(at path: String,to name: String,in directory: String) throws -> String {
         let result = try request("rename",path:path,content:Data(name.utf8),repositoryRoot:directory)
@@ -191,6 +195,14 @@ def workspace_item(path,root):
     os.lstat(target)
     return target
 
+def new_workspace_item(path,root):
+    root=os.path.realpath(os.path.expanduser(root))
+    parent=os.path.dirname(path)
+    if parent!=root: workspace_item(parent,root)
+    if parent!=os.path.realpath(parent) or os.path.basename(path) in ('','.git','.','..'):
+        raise ValueError('Choose a file or folder inside the remote workspace.')
+    return path
+
 def trash_item(path):
     import datetime,urllib.parse,uuid
     home=os.path.expanduser('~')
@@ -255,33 +267,63 @@ def trash_item(path):
             raise
     raise ValueError('Could not reserve a name in the remote Trash.')
 
-def search_text(path,query):
-    import time
-    if not query or len(query)>4096: raise ValueError('Enter between 1 and 4,096 characters to search.')
-    matches=[]
+def project_files(path):
+    import subprocess
+    try:
+        result=subprocess.run(['git','--no-optional-locks','-c','core.fsmonitor=false','-C',path,'ls-files','-z','--cached','--others','--exclude-standard','--','.'],
+                              stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=5)
+        if result.returncode==0 and len(result.stdout)<=16*1024*1024:
+            for name in dict.fromkeys(result.stdout.split(b'\0')):
+                if name: yield os.path.join(path,os.fsdecode(name))
+            return
+    except (OSError,subprocess.TimeoutExpired): pass
     excluded={'.git','node_modules','dist','build','.build','DerivedData','vendor','__pycache__','.venv'}
-    deadline=time.monotonic()+20
-    scanned=0
     for base,dirs,names in os.walk(path,followlinks=False):
         dirs[:]=sorted(name for name in dirs if name not in excluded and not os.path.islink(os.path.join(base,name)))
         for name in sorted(names):
-            if name=='.git': continue
-            if scanned>=20000 or time.monotonic()>=deadline: return matches,True
-            scanned+=1
-            full=os.path.join(base,name)
-            try:
-                fd=os.open(full,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
-                with os.fdopen(fd,'rb') as source:
-                    entry=os.fstat(source.fileno())
-                    if not stat.S_ISREG(entry.st_mode) or entry.st_size>=2000000: continue
-                    data=source.read(2000000)
-                if len(data)>=2000000 or b'\0' in data: continue
-                content=data.decode('utf-8')
-            except (OSError,UnicodeError): continue
-            for i,line in enumerate(content.replace('\r\n','\n').replace('\r','\n').split('\n'),1):
-                if query in line.casefold():
-                    matches.append(dict(path=full,relative=os.path.relpath(full,path),line=i,text=line.strip()[:160]))
-                    if len(matches)>=500: return matches,True
+            if name!='.git': yield os.path.join(base,name)
+
+def search_text(path,query,exact):
+    import time
+    if not query or len(query)>4096: raise ValueError('Enter between 1 and 4,096 characters to search.')
+    matches=[]
+    if not exact: query=query.casefold()
+    deadline=time.monotonic()+20
+    for scanned,full in enumerate(project_files(path)):
+        if scanned>=20000 or time.monotonic()>=deadline: return matches,True
+        if os.path.realpath(os.path.dirname(full))!=os.path.dirname(full): continue
+        try:
+            fd=os.open(full,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+            with os.fdopen(fd,'rb') as source:
+                entry=os.fstat(source.fileno())
+                if not stat.S_ISREG(entry.st_mode) or entry.st_size>=2000000: continue
+                data=source.read(2000000)
+            if len(data)>=2000000 or b'\0' in data: continue
+            content=data.decode('utf-8-sig')
+        except (OSError,UnicodeError): continue
+        for i,line in enumerate(content.replace('\r\n','\n').replace('\r','\n').split('\n'),1):
+            searchable=line if exact else line.casefold()
+            start=searchable.find(query)
+            if start<0: continue
+            mapping=None
+            if len(searchable)!=len(line):
+                mapping=[index for index,ch in enumerate(line) for _ in ch.casefold()]
+            def units(value): return len(value.encode('utf-16-le'))//2
+            while start>=0:
+                end=start+len(query)
+                a,b=(start,end) if mapping is None else (mapping[start],mapping[end-1]+1)
+                preview_start=max(len(line)-len(line.lstrip()) if line[:a].isspace() else 0,a-20)
+                preview_start=min(preview_start,a)
+                lead='…' if preview_start>0 and line[:preview_start].strip() else ''
+                preview=line[preview_start:preview_start+160]
+                matches.append(dict(path=full,relative=os.path.relpath(full,path),line=i,text=lead+preview,
+                                    column=units(line[:a]),length=units(line[a:b]),
+                                    previewColumn=units(lead+line[preview_start:a]),
+                                    previewLength=units(line[a:min(b,preview_start+160)])))
+                if len(matches)>=2000: return matches,True
+                next_start=end
+                while mapping is not None and next_start<len(mapping) and mapping[next_start]<b: next_start+=1
+                start=searchable.find(query,next_start)
     return matches,False
 try:
     req=json.load(sys.stdin)
@@ -299,9 +341,34 @@ try:
     elif op=='search-text':
         path=os.path.realpath(path)
         if not os.path.isdir(path): raise ValueError('Open a remote project folder to search.')
-        query=base64.b64decode(req['content'],validate=True).decode('utf-8').casefold()
-        matches,truncated=search_text(path,query)
+        query=base64.b64decode(req['content'],validate=True).decode('utf-8')
+        matches,truncated=search_text(path,query,req.get('digest')=='exact')
         reply=dict(path=path,matches=matches,truncated=truncated)
+    elif op=='duplicate':
+        import shutil
+        source=workspace_item(path,req['repositoryRoot'])
+        name=os.path.basename(source)
+        mode=os.lstat(source).st_mode
+        folder=stat.S_ISDIR(mode)
+        if not (folder or stat.S_ISREG(mode) or stat.S_ISLNK(mode)):
+            raise ValueError('Only regular files, folders and symbolic links can be duplicated.')
+        stem,ext=(name,'') if folder else os.path.splitext(name)
+        # Stage next to the source and publish only when the copy is complete.
+        parent=os.path.dirname(source)
+        with tempfile.TemporaryDirectory(prefix='.linvell-copy-',dir=parent) as staging:
+            copy=os.path.join(staging,'item')
+            if folder: shutil.copytree(source,copy,symlinks=True)
+            else: shutil.copy2(source,copy,follow_symlinks=False)
+            for i in range(1,1001):
+                destination=os.path.join(parent,stem+(' copy' if i==1 else ' copy '+str(i))+ext)
+                try: exclusive_move(copy,destination); break
+                except FileExistsError: continue
+            else: raise FileExistsError('Could not find an available name for the copy.')
+        reply=dict(path=destination)
+    elif op=='mkdir':
+        path=new_workspace_item(path,req['repositoryRoot'])
+        os.mkdir(path)
+        reply=dict(path=path)
     elif op in ('rename','trash'):
         path=workspace_item(path,req['repositoryRoot'])
         if op=='rename':
@@ -335,6 +402,32 @@ try:
             try: values.append(os.stat(filename).st_mtime)
             except FileNotFoundError: pass
         reply=dict(digest=str(max(values,default=0)))
+    elif op=='filter-files':
+        query=base64.b64decode(req['content'],validate=True).decode('utf-8').casefold()
+        entries=[]
+        for base,dirs,names in os.walk(path,followlinks=False):
+            dirs[:]=[name for name in dirs if name!='.git']
+            for name in dirs+names:
+                if name=='.git': continue
+                full=os.path.join(base,name)
+                relative=os.path.relpath(full,path)
+                if query in relative.casefold():
+                    entries.append(dict(name=relative,path=full,directory=os.path.isdir(full)))
+                    if len(entries)>=500: break
+            if len(entries)>=500: break
+        ignored_entries(path,entries)
+        reply=dict(path=path,entries=entries)
+    elif op=='quick-files':
+        path=os.path.realpath(path)
+        entries=[]
+        for full in project_files(path):
+            if os.path.realpath(os.path.dirname(full))!=os.path.dirname(full): continue
+            try: entry=os.lstat(full)
+            except OSError: continue
+            if not stat.S_ISREG(entry.st_mode): continue
+            entries.append(dict(name=os.path.relpath(full,path),path=full,directory=False))
+            if len(entries)>=20000: break
+        reply=dict(path=path,entries=entries)
     elif op=='files':
         entries=[]
         excluded={'.git','node_modules','dist','build','.build','DerivedData','vendor','__pycache__','.venv'}
@@ -465,6 +558,7 @@ try:
         if os.path.isfile(os.path.join(path,'Makefile')): tasks.append(dict(label='Make',command='make'))
         reply=dict(path=path,tasks=tasks)
     elif op=='create':
+        if req.get('repositoryRoot'): path=new_workspace_item(path,req['repositoryRoot'])
         with open(path,'xb') as f: pass
         reply=dict(path=path,digest=digest(b''))
     elif op=='review-blob':

@@ -12,8 +12,46 @@ extension WorkspaceController: NSMenuDelegate {
         }
         if let node {
             menu.addItem(.separator())
+            if !node.isDirectory {
+                menu.addItem(ExplorerActions.item("Open") { [weak self] in self?.open(node.url) })
+            }
+            menu.addItem(ExplorerActions.item("Duplicate") { [weak self] in self?.duplicateExplorerItem(node) })
             addExplorerItem("Rename…",action:#selector(renameExplorerItem(_:)),node:node,to:menu)
             addExplorerItem("Move to Trash…",action:#selector(trashExplorerItem(_:)),node:node,to:menu)
+            menu.addItem(.separator())
+            for item in ExplorerActions.pathItems(node.url.path,relative:ExplorerActions.relative(node.url.path,under:root?.url.path),reveal:node.url) { menu.addItem(item) }
+        }
+    }
+
+    @objc func newProjectFile() { newProjectItem(directory:false) }
+    @objc func newProjectFolder() { newProjectItem(directory:true) }
+
+    private func newProjectItem(directory: Bool) {
+        if remoteConnection != nil {
+            showExplorer()
+            remoteBrowser?.promptCreate(directory:directory)
+        } else if root != nil {
+            let sender = NSMenuItem()
+            sender.representedObject = outline.item(atRow:outline.selectedRow)
+            createExplorerItem(sender,directory:directory)
+        }
+    }
+
+    func duplicateExplorerItem(_ node: FileNode) {
+        DispatchQueue.global(qos:.userInitiated).async { [weak self] in
+            let result = Result { try ExplorerActions.duplicate(node.url,directory:node.isDirectory) }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .success(let url):
+                    self.refreshExplorerDirectory(url.deletingLastPathComponent())
+                    if let row = (0..<self.outline.numberOfRows).first(where:{ (self.outline.item(atRow:$0) as? FileNode)?.url == url }) {
+                        self.outline.selectRowIndexes(IndexSet(integer:row),byExtendingSelection:false)
+                        self.outline.scrollRowToVisible(row)
+                    }
+                case .failure(let error): self.show(error)
+                }
+            }
         }
     }
 
@@ -57,6 +95,12 @@ extension WorkspaceController: NSMenuDelegate {
             do {
                 let oldCode = affected.compactMap { self.codeSnapshot($0,forClosing:true) }
                 try FileManager.default.moveItem(at:original,to:target)
+                self.recentQuickFiles = self.recentQuickFiles.map { location in
+                    guard case .local(let path) = location else { return location }
+                    if path == original.path { return .local(path:target.path) }
+                    guard let relative = ExplorerActions.relative(path,under:original.path) else { return location }
+                    return .local(path:target.appendingPathComponent(relative).path)
+                }
                 oldCode.forEach { self.languageServices.close($0) }
                 for document in affected {
                     if let preview = document.previewURL {
@@ -69,6 +113,21 @@ extension WorkspaceController: NSMenuDelegate {
                 self.refreshExplorerDirectory(folder)
             } catch { self.show(error) }
         }
+    }
+
+    func renameSelectedExplorerItem() -> Bool {
+        guard let node = outline.item(atRow:outline.selectedRow) as? FileNode else { return false }
+        let sender = NSMenuItem()
+        sender.representedObject = node
+        renameExplorerItem(sender)
+        return true
+    }
+    func trashSelectedExplorerItem() -> Bool {
+        guard let node = outline.item(atRow:outline.selectedRow) as? FileNode else { return false }
+        let sender = NSMenuItem()
+        sender.representedObject = node
+        trashExplorerItem(sender)
+        return true
     }
 
     @objc private func trashExplorerItem(_ sender: NSMenuItem) {
@@ -124,6 +183,10 @@ extension WorkspaceController: NSMenuDelegate {
     }
 
     private func refreshExplorerDirectory(_ folder: URL) {
+        if let project = root {
+            updateIgnoredFiles(for:project)
+            indexProjectFiles(project)
+        }
         if let root, root.url == folder {
             updateExternalDirectory(root,children:FileNode(folder).children)
         } else if let node = (0..<outline.numberOfRows).compactMap({ outline.item(atRow:$0) as? FileNode }).first(where:{ $0.url == folder }) {

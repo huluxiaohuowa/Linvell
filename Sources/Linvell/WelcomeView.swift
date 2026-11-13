@@ -133,18 +133,19 @@ final class WelcomeRecents: NSView {
     var onChange: (() -> Void)?
     private(set) var locations: [WorkspaceSession] = []
     private var rows: [NSButton] = []
+    private lazy var clear = Theme.actionButton("Clear",target:self,action:#selector(clearRecent))
     private let heading = Theme.label("Recent Projects",size:13,color:Theme.secondary,weight:.semibold)
     var requiredHeight: CGFloat { locations.isEmpty ? 0 : 32+CGFloat(locations.count)*54 }
     override var isFlipped: Bool { true }
     init(owner: WorkspaceController) {
-        self.owner = owner; super.init(frame:.zero); addSubview(heading); reload()
+        self.owner = owner; super.init(frame:.zero); addSubview(heading); addSubview(clear); reload()
         NotificationCenter.default.addObserver(self,selector:#selector(reload),name:WorkspaceSession.changed,object:nil)
     }
     required init?(coder: NSCoder) { fatalError() }
     deinit { NotificationCenter.default.removeObserver(self) }
     @objc func reload() {
         rows.forEach { $0.removeFromSuperview() }; rows = []; locations = WorkspaceSession.recent()
-        heading.isHidden = locations.isEmpty
+        heading.isHidden = locations.isEmpty; clear.isHidden = locations.isEmpty
         for (index,location) in locations.enumerated() {
             let button = NSButton(title:location.title,target:self,action:#selector(openRecent(_:)))
             let title = NSMutableAttributedString(string:location.title,attributes:[.font:NSFont.systemFont(ofSize:13,weight:.medium),.foregroundColor:Theme.accent])
@@ -154,13 +155,21 @@ final class WelcomeRecents: NSView {
             button.contentTintColor = Theme.accent; button.lineBreakMode = .byTruncatingMiddle
             button.image = NSImage(systemSymbolName:location.isRemote ? "network" : "folder",accessibilityDescription:nil); button.imagePosition = .imageLeading
             button.toolTip = location.path; button.setAccessibilityLabel(location.title+" · "+location.path)
+            let menu = NSMenu()
+            menu.addItem(ExplorerActions.item("Open") { [weak self] in self?.owner?.openRecentProject(location) })
+            for item in ExplorerActions.pathItems(location.path,reveal:location.isRemote ? nil : URL(fileURLWithPath:location.path)) { menu.addItem(item) }
+            menu.addItem(.separator())
+            menu.addItem(ExplorerActions.item("Remove from Recents") { WorkspaceSession.removeRecent(location) })
+            button.menu = menu
             rows.append(button); addSubview(button)
         }
         needsLayout = true; onChange?()
     }
+    @objc private func clearRecent() { WorkspaceSession.clearRecents() }
     @objc func openRecent(_ sender: NSButton) { guard locations.indices.contains(sender.tag) else { return }; owner?.openRecentProject(locations[sender.tag]) }
     override func layout() {
-        super.layout(); heading.frame = NSRect(x:0,y:0,width:bounds.width,height:22)
+        super.layout(); heading.frame = NSRect(x:0,y:0,width:max(0,bounds.width-90),height:22)
+        clear.frame = NSRect(x:max(0,bounds.width-78),y:0,width:78,height:25)
         for (index,row) in rows.enumerated() { row.frame = NSRect(x:0,y:30+CGFloat(index)*54,width:bounds.width,height:46) }
     }
 }
@@ -185,6 +194,6 @@ extension WorkspaceController {
             connectToSSH(host,folder:path)
             guard remoteConnection?.host == host,remoteDirectory == path else { return }
         }
-        if restoreSavedTabs,let snapshot = WorkspaceTabs.load(for:expected) { restoreTabs(snapshot) }
+        if restoreSavedTabs,PreferencesSync.value("restoreProjectTabs") == "true",let snapshot = WorkspaceTabs.load(for:expected) { restoreTabs(snapshot) }
     }
 }
