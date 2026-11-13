@@ -9,8 +9,6 @@ final class WorkspaceStateTests: XCTestCase {
         let workspace = WorkspaceController()
         defer { workspace.recoveryTimer?.invalidate() }
         let window = try XCTUnwrap(workspace.window)
-        XCTAssertTrue(window.isOpaque)
-        XCTAssertEqual(window.backgroundColor.alphaComponent,1)
         let defaults = UserDefaults.standard
         let keys = ["theme","followSystemTheme"]
         let saved = keys.map { defaults.object(forKey:$0) }
@@ -19,8 +17,24 @@ final class WorkspaceStateTests: XCTestCase {
         for profile in [Theme.Profile.seaGlass,.dark] {
             defaults.set(profile.rawValue,forKey:"theme")
             workspace.applyTheme()
-            XCTAssertTrue(window.isOpaque)
-            XCTAssertEqual(window.backgroundColor,Theme.panel)
+            let root = try XCTUnwrap(window.contentView)
+            root.layoutSubtreeIfNeeded()
+            let titleBar = workspace.titleBarBacking
+            let titleRect = titleBar.convert(titleBar.bounds,to:nil)
+            XCTAssertGreaterThan(titleRect.height,0)
+            XCTAssertEqual(titleRect.minY,window.contentLayoutRect.maxY,accuracy:0.5)
+            XCTAssertEqual(titleRect.width,root.bounds.width,accuracy:0.5)
+            XCTAssertEqual(titleBar.layer?.backgroundColor?.alpha,1)
+            let close = try XCTUnwrap(window.standardWindowButton(.closeButton))
+            XCTAssertTrue(titleRect.contains(close.convert(close.bounds,to:nil)))
+            let backdrop = workspace.workspaceBackdrop
+            let glassRect = backdrop.convert(backdrop.bounds,to:nil)
+            XCTAssertGreaterThan(glassRect.height,0)
+            XCTAssertLessThan(glassRect.maxY,titleRect.minY)
+            XCTAssertEqual(backdrop.blendingMode,.behindWindow)
+            let reduced = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+            XCTAssertEqual(backdrop.isHidden,reduced)
+            XCTAssertEqual(window.backgroundColor.alphaComponent,reduced ? 1 : 0)
         }
         XCTAssertFalse(window.isVisible)
     }

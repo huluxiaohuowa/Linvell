@@ -91,6 +91,9 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     let tabScroll = TabScrollView()
     let editorHost = NSView()
     private var editorCard: NSView?
+    let titleBarBacking = NSView()
+    private let workspaceHeader = NSView()
+    let workspaceBackdrop = NSVisualEffectView()
     let status = Theme.label("Ready",size:11,color:Theme.secondary)
     let languageStatus = Theme.label("",size:11,color:Theme.secondary)
     let modeLabel = Theme.label("TEXT",size:11,color:Theme.accent,weight:.semibold)
@@ -139,13 +142,12 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         self.installedPluginStore = pluginStore;self.managedPluginAutoload = managedAutoload
         let support = FileManager.default.urls(for:.applicationSupportDirectory,in:.userDomainMask).first!.appendingPathComponent("Linvell/Recovery",isDirectory:true)
         recovery = RecoveryStore(directory:support)
-        let window = NSWindow(contentRect:NSRect(x:0,y:0,width:1320,height:860),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
+        let window = NSWindow(contentRect:NSRect(x:0,y:0,width:1320,height:860),styleMask:[.titled,.closable,.miniaturizable,.resizable,.fullSizeContentView],backing:.buffered,defer:false)
         super.init(window:window)
         window.contentView = WorkspaceRootView(frame:NSRect(x:0,y:0,width:1320,height:860))
         window.title = "Linvell"; window.titleVisibility = .hidden; window.titlebarAppearsTransparent = true
-        window.isOpaque = true
         window.appearance = Theme.appearance
-        window.backgroundColor = Theme.panel
+        updateWorkspaceMaterial()
         window.minSize = NSSize(width:800,height:540); window.delegate = self
         window.setFrameAutosaveName("Linvell.Workspace"); window.center()
         buildUI(); showWelcome()
@@ -156,21 +158,43 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
             self?.observeDiagnostics(session,snapshot:EditorCodeSnapshot(id:UUID(),uri:"",path:"",text:"",version:0,language:language,root:root,remote:remote))
         }
         NotificationCenter.default.addObserver(self,selector:#selector(languageToolsChanged(_:)),name:LanguageTools.changed,object:nil)
+        NSWorkspace.shared.notificationCenter.addObserver(self,selector:#selector(updateWorkspaceMaterial),name:NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,object:nil)
         recoveryTimer = Timer.scheduledTimer(withTimeInterval:2,repeats:true) { [weak self] _ in self?.persistRecovery() }
     }
     required init?(coder: NSCoder) { fatalError() }
-    deinit { recoveryTimer?.invalidate(); NotificationCenter.default.removeObserver(self) }
+    deinit { recoveryTimer?.invalidate(); NotificationCenter.default.removeObserver(self); NSWorkspace.shared.notificationCenter.removeObserver(self) }
 
     func buildUI() {
-        guard let rootView = window?.contentView else { return }
+        guard let window,let rootView = window.contentView,
+              let usableArea = window.contentLayoutGuide as? NSLayoutGuide else { return }
         rootView.clipsToBounds = true
         let shell = NSStackView(); shell.orientation = .vertical; shell.spacing = 0; shell.alignment = .leading; shell.distribution = .fill
-        Theme.pin(shell,in:rootView)
-        let backdrop = NSVisualEffectView()
-        backdrop.material = .underWindowBackground
-        backdrop.blendingMode = .behindWindow
-        Theme.pin(backdrop,in:rootView,positioned:.below)
-        let header = NSView()
+        let header = workspaceHeader
+        shell.addArrangedSubview(header)
+        for view in [workspaceBackdrop,titleBarBacking,shell] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            rootView.addSubview(view)
+        }
+        titleBarBacking.wantsLayer = true
+        header.wantsLayer = true
+        workspaceBackdrop.material = .menu
+        workspaceBackdrop.blendingMode = .behindWindow
+        workspaceBackdrop.state = .active
+        NSLayoutConstraint.activate([
+            titleBarBacking.leadingAnchor.constraint(equalTo:rootView.leadingAnchor),
+            titleBarBacking.trailingAnchor.constraint(equalTo:rootView.trailingAnchor),
+            titleBarBacking.topAnchor.constraint(equalTo:rootView.topAnchor),
+            titleBarBacking.bottomAnchor.constraint(equalTo:usableArea.topAnchor),
+            shell.leadingAnchor.constraint(equalTo:rootView.leadingAnchor),
+            shell.trailingAnchor.constraint(equalTo:rootView.trailingAnchor),
+            shell.topAnchor.constraint(equalTo:usableArea.topAnchor),
+            shell.bottomAnchor.constraint(equalTo:rootView.bottomAnchor),
+            workspaceBackdrop.leadingAnchor.constraint(equalTo:rootView.leadingAnchor),
+            workspaceBackdrop.trailingAnchor.constraint(equalTo:rootView.trailingAnchor),
+            workspaceBackdrop.topAnchor.constraint(equalTo:header.bottomAnchor),
+            workspaceBackdrop.bottomAnchor.constraint(equalTo:rootView.bottomAnchor)
+        ])
+        updateWorkspaceMaterial()
         header.heightAnchor.constraint(equalToConstant:38).isActive = true
         let command = NSButton(title:L.text("Quick Open…   ⌘P"),target:self,action:#selector(quickOpen))
         command.image = NSImage(systemSymbolName:"magnifyingglass",accessibilityDescription:nil)?
@@ -200,7 +224,6 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
             heading.trailingAnchor.constraint(equalTo:header.trailingAnchor,constant:-10),
             heading.centerYAnchor.constraint(equalTo:header.centerYAnchor)
         ])
-        shell.addArrangedSubview(header)
         header.widthAnchor.constraint(equalTo:shell.widthAnchor).isActive = true
         body.isVertical = true; body.firstMinimum = 180; body.secondMinimum = 400
         body.addArrangedSubview(sidebar); body.addArrangedSubview(center)
@@ -214,7 +237,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         body.heightAnchor.constraint(equalTo:area.heightAnchor).isActive = true
         shell.addArrangedSubview(area)
         area.widthAnchor.constraint(equalTo:shell.widthAnchor).isActive = true
-        area.heightAnchor.constraint(equalTo:rootView.heightAnchor,constant:-62).isActive = true
+        area.heightAnchor.constraint(equalTo:shell.heightAnchor,constant:-62).isActive = true
         breadcrumb.setContentCompressionResistancePriority(.defaultLow,for:.horizontal)
         let footer = Theme.stack([modeLabel,languageStatus,breadcrumb,NSView(),pluginStatusBar,status]); footer.edgeInsets = NSEdgeInsets(top:0,left:16,bottom:0,right:20)
         footer.heightAnchor.constraint(equalToConstant:24).isActive = true; shell.addArrangedSubview(footer)
@@ -494,7 +517,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         editorHost.translatesAutoresizingMaskIntoConstraints = false
         content.isVertical = false; content.addArrangedSubview(editorHost)
         let card = WorkspaceGlass.surface(containing:content,radius:12)
-        WorkspaceGlass.tintEditor(card)
+        WorkspaceGlass.tintEditor(card,workspace:true)
         editorCard = card
         Theme.pin(card,in:center,inset:6)
     }
@@ -910,12 +933,21 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
             self?.goToLine(line)
         }
     }
+    @objc private func updateWorkspaceMaterial() {
+        let reduced = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+        window?.backgroundColor = reduced ? Theme.panel : .clear
+        window?.isOpaque = reduced
+        titleBarBacking.layer?.backgroundColor = Theme.panel.cgColor
+        workspaceHeader.layer?.backgroundColor = Theme.panel.cgColor
+        workspaceBackdrop.isHidden = reduced
+        if let editorCard { WorkspaceGlass.tintEditor(editorCard,workspace:true) }
+    }
+
     func applyTheme() {
         let selectedActivity = activeActivity
         window?.appearance = Theme.appearance
-        window?.backgroundColor = Theme.panel
+        updateWorkspaceMaterial()
         if let view = window?.contentView { Theme.refreshViews(view) }
-        if let editorCard { WorkspaceGlass.tintEditor(editorCard) }
         activity.layer?.backgroundColor = NSColor.clear.cgColor
         center.layer?.backgroundColor = NSColor.clear.cgColor
         if sidebarKind == "files" { sidebar.layer?.backgroundColor = NSColor.clear.cgColor }

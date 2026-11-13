@@ -18,11 +18,13 @@ enum WorkspaceGlass {
         return material
     }
 
-    static func tintEditor(_ surface: NSView) {
+    static func tintEditor(_ surface: NSView, workspace: Bool = false) {
+        let clear = workspace && !NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
         if #available(macOS 26.0, *), let glass = surface as? NSGlassEffectView {
-            glass.tintColor = Theme.canvas.withAlphaComponent(Theme.isDark ? 0.60 : 0.52)
+            glass.style = clear ? .clear : .regular
+            glass.tintColor = Theme.canvas.withAlphaComponent(clear ? 0.12 : (Theme.isDark ? 0.60 : 0.52))
         } else {
-            surface.layer?.backgroundColor = Theme.canvas.cgColor
+            surface.layer?.backgroundColor = Theme.canvas.withAlphaComponent(clear ? 0.16 : 1).cgColor
         }
     }
 
