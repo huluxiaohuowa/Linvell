@@ -45,6 +45,7 @@ extension WorkspaceController {
             if terminal != nil {
                 guard mayCloseTerminal() else { return }; terminateTerminal(); terminalHost?.removeFromSuperview(); terminalHost = nil; terminal = nil
             }
+            if remoteConnection?.host != host || remoteDirectory != folder { persistWorkspaceTabs() }
             latestOpenRequest = nil; tabRestoreGeneration = UUID(); stopPlugins(); resetLanguageServices()
             remoteConnection = connection; remoteDirectory = "~"; root = nil; fileIndex = []
             projectTitle.stringValue = "SSH · "+host; window?.title = "SSH · "+host
@@ -73,6 +74,7 @@ extension WorkspaceController {
         let picker = RemoteFolderPicker(connection:connection,path:remoteDirectory,owner:window); remoteFolderPicker = picker
         picker.onChoose = { [weak self] path in
             guard let self,self.remoteConnection?.host == connection.host else { return }
+            if self.remoteDirectory != path { self.persistWorkspaceTabs() }
             self.tabRestoreGeneration = UUID(); self.stopPlugins(); self.resetLanguageServices()
             self.remoteDirectory = path; self.sidebar.subviews.forEach { $0.removeFromSuperview() }
             self.setupRemoteSidebar(connection); self.sidebar.isHidden = false; self.body.adjustSubviews(); self.selectActivity(0); self.agentProjectDidChange()

@@ -61,7 +61,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     let workspaceArea = NSView()
     let center = Surface(Theme.canvas)
     let tabs = NSStackView()
-    let tabScroll = ResponsiveScrollView()
+    let tabScroll = TabScrollView()
     let editorHost = NSView()
     private var editorCard: NSView?
     let status = Theme.label("Ready",size:11,color:Theme.secondary)
@@ -110,7 +110,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         self.installedPluginStore = pluginStore;self.managedPluginAutoload = managedAutoload
         let support = FileManager.default.urls(for:.applicationSupportDirectory,in:.userDomainMask).first!.appendingPathComponent("Linvell/Recovery",isDirectory:true)
         recovery = RecoveryStore(directory:support)
-        let window = NSWindow(contentRect:NSRect(x:0,y:0,width:1320,height:860),styleMask:[.titled,.closable,.miniaturizable,.resizable,.fullSizeContentView],backing:.buffered,defer:false)
+        let window = NSWindow(contentRect:NSRect(x:0,y:0,width:1320,height:860),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
         super.init(window:window)
         window.contentView = WorkspaceRootView(frame:NSRect(x:0,y:0,width:1320,height:860))
         window.title = "Linvell"; window.titleVisibility = .hidden; window.titlebarAppearsTransparent = true
@@ -165,7 +165,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         ],spacing:5)
         heading.translatesAutoresizingMaskIntoConstraints = false; header.addSubview(heading)
         NSLayoutConstraint.activate([
-            heading.leadingAnchor.constraint(equalTo:header.leadingAnchor,constant:86),
+            heading.leadingAnchor.constraint(equalTo:header.leadingAnchor,constant:12),
             heading.trailingAnchor.constraint(equalTo:header.trailingAnchor,constant:-10),
             heading.centerYAnchor.constraint(equalTo:header.centerYAnchor)
         ])
@@ -418,6 +418,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         center.layer?.backgroundColor = NSColor.clear.cgColor
         tabs.orientation = .horizontal; tabs.spacing = 5; tabs.alignment = .centerY
         tabs.edgeInsets = NSEdgeInsets(top:0,left:6,bottom:0,right:6)
+        tabScroll.owner = self
         tabScroll.documentView = tabs; tabScroll.hasHorizontalScroller = true; tabScroll.autohidesScrollers = true
         tabScroll.drawsBackground = false; tabScroll.heightAnchor.constraint(equalToConstant:30).isActive = true
         tabScroll.setContentHuggingPriority(.defaultLow,for:.horizontal)
@@ -465,6 +466,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         if root?.url.path != url.resolvingSymlinksInPath().path,gitWorkspaceView?.running == true {
             status.stringValue = L.text("Finish the current Git operation first."); return
         }
+        if root?.url.path != url.resolvingSymlinksInPath().path { persistWorkspaceTabs() }
         resetLanguageServices()
         let wasRemote = remoteConnection != nil
         if wasRemote {
@@ -480,7 +482,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         root = project; updateIgnoredFiles(for:project); syncManagedPlugins(); projectTitle.stringValue = url.lastPathComponent
         if let task = AgentTaskStore().task(at:root!.url.path) { projectTitle.stringValue = task.title }
         outline.reloadData(); UserDefaults.standard.set(url.path,forKey:"lastProject")
-        WorkspaceSession.save(.local(path:url.path))
+        WorkspaceSession.save(.local(path:project.url.path))
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
             let files = ProjectFiles.list(project.url)
             DispatchQueue.main.async { [weak self] in if self?.root === project { self?.fileIndex = files } }
@@ -563,11 +565,15 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
             let row: NSStackView
             if let existing = tabRows[id] { row = existing }
             else {
-                let button = NSButton(title:doc.displayName,target:self,action:#selector(tabClicked(_:)))
+                let button = TabTitleButton(title:doc.displayName,target:self,action:#selector(tabClicked(_:)))
                 button.bezelStyle = .inline; button.isBordered = false
                 button.menu = tabMenu(for:doc)
                 let close = TabCloseButton(); close.target = self; close.action = #selector(closeTab(_:))
-                row = Theme.stack([FileIcon.view(for:doc.fileURL),button,close],spacing:5)
+                let tab = DraggableTabRow(views:[FileIcon.view(for:doc.fileURL),button,close])
+                tab.owner = self
+                tab.documentID = id
+                tab.orientation = .horizontal; tab.alignment = .centerY; tab.spacing = 5
+                row = tab
                 row.edgeInsets = NSEdgeInsets(top:0,left:8,bottom:0,right:4)
                 row.heightAnchor.constraint(equalToConstant:26).isActive = true; row.wantsLayer = true
                 row.layer?.cornerRadius = 7
@@ -590,6 +596,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
             close.toolTip = L.format("Close %@",doc.displayName); close.setAccessibilityLabel(close.toolTip)
             row.layer?.backgroundColor = selected ? Theme.foreground.withAlphaComponent(0.11).cgColor : NSColor.clear.cgColor
         }
+        tabs.setAccessibilityChildren(tabs.arrangedSubviews)
         updateTabTitles()
         if let current,let row = tabRows[current.buffer.id] {
             tabs.layoutSubtreeIfNeeded()
@@ -604,7 +611,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         }
         window?.isDocumentEdited = documents.contains { $0.buffer.isModified }
     }
-    @objc private func tabClicked(_ sender: NSButton) { activate(documents[sender.tag]) }
+    @objc private func tabClicked(_ sender: NSButton) { if documents.indices.contains(sender.tag) { activate(documents[sender.tag]) } }
     @objc private func closeTab(_ sender: NSButton) { closeDocument(documents[sender.tag]) }
     @objc func closeCurrent() { if let current { closeDocument(current) } }
     func closeDocument(_ doc: OpenDocument) {
@@ -695,11 +702,14 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         if let remoteConnection { workspace = .ssh(host:remoteConnection.host,path:remoteDirectory) }
         else if let root { workspace = .local(path:root.url.path) }
         else { return }
-        guard WorkspaceSession.load() == workspace else { return }
         func path(_ document: OpenDocument) -> String? {
             switch workspace {
-            case .local: return document.remote == nil ? document.fileURL?.path : nil
-            case .ssh(let host,_): return document.remote?.connection.host == host ? document.remote?.path : nil
+            case .local:
+                guard document.remote == nil,let path = document.fileURL?.path,path.hasPrefix(workspace.path+"/") else { return nil }
+                return path
+            case .ssh(let host,_):
+                guard let remote = document.remote,remote.connection.host == host,remote.path.hasPrefix(workspace.path+"/") else { return nil }
+                return remote.path
             }
         }
         let paths = documents.compactMap(path)
@@ -709,9 +719,10 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         WorkspaceTabs(workspace:workspace,paths:retained,active:active).save()
     }
 
-    private func restoreTabs(_ snapshot: WorkspaceTabs) {
+    func restoreTabs(_ snapshot: WorkspaceTabs) {
         let project = root, connection = remoteConnection
         let token = latestOpenRequest
+        let previous = current
         let generation = tabRestoreGeneration
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
             var seen = Set<String>()
@@ -733,8 +744,13 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
                 let opened = Set(self.documents.compactMap { $0.remote?.path ?? $0.fileURL?.path })
                 let additions = restored.filter { !opened.contains($0.0) }
                 self.documents.append(contentsOf:additions.map(\.1))
-                if self.current == nil,self.latestOpenRequest == token,
-                   let selected = additions.first(where:{ $0.0 == snapshot.active })?.1 ?? additions.last?.1 {
+                let preferred = self.documents.first { document in
+                    guard let active = snapshot.active else { return false }
+                    if let connection { return document.remote?.connection.host == connection.host && document.remote?.path == active }
+                    return document.remote == nil && document.fileURL?.path == active
+                }
+                if self.current === previous,self.latestOpenRequest == token,
+                   let selected = preferred ?? additions.last?.1 {
                     self.activate(selected)
                 } else { self.renderTabs() }
             }
@@ -747,13 +763,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     }
     func restore(recoverDrafts: Bool = true) {
         guard WorkspaceSession.shouldRestore else { return }
-        if let location = WorkspaceSession.load() {
-            switch location {
-            case .local(let path): if FileManager.default.fileExists(atPath:path) { setProject(URL(fileURLWithPath:path)) }
-            case .ssh(let host,let path): connectToSSH(host,folder:path)
-            }
-            if recoverDrafts,let tabs = WorkspaceTabs.load(for:location) { restoreTabs(tabs) }
-        }
+        if let location = WorkspaceSession.load() { openRecentProject(location,restoreSavedTabs:recoverDrafts) }
         guard recoverDrafts else { return }
         do {
             for entry in try recovery.entries() {

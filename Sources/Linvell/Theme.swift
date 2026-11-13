@@ -11,9 +11,19 @@ enum Theme {
         case dracula = "Dracula", alucard = "Alucard"
         case seaGlass = "Linvell Sea Glass", ember = "Linvell Ember"
 
+        case oneLight = "Atom One Light"
+        case oneDark = "Atom One Dark"
+        case githubLight = "GitHub Light"
+        case githubDark = "GitHub Dark"
+        case xcodeLight = "Xcode Light"
+        case xcodeDark = "Xcode Dark"
+        case gruvboxLight = "Gruvbox Light"
+        case gruvboxDark = "Gruvbox Dark"
+        case solarizedDark = "Solarized Dark"
+
         var isDark: Bool {
             switch self {
-            case .light, .solarized, .catppuccinLatte, .tokyoNightDay, .rosePineDawn, .alucard, .seaGlass: return false
+            case .light, .solarized, .catppuccinLatte, .tokyoNightDay, .rosePineDawn, .alucard, .seaGlass, .oneLight, .githubLight, .xcodeLight, .gruvboxLight: return false
             default: return true
             }
         }
@@ -33,6 +43,15 @@ enum Theme {
             case .alucard: return [0xFFFBEB,0xF2E9CF,0x27252A,0x6C664B,0x036A96,0xA3144D,0x644AC9,0xE4D9B7]
             case .seaGlass: return [0xF0F8F7,0xE0F0ED,0x173C42,0x49676D,0x006F72,0x7140A0,0x9A4C28,0xCBE8E2]
             case .ember: return [0x211B20,0x2E252B,0xF5E6DE,0xBDA5A9,0xF2B17D,0xF3A9C3,0xF6C879,0x513845]
+            case .oneLight: return [0xFAFAFA,0xF0F0F0,0x383A42,0x676C78,0x245CAA,0xA626A4,0x986801,0xDCE8F8]
+            case .oneDark: return [0x282C34,0x30353F,0xABB2BF,0x9DA5B3,0x61AFEF,0xC678DD,0xD19A66,0x3E4C64]
+            case .githubLight: return [0xFFFFFF,0xF6F8FA,0x24292F,0x57606A,0x0969DA,0xCF222E,0x0550AE,0xDDF4FF]
+            case .githubDark: return [0x0D1117,0x161B22,0xE6EDF3,0x9CA7B5,0x58A6FF,0xFF7B72,0x79C0FF,0x253B58]
+            case .xcodeLight: return [0xFFFFFF,0xF0F3F6,0x242834,0x606578,0x1146B3,0xAC3261,0x286DAB,0xD8E7FC]
+            case .xcodeDark: return [0x1F2430,0x282E3D,0xE7EAF3,0xA2AAC4,0x78A9F4,0xED80A8,0xDE9F2E,0x3A4C70]
+            case .gruvboxLight: return [0xFBF1C7,0xF2E5BC,0x3C3836,0x6B5B4D,0x076678,0x9D0006,0x8F3F71,0xE5D5A7]
+            case .gruvboxDark: return [0x282828,0x32302F,0xEBDBB2,0xA89984,0x83A598,0xFB4934,0xD3869B,0x504945]
+            case .solarizedDark: return [0x002B36,0x073642,0x93A1A1,0x839496,0x62AFE0,0xB2BE48,0xE483AF,0x174653]
             }
         }
     }
@@ -85,6 +104,15 @@ enum Theme {
         case .alucard: tones = (0x756014,0x036A96,0xA34D14)
         case .seaGlass: tones = (0x317043,0x236197,0x9E3F66)
         case .ember: tones = (0xBCD6A5,0x9BCED2,0xD5B6F1)
+        case .oneLight: tones = (0x3A7438,0x8C5600,0xA626A4)
+        case .oneDark: tones = (0x98C379,0xE5C07B,0xC678DD)
+        case .githubLight: tones = (0x0A3069,0x953800,0xCF222E)
+        case .githubDark: tones = (0xA5D6FF,0xFFA657,0xFF7B72)
+        case .xcodeLight: tones = (0xB33421,0x853CC1,0x805F24)
+        case .xcodeDark: tones = (0xEF8772,0xC793F7,0xDE9F2E)
+        case .gruvboxLight: tones = (0x59600F,0x87550C,0xAF3A03)
+        case .gruvboxDark: tones = (0xB8BB26,0xFABD2F,0xFE8019)
+        case .solarizedDark: tones = (0x56C5AE,0xE2B853,0xF08357)
         }
         switch kind {
         case .string: return tones.0

@@ -3,7 +3,7 @@ import QuartzCore
 
 /// AppKit/Core Animation owns scrolling. Use its responsive path and pace pending
 /// window drawing with the display only while the user is interacting.
-final class ResponsiveScrollView: NSScrollView {
+class ResponsiveScrollView: NSScrollView {
     override class var isCompatibleWithResponsiveScrolling: Bool { true }
     override init(frame: NSRect) {
         super.init(frame:frame)

@@ -32,7 +32,11 @@ final class WorkspaceStateTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName:name) }
         let location = WorkspaceSession.ssh(host:"test-host",path:"/project")
         let tabs = WorkspaceTabs(workspace:location,paths:["/project/a.swift","/project/b.swift"],active:"/project/a.swift")
-        tabs.save(defaults:defaults)
+        defaults.set(try JSONEncoder().encode(tabs),forKey:WorkspaceTabs.key)
+        XCTAssertEqual(WorkspaceTabs.load(for:location,defaults:defaults)?.paths,tabs.paths)
+        let local = WorkspaceSession.local(path:"/local")
+        WorkspaceTabs(workspace:local,paths:["/local/b.swift","/local/a.swift"],active:"/local/a.swift").save(defaults:defaults)
+        XCTAssertEqual(WorkspaceTabs.load(for:local,defaults:defaults)?.paths,["/local/b.swift","/local/a.swift"])
         XCTAssertEqual(WorkspaceTabs.load(for:location,defaults:defaults)?.paths,tabs.paths)
         XCTAssertEqual(WorkspaceTabs.load(for:location,defaults:defaults)?.active,tabs.active)
         XCTAssertNil(WorkspaceTabs.load(for:.local(path:"/project"),defaults:defaults))
@@ -44,13 +48,30 @@ final class WorkspaceStateTests: XCTestCase {
         _ = NSApplication.shared
         let workspace = WorkspaceController()
         defer { workspace.recoveryTimer?.invalidate(); workspace.window?.orderOut(nil) }
-        let a = OpenDocument(DocumentBuffer()), b = OpenDocument(DocumentBuffer())
-        workspace.documents = [a,b]; workspace.current = a
-        workspace.moveTab(a.buffer.id,by:1)
-        XCTAssertEqual(workspace.documents.map { $0.buffer.id },[b.buffer.id,a.buffer.id])
-        XCTAssertTrue(workspace.current === a)
-        workspace.moveTab(a.buffer.id,by:1)
-        XCTAssertEqual(workspace.documents.map { $0.buffer.id },[b.buffer.id,a.buffer.id])
+        let a = OpenDocument(DocumentBuffer()), b = OpenDocument(DocumentBuffer()), c = OpenDocument(DocumentBuffer())
+        workspace.documents = [a,b,c]; workspace.current = b
+        XCTAssertTrue(workspace.moveTab(a.buffer.id,toInsertion:3))
+        XCTAssertEqual(workspace.documents.map { $0.buffer.id },[b.buffer.id,c.buffer.id,a.buffer.id])
+        XCTAssertTrue(workspace.moveTab(a.buffer.id,toInsertion:0))
+        XCTAssertEqual(workspace.documents.map { $0.buffer.id },[a.buffer.id,b.buffer.id,c.buffer.id])
+        XCTAssertTrue(workspace.current === b)
+        XCTAssertFalse(workspace.moveTab(a.buffer.id,toInsertion:4))
+    }
+
+    func testTabTitleIsInsideTheWindowContentArea() throws {
+        _ = NSApplication.shared
+        let workspace = WorkspaceController()
+        defer { workspace.recoveryTimer?.invalidate() }
+        let window = try XCTUnwrap(workspace.window)
+        let document = OpenDocument(DocumentBuffer())
+        workspace.documents = [document]
+        workspace.renderTabs()
+        window.contentView?.layoutSubtreeIfNeeded()
+        let row = try XCTUnwrap(workspace.tabRows[document.buffer.id])
+        let button = try XCTUnwrap(row.arrangedSubviews.compactMap { $0 as? TabTitleButton }.first)
+        let frame = button.convert(button.bounds,to:nil)
+        XCTAssertFalse(frame.isEmpty)
+        XCTAssertTrue(window.contentLayoutRect.contains(frame),"The title bar must leave the entire label clickable.")
     }
 
     func testActivityKeepsOneVisibleSelectedButton() {

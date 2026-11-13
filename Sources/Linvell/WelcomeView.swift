@@ -168,13 +168,23 @@ private extension WorkspaceSession {
     var isRemote: Bool { if case .ssh = self { return true }; return false }
 }
 extension WorkspaceController {
-    func openRecentProject(_ location: WorkspaceSession) {
+    func openRecentProject(_ location: WorkspaceSession,restoreSavedTabs: Bool = true) {
+        let expected: WorkspaceSession
         switch location {
         case .local(let path):
+            let url = URL(fileURLWithPath:path).resolvingSymlinksInPath()
             var directory: ObjCBool = false
-            guard FileManager.default.fileExists(atPath:path,isDirectory:&directory),directory.boolValue else { status.stringValue = L.text("This project folder is no longer available."); return }
-            setProject(URL(fileURLWithPath:path))
-        case .ssh(let host,let path): connectToSSH(host,folder:path)
+            guard FileManager.default.fileExists(atPath:url.path,isDirectory:&directory),directory.boolValue else {
+                status.stringValue = L.text("This project folder is no longer available."); return
+            }
+            expected = .local(path:url.path)
+            setProject(url)
+            guard root?.url == url else { return }
+        case .ssh(let host,let path):
+            expected = location
+            connectToSSH(host,folder:path)
+            guard remoteConnection?.host == host,remoteDirectory == path else { return }
         }
+        if restoreSavedTabs,let snapshot = WorkspaceTabs.load(for:expected) { restoreTabs(snapshot) }
     }
 }

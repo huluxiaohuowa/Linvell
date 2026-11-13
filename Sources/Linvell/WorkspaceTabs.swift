@@ -20,8 +20,20 @@ extension WorkspaceController {
     func moveTab(_ id: UUID,by offset: Int) {
         guard let index = documents.firstIndex(where:{ $0.buffer.id == id }),
               documents.indices.contains(index+offset) else { return }
-        documents.swapAt(index,index+offset)
+        _ = moveTab(id,toInsertion:index+offset+(offset > 0 ? 1 : 0))
+    }
+
+    @discardableResult
+    func moveTab(_ id: UUID,toInsertion boundary: Int) -> Bool {
+        guard let source = documents.firstIndex(where:{ $0.buffer.id == id }),
+              (0...documents.count).contains(boundary) else { return false }
+        let destination = boundary > source ? boundary-1 : boundary
+        guard source != destination else { return true }
+        let document = documents.remove(at:source)
+        documents.insert(document,at:destination)
         renderTabs()
+        persistWorkspaceTabs()
+        return true
     }
     @objc private func moveTabLeft(_ item: NSMenuItem) {
         if let id = item.representedObject as? UUID { moveTab(id,by:-1) }

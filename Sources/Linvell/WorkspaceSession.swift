@@ -42,14 +42,24 @@ struct WorkspaceTabs: Codable {
     let paths: [String]
     let active: String?
     static let key = "lastWorkspaceTabs"
+    private static let historyKey = "workspaceTabHistory"
     static let limit = 30
 
     func save(defaults: UserDefaults = .standard) {
-        if let data = try? JSONEncoder().encode(self) { defaults.set(data,forKey:Self.key) }
+        var history = Self.history(defaults)
+        history.removeAll { $0.workspace == workspace }
+        history.insert(self,at:0)
+        if let data = try? JSONEncoder().encode(Array(history.prefix(12))) {
+            defaults.set(data,forKey:Self.historyKey)
+        }
     }
     static func load(for workspace: WorkspaceSession,defaults: UserDefaults = .standard) -> Self? {
-        guard let data = defaults.data(forKey:key),
-              let snapshot = try? JSONDecoder().decode(Self.self,from:data),snapshot.workspace == workspace else { return nil }
-        return snapshot
+        history(defaults).first { $0.workspace == workspace }
+    }
+    private static func history(_ defaults: UserDefaults) -> [Self] {
+        let decoder = JSONDecoder()
+        if let data = defaults.data(forKey:historyKey),let history = try? decoder.decode([Self].self,from:data) { return history }
+        if let data = defaults.data(forKey:key),let legacy = try? decoder.decode(Self.self,from:data) { return [legacy] }
+        return []
     }
 }
