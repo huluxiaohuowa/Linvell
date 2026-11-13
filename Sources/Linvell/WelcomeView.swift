@@ -60,30 +60,32 @@ private final class WelcomePage: NSView {
         footer.frame = NSRect(x:left,y:top+height+recents.requiredHeight+44,width:width,height:20)
     }
     override func draw(_ dirtyRect: NSRect) {
+        Theme.canvas.setFill(); dirtyRect.fill()
+        NSGraphicsContext.saveGraphicsState(); bounds.clip()
         let center = NSPoint(x:bounds.width*0.25,y:bounds.height*0.42)
-        NSGradient(starting:Theme.accent.withAlphaComponent(Theme.isDark ? 0.16 : 0.12),ending:Theme.accent.withAlphaComponent(0))?
-            .draw(fromCenter:center,radius:0,toCenter:center,radius:min(bounds.width,700)*0.85,options:[])
+        NSGradient(starting:Theme.accent.withAlphaComponent(Theme.isDark ? 0.10 : 0.065),ending:Theme.canvas.withAlphaComponent(0))?.draw(fromCenter:center,radius:0,toCenter:center,radius:min(bounds.width,700)*0.7,options:[])
+        NSGraphicsContext.restoreGraphicsState()
     }
 }
 
 private final class WelcomeActions: NSView {
+    private let buttons: [WelcomeAction]
+    override var isFlipped: Bool { true }
     init(owner: WorkspaceController) {
-        let buttons = [
+        buttons = [
             WelcomeAction(title:"Open a folder",detail:"Bring your project into focus.",symbol:"folder",shortcut:"⌘K ⌘O",owner:owner,action:#selector(WorkspaceController.openFolder)),
             WelcomeAction(title:"New file",detail:"Start with a blank canvas.",symbol:"square.and.pencil",shortcut:"⌘N",owner:owner,action:#selector(WorkspaceController.newFile)),
             WelcomeAction(title:"Open a file",detail:"Pick up where you left off.",symbol:"doc",shortcut:"⌘O",owner:owner,action:#selector(WorkspaceController.openFile))
         ]
         super.init(frame:.zero)
-        let cards = buttons.map { button in
-            let card = WorkspaceGlass.surface(containing:button,radius:14)
-            card.heightAnchor.constraint(equalToConstant:70).isActive = true
-            return card
-        }
-        let stack = Theme.stack(cards,orientation:.vertical,spacing:12)
-        stack.distribution = .fill
-        Theme.pin(WorkspaceGlass.group(stack),in:self)
+        for button in buttons { button.translatesAutoresizingMaskIntoConstraints = true; addSubview(button) }
     }
     required init?(coder: NSCoder) { fatalError() }
+    override func setFrameSize(_ newSize: NSSize) { super.setFrameSize(newSize); needsLayout = true }
+    override func layout() {
+        super.layout()
+        for (index,button) in buttons.enumerated() { button.frame = NSRect(x:0,y:CGFloat(index)*82,width:bounds.width,height:70) }
+    }
 }
 
 private final class WelcomeAction: NSButton {
@@ -105,10 +107,8 @@ private final class WelcomeAction: NSButton {
     override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
     override func draw(_ dirtyRect: NSRect) {
         let card = NSBezierPath(roundedRect:bounds.insetBy(dx:1,dy:1),xRadius:10,yRadius:10)
-        if hovering || isHighlighted {
-            Theme.accent.withAlphaComponent(isHighlighted ? 0.22 : 0.12).setFill()
-            card.fill()
-        }
+        (hovering || isHighlighted ? Theme.selection : Theme.panel.withAlphaComponent(0.72)).setFill(); card.fill()
+        Theme.accent.withAlphaComponent(hovering ? 0.65 : 0.22).setStroke(); card.lineWidth = 1; card.stroke()
         let image = NSImage(systemSymbolName:symbol,accessibilityDescription:nil)?.withSymbolConfiguration(.init(paletteColors:[Theme.accent]))
         image?.draw(in:NSRect(x:18,y:23,width:24,height:24),from:.zero,operation:.sourceOver,fraction:1)
         (caption as NSString).draw(at:NSPoint(x:56,y:14),withAttributes:[.font:NSFont.systemFont(ofSize:14,weight:.semibold),.foregroundColor:Theme.foreground])
