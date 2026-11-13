@@ -40,6 +40,41 @@ final class SourceEditingTests: XCTestCase {
         UserDefaults.standard.set(false,forKey:"relativeLineNumbers")
         XCTAssertEqual(gutter.numberLabel(row:3,current:8),"4")
     }
+
+    func testGutterAndTextViewportStaySeparateWithAndWithoutWrapping() {
+        _ = NSApplication.shared
+        let defaults = UserDefaults.standard
+        let keys = ["wordWrap","lineNumbers"]
+        let saved = keys.map { defaults.object(forKey:$0) }
+        defer { for (key,value) in zip(keys,saved) { defaults.set(value,forKey:key) } }
+        defaults.set(true,forKey:"lineNumbers")
+        let line = String(repeating:"let value = 123; ",count:150)
+        let document = OpenDocument(DocumentBuffer(text:String(repeating:line+"\n",count:50)))
+        let pane = EditorPane(document:document,vim:false)
+        pane.setFrameSize(NSSize(width:540,height:300))
+        for wrap in [true,false] {
+            defaults.set(wrap,forKey:"wordWrap")
+            pane.updatePreferences()
+            pane.layoutSubtreeIfNeeded()
+            let gutter = pane.gutter.convert(pane.gutter.bounds,to:pane)
+            let clip = pane.scroll.contentView
+            XCTAssertGreaterThan(gutter.width,0)
+            XCTAssertGreaterThanOrEqual(clip.convert(clip.bounds,to:pane).minX,gutter.maxX-0.5)
+            XCTAssertTrue(clip.clipsToBounds)
+            if !wrap {
+                pane.textView.setFrameSize(NSSize(width:1200,height:1200))
+                clip.scroll(to:NSPoint(x:120,y:100))
+                pane.scroll.reflectScrolledClipView(clip)
+                XCTAssertGreaterThan(clip.bounds.minX,0)
+                XCTAssertEqual(pane.gutter.convert(pane.gutter.bounds,to:pane),gutter)
+                XCTAssertGreaterThanOrEqual(clip.convert(clip.bounds,to:pane).minX,gutter.maxX-0.5)
+            }
+        }
+        pane.setLineNumbersVisible(false)
+        pane.layoutSubtreeIfNeeded()
+        XCTAssertTrue(pane.gutter.isHidden)
+        XCTAssertEqual(pane.scroll.frame.minX,0,accuracy:0.5)
+    }
     func testFoldingChangesGeometryWithoutChangingFileOrUndo() throws {
         _ = NSApplication.shared
         let source = "struct Sample {\n"+String(repeating:"    let value = 123\n",count:100)+"}\n"

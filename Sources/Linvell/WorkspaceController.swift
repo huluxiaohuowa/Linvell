@@ -143,7 +143,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         super.init(window:window)
         window.contentView = WorkspaceRootView(frame:NSRect(x:0,y:0,width:1320,height:860))
         window.title = "Linvell"; window.titleVisibility = .hidden; window.titlebarAppearsTransparent = true
-        window.appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua); window.backgroundColor = Theme.panel
+        window.appearance = Theme.appearance
         window.minSize = NSSize(width:800,height:540); window.delegate = self
         window.setFrameAutosaveName("Linvell.Workspace"); window.center()
         buildUI(); showWelcome()
@@ -164,10 +164,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         rootView.clipsToBounds = true
         let shell = NSStackView(); shell.orientation = .vertical; shell.spacing = 0; shell.alignment = .leading; shell.distribution = .fill
         Theme.pin(shell,in:rootView)
-        let backdrop = NSVisualEffectView()
-        backdrop.material = .underWindowBackground
-        backdrop.blendingMode = .behindWindow
-        Theme.pin(backdrop,in:rootView,positioned:.below)
+        if let window { WorkspaceGlass.installWindowBackdrop(in:window,root:rootView) }
         let header = NSView()
         header.heightAnchor.constraint(equalToConstant:38).isActive = true
         let command = NSButton(title:L.text("Quick Open…   ⌘P"),target:self,action:#selector(quickOpen))
@@ -910,7 +907,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     }
     func applyTheme() {
         let selectedActivity = activeActivity
-        window?.appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua); window?.backgroundColor = Theme.panel
+        window?.appearance = Theme.appearance
         if let view = window?.contentView { Theme.refreshViews(view) }
         if let editorCard { WorkspaceGlass.tintEditor(editorCard) }
         activity.layer?.backgroundColor = NSColor.clear.cgColor
@@ -1219,8 +1216,8 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
             case "w": self.save()
             case "q": self.closeCurrent()
             case "wq": if let doc = self.current,self.saveDocument(doc) { self.closeCurrent() }
-            case "set number", "set nu": self.panes.forEach { $0.scroll.rulersVisible = true }
-            case "set nonumber", "set nonu": self.panes.forEach { $0.scroll.rulersVisible = false }
+            case "set number", "set nu": self.panes.forEach { $0.setLineNumbersVisible(true) }
+            case "set nonumber", "set nonu": self.panes.forEach { $0.setLineNumbersVisible(false) }
             default:
                 guard let pane = self.activePane else { return }
                 let vim = pane.document.vim,view = pane.textView,command = field.stringValue

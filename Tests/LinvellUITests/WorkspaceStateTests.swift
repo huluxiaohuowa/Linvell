@@ -4,6 +4,44 @@ import LinvellCore
 @testable import Linvell
 
 final class WorkspaceStateTests: XCTestCase {
+    func testWelcomeKeepsTheWindowBackdropVisibleAcrossThemeRefreshes() throws {
+        _ = NSApplication.shared
+        let workspace = WorkspaceController()
+        defer { workspace.recoveryTimer?.invalidate() }
+        let window = try XCTUnwrap(workspace.window)
+        let root = try XCTUnwrap(window.contentView)
+        let backdrop = try XCTUnwrap(root.subviews.compactMap { $0 as? NSVisualEffectView }.first)
+        XCTAssertTrue(root.subviews.first === backdrop)
+        XCTAssertEqual(backdrop.blendingMode,.behindWindow)
+        XCTAssertEqual(backdrop.state,.active)
+        XCTAssertEqual(backdrop.material,.menu)
+
+        let welcome = try XCTUnwrap(workspace.editors.arrangedSubviews.first as? WelcomeView)
+        XCTAssertFalse(welcome.isOpaque)
+        XCTAssertNil(welcome.layer?.backgroundColor)
+        if #available(macOS 26.0, *) {
+            func descendants(_ view: NSView) -> [NSView] { [view]+view.subviews.flatMap(descendants) }
+            let group = try XCTUnwrap(descendants(welcome).compactMap { $0 as? NSGlassEffectContainerView }.first)
+            let cards = descendants(group).compactMap { $0 as? NSGlassEffectView }
+            XCTAssertEqual(cards.count,3)
+            XCTAssertTrue(cards.allSatisfy { ($0.contentView as? NSButton)?.action != nil })
+        }
+
+        let defaults = UserDefaults.standard
+        let keys = ["theme","followSystemTheme"]
+        let saved = keys.map { defaults.object(forKey:$0) }
+        defer { for (key,value) in zip(keys,saved) { defaults.set(value,forKey:key) } }
+        defaults.set(false,forKey:"followSystemTheme")
+        for profile in [Theme.Profile.seaGlass,.dark] {
+            defaults.set(profile.rawValue,forKey:"theme")
+            workspace.applyTheme()
+            XCTAssertFalse(window.isOpaque)
+            XCTAssertEqual(window.backgroundColor,.clear)
+            XCTAssertEqual(workspace.sidebar.layer?.backgroundColor?.alpha,0)
+        }
+        XCTAssertFalse(window.isVisible)
+    }
+
     func testLastWorkspaceRoundTripsLocalAndRemoteWithoutCloudKeys() throws {
         let name = "Linvell.WorkspaceStateTests."+UUID().uuidString,defaults = try XCTUnwrap(UserDefaults(suiteName:name))
         defer { defaults.removePersistentDomain(forName:name) }

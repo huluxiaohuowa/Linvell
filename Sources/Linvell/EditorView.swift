@@ -468,6 +468,7 @@ final class EditorPane: NSView, NSTextViewDelegate {
         super.init(frame:.zero)
         wantsLayer = true; clipsToBounds = true; layer?.masksToBounds = true
         textView.clipsToBounds = true; scroll.clipsToBounds = true
+        scroll.contentView.clipsToBounds = true
         textView.document = document; textView.vimEnabled = vim
         gutter.pane = self
         minimap.pane = self
@@ -490,9 +491,10 @@ final class EditorPane: NSView, NSTextViewDelegate {
         scroll.documentView = textView; scroll.hasVerticalScroller = true; scroll.drawsBackground = false
         scroll.borderType = .noBorder
         gutter.editor = textView
-        scroll.verticalRulerView = gutter; scroll.hasVerticalRuler = true; scroll.rulersVisible = true
+        gutter.updateWidth()
         minimap.widthAnchor.constraint(equalToConstant:68).isActive = true
-        let row = Theme.stack([scroll,minimap],spacing:0)
+        let row = Theme.stack([gutter,scroll,minimap],spacing:0)
+        gutter.heightAnchor.constraint(equalTo:row.heightAnchor).isActive = true
         scroll.heightAnchor.constraint(equalTo:row.heightAnchor).isActive = true
         scroll.setContentCompressionResistancePriority(.defaultLow,for:.horizontal)
         minimap.heightAnchor.constraint(equalTo:row.heightAnchor).isActive = true
@@ -548,6 +550,7 @@ final class EditorPane: NSView, NSTextViewDelegate {
         return true
     }
     func textDidChange(_ notification: Notification) {
+        gutter.updateWidth()
         guard !highlighting else { return }
         let before = document.buffer.text
         if !textView.applyingVim { document.vim.recordInsertion(before:before,cursor:textView.selectedRange().location); document.vim.sync(text:document.storage.string,cursor:textView.selectedRange().location) }
@@ -571,12 +574,16 @@ final class EditorPane: NSView, NSTextViewDelegate {
     }
     func updatePreferences() {
         minimap.isHidden = PreferencesSync.value("showMinimap") != "true"
-        updateFont(); scroll.rulersVisible = PreferencesSync.value("lineNumbers") == "true"
+        updateFont(); setLineNumbersVisible(PreferencesSync.value("lineNumbers") == "true")
         let wrap = PreferencesSync.value("wordWrap") == "true"
         textView.isHorizontallyResizable = !wrap; scroll.hasHorizontalScroller = !wrap
         textView.textContainer?.widthTracksTextView = wrap
         textView.textContainer?.containerSize = NSSize(width:wrap ? max(100,scroll.contentSize.width) : CGFloat.greatestFiniteMagnitude,height:CGFloat.greatestFiniteMagnitude)
         if wrap { textView.setFrameSize(NSSize(width:scroll.contentSize.width,height:textView.frame.height)) }
+    }
+    func setLineNumbersVisible(_ visible: Bool) {
+        gutter.isHidden = !visible
+        needsLayout = true
     }
     override func layout() {
         super.layout()
@@ -590,7 +597,7 @@ final class EditorPane: NSView, NSTextViewDelegate {
         textView.selectedTextAttributes = [.backgroundColor:Theme.selection]
         gutter.needsDisplay = true; minimap.needsDisplay = true; highlight()
     }
-    func refreshCodePresentation() { gutter.needsDisplay = true; highlight(); applyCodeDiagnostics(); onChange?() }
+    func refreshCodePresentation() { gutter.updateWidth(); gutter.needsDisplay = true; highlight(); applyCodeDiagnostics(); onChange?() }
     func applyCodeDiagnostics() {
         let whole = NSRange(location:0,length:(document.storage.string as NSString).length)
         textView.layoutManager?.removeTemporaryAttribute(.underlineStyle,forCharacterRange:whole)
@@ -605,10 +612,25 @@ final class EditorPane: NSView, NSTextViewDelegate {
 
 }
 
-final class LineNumbers: NSRulerView {
+final class LineNumbers: NSView {
     weak var editor: NSTextView?
     weak var pane: EditorPane?
+    private lazy var width = widthAnchor.constraint(equalToConstant:46)
     var foldHits: [(CGRect,Int)] = []
+    override var isFlipped: Bool { true }
+
+    override init(frame: NSRect) {
+        super.init(frame:frame)
+        clipsToBounds = true
+        width.isActive = true
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func updateWidth() {
+        let digits = String(pane?.document.lines.starts.count ?? 1).count
+        let desired = max(46,CGFloat(digits)*8+24)
+        if width.constant != desired { width.constant = desired }
+    }
     func numberLabel(row: Int,current: Int) -> String {
         String(PreferencesSync.value("relativeLineNumbers") == "true" && row != current ? abs(row-current) : row+1)
     }
@@ -617,43 +639,44 @@ final class LineNumbers: NSRulerView {
         if let hit = foldHits.first(where:{ $0.0.contains(point) }) { pane?.toggleFold(line:hit.1) }
         else { super.mouseDown(with:event) }
     }
-    init() { super.init(scrollView:nil,orientation:.verticalRuler); ruleThickness = 46; clipsToBounds = true; wantsLayer = true }
-    required init(coder: NSCoder) { fatalError() }
-    override func draw(_ dirtyRect: NSRect) { drawHashMarksAndLabels(in:dirtyRect) }
-    override func drawHashMarksAndLabels(in rect: NSRect) {
-        NSGraphicsContext.saveGraphicsState(); bounds.clip(); defer { NSGraphicsContext.restoreGraphicsState() }
-        guard let editor, let lm = editor.layoutManager, let tc = editor.textContainer else { return }
-        let digits = String((editor as? EditorTextView)?.document?.lines.starts.count ?? 1).count
-        let desired = max(46,CGFloat(digits)*8+24)
-        if ruleThickness != desired { ruleThickness = desired }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
         foldHits.removeAll()
-        let visible = editor.visibleRect
-        let glyphRange = lm.glyphRange(forBoundingRect:visible.offsetBy(dx:0,dy:-editor.textContainerInset.height),in:tc)
-        guard lm.numberOfGlyphs > 0 else { return }
-        var glyph = glyphRange.location
-        let ns = editor.string as NSString
-        let initial = lm.characterIndexForGlyph(at:min(glyph,lm.numberOfGlyphs-1))
-        var line = (editor as? EditorTextView)?.document?.lines.line(at:initial) ?? 0
-        line += 1
-        while glyph < NSMaxRange(glyphRange) && glyph < lm.numberOfGlyphs {
-            var range = NSRange()
-            let lineRect = lm.lineFragmentRect(forGlyphAt:glyph,effectiveRange:&range)
-            let idx = lm.characterIndexForGlyph(at:glyph)
-            if idx == 0 || ns.character(at:idx-1) == 10 {
-                let y = lineRect.minY + editor.textContainerInset.height-visible.minY+max(0,(lineRect.height-15)/2)
-                let row = (editor as? EditorTextView)?.document?.lines.line(at:idx) ?? line-1
-                let current = (editor as? EditorTextView)?.document?.lines.line(at:editor.selectedRange().location) ?? 0
-                let label = numberLabel(row:row,current:current) as NSString
-                if let pane,let fold = pane.document.syntax.analysis.fold(atLine:row) {
-                    let hit = CGRect(x:0,y:y,width:15,height:18); foldHits.append((hit,row))
-                    let mark = (pane.folding.hides(fold.range.location) ? "▸" : "▾") as NSString
-                    mark.draw(at:NSPoint(x:2,y:y),withAttributes:[.font:NSFont.systemFont(ofSize:12),.foregroundColor:Theme.accent])
-                }
-                let attrs: [NSAttributedString.Key:Any] = [.font:NSFont.monospacedDigitSystemFont(ofSize:11,weight:row == current ? .medium : .regular),.foregroundColor:row == current ? Theme.foreground : Theme.secondary]
-                label.draw(at:NSPoint(x:ruleThickness-14-label.size(withAttributes:attrs).width,y:y),withAttributes:attrs)
-                line += 1
+        guard let editor,let pane,let lm = editor.layoutManager,let tc = editor.textContainer else { return }
+        let origin = editor.textContainerOrigin
+        let viewport = editor.visibleRect
+        // Horizontal scrolling must not change which source lines get numbers.
+        let verticalViewport = NSRect(x:0,y:viewport.minY-origin.y,width:viewport.width,height:viewport.height)
+        let glyphs = lm.glyphRange(forBoundingRect:verticalViewport,in:tc)
+        let current = pane.document.lines.line(at:editor.selectedRange().location)
+        let starts = pane.document.lines.starts
+        let source = editor.string as NSString
+        var glyph = glyphs.location
+
+        func drawNumber(row: Int,fragment: NSRect) {
+            let point = convert(NSPoint(x:0,y:fragment.minY+origin.y),from:editor)
+            let y = point.y+max(0,(fragment.height-15)/2)
+            guard y+18 > bounds.minY,y < bounds.maxY else { return }
+            if let fold = pane.document.syntax.analysis.fold(atLine:row) {
+                foldHits.append((CGRect(x:0,y:y,width:15,height:18),row))
+                let mark = (pane.folding.hides(fold.range.location) ? "▸" : "▾") as NSString
+                mark.draw(at:NSPoint(x:2,y:y),withAttributes:[.font:NSFont.systemFont(ofSize:12),.foregroundColor:Theme.accent])
             }
+            let label = numberLabel(row:row,current:current) as NSString
+            let attrs: [NSAttributedString.Key:Any] = [.font:NSFont.monospacedDigitSystemFont(ofSize:11,weight:row == current ? .medium : .regular),.foregroundColor:row == current ? Theme.foreground : Theme.secondary]
+            label.draw(at:NSPoint(x:bounds.maxX-10-label.size(withAttributes:attrs).width,y:y),withAttributes:attrs)
+        }
+        while glyph < NSMaxRange(glyphs) && glyph < lm.numberOfGlyphs {
+            var range = NSRange()
+            let fragment = lm.lineFragmentRect(forGlyphAt:glyph,effectiveRange:&range)
+            let index = lm.characterIndexForGlyph(at:glyph)
+            let row = pane.document.lines.line(at:index)
+            if starts[row] == index,!pane.folding.hides(index) { drawNumber(row:row,fragment:fragment) }
             glyph = max(glyph+1,NSMaxRange(range))
+        }
+        if starts.last == source.length,lm.extraLineFragmentTextContainer === tc {
+            drawNumber(row:starts.count-1,fragment:lm.extraLineFragmentRect)
         }
     }
 }
