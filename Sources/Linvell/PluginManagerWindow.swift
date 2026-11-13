@@ -10,10 +10,10 @@ private final class PluginManagerCell: NSTableCellView {
 final class PluginManagerWindow: PluginOwnedWindow, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
     let store: PluginStore
     private let queue = DispatchQueue(label:"top.fuluwa.linvell.plugin-manager",qos:.userInitiated)
-    private let tabs = NSSegmentedControl(labels:[L.text("Installed Plugins"),L.text("Plugin Catalog"),L.text("Plugin Sources")],trackingMode:.selectOne,target:nil,action:nil)
+    private let tabs = Theme.segmented([L.text("Installed Plugins"),L.text("Plugin Catalog"),L.text("Plugin Sources")])
     private let table = NSTableView(),details = NSTextField(wrappingLabelWithString:""),status = NSTextField(wrappingLabelWithString:"")
     private let actions = NSStackView(),sourceField = NSTextField()
-    private let search = NSSearchField()
+    private let search = Theme.searchField()
     private var listedInstalled: [InstalledPlugin] = [],listedSources: [PluginSource] = []
     private var controls: [NSControl] = []
     private var registry = PluginRegistry()
@@ -29,10 +29,10 @@ final class PluginManagerWindow: PluginOwnedWindow, NSTableViewDataSource, NSTab
         tabs.selectedSegment = 0;tabs.target = self;tabs.action = #selector(tabChanged);controls.append(tabs)
         let install = button("Install Package…",#selector(installPackage)),url = button("Install from URL…",#selector(installURL)),check = button("Check Plugin Updates",#selector(checkUpdates))
         let heading = Theme.stack([install,url,check,NSView()])
-        table.headerView = nil;table.rowHeight = 42;table.delegate = self;table.dataSource = self;table.backgroundColor = Theme.canvas
+        table.headerView = nil;table.rowHeight = 42;table.delegate = self;table.dataSource = self;table.backgroundColor = Theme.liveCanvas
         let column = NSTableColumn(identifier:.init("plugin"));column.title = L.text("Plugins");table.addTableColumn(column);table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle;table.setAccessibilityLabel(L.text("Plugin Manager List"))
         let scroll = ResponsiveScrollView();scroll.documentView = table;scroll.hasVerticalScroller = true
-        details.textColor = Theme.foreground;status.textColor = Theme.secondary;details.maximumNumberOfLines = 6;status.maximumNumberOfLines = 3
+        details.textColor = Theme.liveForeground;status.textColor = Theme.liveSecondary;details.maximumNumberOfLines = 6;status.maximumNumberOfLines = 3
         search.placeholderString = L.text("Search plugins and sources");search.delegate = self;controls.append(search)
         sourceField.placeholderString = L.text("HTTPS source catalog URL");sourceField.isHidden = true
         actions.orientation = .horizontal;actions.spacing = 8
@@ -60,7 +60,7 @@ final class PluginManagerWindow: PluginOwnedWindow, NSTableViewDataSource, NSTab
         }
     }
     override func refreshAppearance() {
-        super.refreshAppearance();table.backgroundColor = Theme.canvas;details.textColor = Theme.foreground;status.textColor = Theme.secondary;table.reloadData()
+        super.refreshAppearance();table.backgroundColor = Theme.liveCanvas;details.textColor = Theme.liveForeground;status.textColor = Theme.liveSecondary;table.reloadData()
     }
     @objc private func runtimeChanged() { if tabs.selectedSegment == 0 { renderActions() } }
     @objc private func storeChanged() { if !busy { refresh() } }
@@ -94,7 +94,7 @@ final class PluginManagerWindow: PluginOwnedWindow, NSTableViewDataSource, NSTab
         default:
             guard listedSources.indices.contains(row) else { return nil };let source = listedSources[row];text = source.name+"  · "+source.url.absoluteString
         }
-        let value = NSTextField(labelWithString:text);value.lineBreakMode = .byTruncatingMiddle;value.textColor = Theme.foreground
+        let value = NSTextField(labelWithString:text);value.lineBreakMode = .byTruncatingMiddle;value.textColor = Theme.liveForeground
         let cell = PluginManagerCell();cell.textField = value;Theme.pin(value,in:cell,inset:8);return cell
     }
     func tableViewSelectionDidChange(_ notification: Notification) { renderActions() }
@@ -135,7 +135,7 @@ final class PluginManagerWindow: PluginOwnedWindow, NSTableViewDataSource, NSTab
     @objc private func installPackage() { choosePackage() }
     private func choosePackage(expectedID: String? = nil) {
         guard !busy,let window else { return }
-        let picker = NSOpenPanel();picker.canChooseFiles = true;picker.canChooseDirectories = true;picker.message = L.text("Choose a plugin ZIP or package folder.")
+        let picker = Theme.openPanel();picker.canChooseFiles = true;picker.canChooseDirectories = true;picker.message = L.text("Choose a plugin ZIP or package folder.")
         picker.beginSheetModal(for:window) { [weak self] reply in
             guard let self,reply == .OK,let url = picker.url else { return }
             self.perform("Validating plugin package…",work:{
@@ -147,7 +147,7 @@ final class PluginManagerWindow: PluginOwnedWindow, NSTableViewDataSource, NSTab
     }
     @objc private func installURL() {
         guard !busy,let window else { return }
-        let alert = NSAlert();alert.messageText = L.text("Install from URL…");alert.informativeText = L.text("Enter the HTTPS URL of a plugin ZIP. You will review the package before installation.")
+        let alert = ThemedAlert();alert.messageText = L.text("Install from URL…");alert.informativeText = L.text("Enter the HTTPS URL of a plugin ZIP. You will review the package before installation.")
         let field = NSTextField(frame:NSRect(x:0,y:0,width:460,height:26));field.placeholderString = "https://example.com/plugin.zip";alert.accessoryView = field
         alert.addButton(withTitle:L.text("Download"));alert.addButton(withTitle:L.text("Cancel"))
         alert.beginSheetModal(for:window) { [weak self] reply in
@@ -158,7 +158,7 @@ final class PluginManagerWindow: PluginOwnedWindow, NSTableViewDataSource, NSTab
     private func review(_ candidate: PluginCandidate) {
         guard let window else { return }
         let manifest = candidate.package.manifest,old = registry.installed.first { $0.id == manifest.id }
-        let alert = NSAlert();alert.messageText = L.text(old == nil ? "Install Plugin" : "Replace Plugin")+": "+manifest.name+" "+manifest.version
+        let alert = ThemedAlert();alert.messageText = L.text(old == nil ? "Install Plugin" : "Replace Plugin")+": "+manifest.name+" "+manifest.version
         let history = old.map { $0.version+" → "+manifest.version+"\n" } ?? ""
         let origin = candidate.downloadURL?.absoluteString ?? L.text("Local package")
         let identity = manifest.id+"\n"+history+origin
@@ -195,7 +195,7 @@ final class PluginManagerWindow: PluginOwnedWindow, NSTableViewDataSource, NSTab
     }
     @objc private func rollbackPlugin() {
         guard let record = selected,let window else { return }
-        let alert = NSAlert();alert.messageText = L.text("Roll back to the previous plugin version?");alert.addButton(withTitle:L.text("Roll Back"));alert.addButton(withTitle:L.text("Cancel"))
+        let alert = ThemedAlert();alert.messageText = L.text("Roll back to the previous plugin version?");alert.addButton(withTitle:L.text("Roll Back"));alert.addButton(withTitle:L.text("Cancel"))
         alert.beginSheetModal(for:window) { [weak self] reply in
             guard let self,reply == .alertFirstButtonReturn else { return };self.pause(record.id)
             self.perform("Rolling back plugin…",work:{ try self.store.rollback(record.id,expectedRevision:record.revision) }) { self.announce($0.id) }
@@ -203,7 +203,7 @@ final class PluginManagerWindow: PluginOwnedWindow, NSTableViewDataSource, NSTab
     }
     @objc private func uninstallPlugin() {
         guard let record = selected,let window else { return }
-        let alert = NSAlert();alert.messageText = L.text("Uninstall Plugin")+": "+record.name
+        let alert = ThemedAlert();alert.messageText = L.text("Uninstall Plugin")+": "+record.name
         alert.informativeText = L.text("The plugin and its rollback copy will be removed. Project settings and external CLI tools are kept.")
         let clear = NSButton(checkboxWithTitle:L.text("Also remove user settings and local stored state"),target:nil,action:nil);alert.accessoryView = clear
         alert.addButton(withTitle:L.text("Uninstall Plugin"));alert.addButton(withTitle:L.text("Cancel"))

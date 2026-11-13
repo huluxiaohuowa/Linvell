@@ -14,21 +14,21 @@ final class PreferencesController: NSWindowController {
         self.updates = updates; self.workspaceOwner = owner
         let window = NSWindow(contentRect:NSRect(x:0,y:0,width:900,height:650),styleMask:[.titled,.closable,.resizable,.miniaturizable],backing:.buffered,defer:false)
         window.title = L.text("Linvell Settings"); window.minSize = NSSize(width:780,height:610); window.center(); window.isReleasedWhenClosed = false
-        window.appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua); window.backgroundColor = Theme.canvas
+        ThemedWindow.install(window)
         super.init(window:window)
         let stack = Theme.stack([navigation,detail],spacing:0); stack.alignment = .top
         Theme.pin(stack,in:window.contentView!)
-        navigation.widthAnchor.constraint(equalToConstant:200).isActive = true
+        navigation.widthAnchor.constraint(equalToConstant:174).isActive = true
         navigation.heightAnchor.constraint(equalTo:stack.heightAnchor).isActive = true; detail.heightAnchor.constraint(equalTo:stack.heightAnchor).isActive = true
         let heading = Theme.label("SETTINGS",size:11,color:Theme.secondary,weight:.semibold)
         var rows: [NSView] = [heading]
         for (index,entry) in [("paintpalette","Appearance"),("textformat","Editor"),("keyboard","Vim"),("icloud","Sync"),("arrow.triangle.2.circlepath","Updates"),("puzzlepiece.extension","Plugins")].enumerated() {
             let b = NSButton(title:L.text(entry.1),image:NSImage(systemSymbolName:entry.0,accessibilityDescription:nil)!,target:self,action:#selector(selectCategory(_:)))
-            b.tag = index; b.isBordered = false; b.imagePosition = .imageLeading; b.alignment = .left; b.font = .systemFont(ofSize:14)
-            b.heightAnchor.constraint(equalToConstant:40).isActive = true; buttons.append(b); rows.append(b)
+            b.tag = index; b.isBordered = false; b.imagePosition = .imageLeading; b.alignment = .left; b.font = .systemFont(ofSize:13)
+            b.heightAnchor.constraint(equalToConstant:31).isActive = true; buttons.append(b); rows.append(b)
         }
         rows.append(NSView()); rows.append(Theme.label("Linvell \(UpdateManager.currentVersion)",size:11,color:Theme.secondary))
-        Theme.pin(Theme.stack(rows,orientation:.vertical,spacing:12),in:navigation,inset:20)
+        Theme.pin(Theme.stack(rows,orientation:.vertical,spacing:7),in:navigation,inset:16)
         render()
         NotificationCenter.default.addObserver(self,selector:#selector(pluginsChanged),name:PluginMenus.changed,object:owner)
         NotificationCenter.default.addObserver(self,selector:#selector(preferencesUpdated),name:PreferencesSync.didApply,object:nil)
@@ -50,7 +50,6 @@ final class PreferencesController: NSWindowController {
     }
     @objc private func pluginsChanged() { if category == 5 { render() } }
     @objc private func preferencesUpdated() {
-        window?.appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua); window?.backgroundColor = Theme.canvas
         navigation.refreshTheme(); detail.refreshTheme(); render()
     }
     private func render() {
@@ -58,7 +57,7 @@ final class PreferencesController: NSWindowController {
         buttons.forEach { $0.contentTintColor = $0.tag == category ? Theme.accent : Theme.secondary }
         let title = ["Appearance","Editor","Vim","iCloud Sync","Updates","Plugins"][category]
         let subtitle = ["A workspace that feels like your own.","Comfortable text, deliberate defaults.","A native engine, built one behavior at a time.","Your preferences, across your Macs.","Stay current, on your terms.","Configure the plugins loaded in this workspace."][category]
-        var rows: [NSView] = [Theme.label(title,size:30,weight:.semibold),Theme.label(subtitle,size:14,color:Theme.secondary)]
+        var rows: [NSView] = [Theme.label(title,size:24,weight:.semibold),Theme.label(subtitle,size:14,color:Theme.secondary)]
         switch category {
         case 0:
             rows.append(section("STARTUP"))
@@ -86,7 +85,6 @@ final class PreferencesController: NSWindowController {
                 }
                 let row = Theme.stack(tiles,spacing:16); row.distribution = .fillEqually; rows.append(row)
             }
-            rows.append(Theme.label("Themes update the editor, sidebar and terminal together.",size:12,color:Theme.secondary))
         case 1:
             rows.append(section("SAVING"))
             rows.append(check("Automatically save changes",key:"autoSave"))
@@ -105,7 +103,8 @@ final class PreferencesController: NSWindowController {
             size.selectItem(withTitle:String(Int(Theme.fontSize))); size.identifier = NSUserInterfaceItemIdentifier("editorFontSize"); size.target = self; size.action = #selector(popupChanged(_:))
             rows.append(settingRow("Font size",size))
             rows.append(section("LAYOUT & INDENTATION"))
-            rows.append(check("Show line numbers",key:"lineNumbers")); rows.append(check("Relative line numbers",key:"relativeLineNumbers")); rows.append(check("Wrap long lines",key:"wordWrap"))
+            rows.append(check("Show line numbers",key:"lineNumbers")); rows.append(check("Relative line numbers",key:"relativeLineNumbers")); rows.append(check("Wrap long lines",key:"wordWrap")); rows.append(check("Show Minimap",key:"showMinimap"))
+            rows.append(check("Show indentation guides",key:"indentGuides"))
             rows.append(check("Indent with spaces",key:"useSpaces"))
             let tabs = Theme.choiceButton(); tabs.addItems(withTitles:["2","4","8"]); tabs.selectItem(withTitle:PreferencesSync.value("tabWidth")); tabs.identifier = NSUserInterfaceItemIdentifier("tabWidth"); tabs.target = self; tabs.action = #selector(popupChanged(_:))
             rows.append(settingRow("Tab width",tabs))
@@ -160,12 +159,12 @@ final class PreferencesController: NSWindowController {
         let scroll = ResponsiveScrollView(); scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = false; scroll.borderType = .noBorder
         let document = SettingsDocument(); document.translatesAutoresizingMaskIntoConstraints = false; scroll.documentView = document
         Theme.pin(scroll,in:detail)
-        let stack = Theme.stack(rows,orientation:.vertical,spacing:18); Theme.pin(stack,in:document,inset:32)
+        let stack = Theme.stack(rows,orientation:.vertical,spacing:12); Theme.pin(stack,in:document,inset:24)
         document.widthAnchor.constraint(equalTo:scroll.contentView.widthAnchor).isActive = true
         document.heightAnchor.constraint(greaterThanOrEqualTo:scroll.contentView.heightAnchor).isActive = true
     }
     private func section(_ title: String) -> NSTextField { Theme.label(title,size:11,color:Theme.secondary,weight:.semibold) }
-    private func text(_ value: String) -> NSTextField { let l = NSTextField(wrappingLabelWithString:L.text(value)); l.font = .systemFont(ofSize:13); l.textColor = Theme.secondary; return l }
+    private func text(_ value: String) -> NSTextField { let l = NSTextField(wrappingLabelWithString:L.text(value)); l.font = .systemFont(ofSize:13); l.textColor = Theme.liveSecondary; return l }
     private func settingRow(_ title: String,_ control: NSView) -> NSStackView { Theme.stack([Theme.label(title,size:14),NSView(),control]) }
     private func check(_ title: String,key: String) -> NSButton {
         let b = NSButton(checkboxWithTitle:L.text(title),target:self,action:#selector(checkChanged(_:))); b.identifier = NSUserInterfaceItemIdentifier(key)
@@ -175,7 +174,7 @@ final class PreferencesController: NSWindowController {
     @objc private func openPluginSettings(_ sender: NSButton) {
         if let id = sender.identifier?.rawValue,let session = workspaceOwner?.pluginSessions[id] { workspaceOwner?.openPluginSettings(session) }
     }
-    @objc private func themeSelected(_ sender: NSButton) { let store = workspaceOwner?.installedPluginStore ?? .shared; DispatchQueue.global(qos:.utility).async { try? store.selectTheme(plugin:nil,id:nil) }; Theme.profile = Theme.Profile.allCases[sender.tag]; PreferencesSync.shared.changed() }
+    @objc private func themeSelected(_ sender: NSButton) { Theme.selectProfile(Theme.Profile.allCases[sender.tag],store:workspaceOwner?.installedPluginStore ?? .shared) }
     @objc private func popupChanged(_ sender: NSPopUpButton) {
         guard let key = sender.identifier?.rawValue,let title = sender.titleOfSelectedItem else { return }
         let value = (sender.selectedItem?.representedObject as? String) ?? title
@@ -220,16 +219,21 @@ final class ThemePreview: NSButton {
     let profile: Theme.Profile
     init(profile: Theme.Profile,target: AnyObject,action: Selector) {
         self.profile = profile; super.init(frame:.zero); self.target = target; self.action = action; isBordered = false
-        setAccessibilityLabel(profile.rawValue); heightAnchor.constraint(equalToConstant:160).isActive = true
+        setAccessibilityLabel(L.text(profile.rawValue)); heightAnchor.constraint(equalToConstant:76).isActive = true
     }
     required init?(coder: NSCoder) { fatalError() }
     override func draw(_ dirtyRect: NSRect) {
         let r = bounds.insetBy(dx:2,dy:2), palette = profile.colors
         Theme.color(palette[0]).setFill(); NSBezierPath(roundedRect:r,xRadius:10,yRadius:10).fill()
-        Theme.color(palette[1]).setFill(); NSRect(x:r.minX+1,y:r.minY+30,width:48,height:r.height-31).fill()
-        for (i,width) in [52.0,80,62,95,46].enumerated() {
-            Theme.color(palette[i%3+4]).withAlphaComponent(0.8).setFill()
-            NSBezierPath(roundedRect:NSRect(x:66,y:r.maxY-25-CGFloat(i)*15,width:width,height:4),xRadius:2,yRadius:2).fill()
+        let samples: [(String,SourceTokenKind)] = [("let",.keyword),(" hue: Color",.type),(" = ",.comment),("\"Glass\"",.string)]
+        let font = NSFont.monospacedSystemFont(ofSize:11,weight:.regular)
+        var x = r.minX+12
+        for (text,kind) in samples {
+            let hex = Theme.syntaxHex(kind,palette:palette,profile:profile)
+            let attributes: [NSAttributedString.Key:Any] = [.font:font,.foregroundColor:Theme.color(hex)]
+            let word = text as NSString
+            word.draw(at:NSPoint(x:x,y:r.maxY-33),withAttributes:attributes)
+            x += word.size(withAttributes:attributes).width
         }
         let selected = profile == Theme.profile && Theme.pluginTheme == nil
         let title = L.text(profile.rawValue) + (selected ? "   ✓" : "")

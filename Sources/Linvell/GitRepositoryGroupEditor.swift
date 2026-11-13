@@ -4,10 +4,10 @@ import LinvellCore
 /// Native adaptation of FoldGit's RepositoryGroupEditor and immediate-child discovery (MIT).
 final class GitRepositoryGroupEditor: NSView, NSTextFieldDelegate {
     let name = NSTextField()
-    let filter = NSSearchField()
+    let filter = Theme.searchField()
     private let rows = NSStackView()
     private let scroll = NSScrollView()
-    private let add = NSButton(title:L.text("Add Repositories from Finder"),target:nil,action:nil)
+    private let add = Theme.actionButton("Add Repositories from Finder",target:nil,action:nil)
     private let count = Theme.label("",size:12,color:Theme.secondary)
     private let error = NSTextField(wrappingLabelWithString:"")
     private(set) var candidates: [WorkspaceSession]
@@ -58,7 +58,7 @@ final class GitRepositoryGroupEditor: NSView, NSTextFieldDelegate {
     }
     @objc private func chooseDirectories() {
         guard let window else { return }
-        let panel = NSOpenPanel(); panel.appearance = window.effectiveAppearance; panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = true
+        let panel = Theme.openPanel(); panel.appearance = window.effectiveAppearance; panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = true
         panel.title = L.text("Add Repositories from Finder")
         panel.beginSheetModal(for:window) { [weak self] response in
             if response == .OK { self?.importDirectories(panel.urls) }

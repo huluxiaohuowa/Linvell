@@ -109,8 +109,17 @@ final class PreviewTests: XCTestCase {
         ![Local](images/example.png)
         """
         let html = MarkdownRendering.html(source,colors:Theme.Profile.light.colors)
-        for fragment in ["<h1","<strong>Bold</strong>","<em>italic</em>","<ul data-source-line=", "<pre data-source-line=","&lt;tag&gt;","<table data-source-line=","images/example.png"] { XCTAssertTrue(html.contains(fragment),fragment) }
+        for fragment in ["<h1","<strong>Bold</strong>","<em>italic</em>","<ul data-source-line=", "<pre data-source-line=","&lt;tag&gt;","<span class=\"syntax-keyword\">let</span>","<span class=\"syntax-string\">","<table data-source-line=","images/example.png"] { XCTAssertTrue(html.contains(fragment),fragment) }
         XCTAssertTrue(html.contains("default-src 'none'"))
+    }
+    func testMarkdownCodeUsesTheSelectedThemeAndPreservesEscaping() {
+        let profile = Theme.Profile.ember
+        let source = "```swift\nlet value = \"&lt; <tag>\"\n```"
+        let html = MarkdownRendering.html(source,colors:profile.colors,profile:profile)
+        let stringColor = Theme.syntaxHex(.string,palette:profile.colors,profile:profile)
+        XCTAssertTrue(html.contains(String(format:".syntax-string{color:#%06X}",stringColor)))
+        XCTAssertTrue(html.contains("&amp;lt; &lt;tag&gt;"))
+        XCTAssertFalse(html.contains("<tag>"))
     }
     func testMarkdownResourcesCannotEscapeDocumentFolder() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

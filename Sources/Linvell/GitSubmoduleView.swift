@@ -3,7 +3,7 @@ import LinvellCore
 
 final class GitSubmoduleView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
     private(set) var repository: GitRepository
-    let table = ResponsiveTableView(),search = NSSearchField()
+    let table = ResponsiveTableView(),search = Theme.searchField()
     let caption = NSTextField(wrappingLabelWithString:"")
     let recursive = NSButton(checkboxWithTitle:L.text("Include nested submodules"),target:nil,action:nil)
     let detail = NSTextField(wrappingLabelWithString:"")
@@ -19,10 +19,10 @@ final class GitSubmoduleView: NSView, NSTableViewDataSource, NSTableViewDelegate
     init(repository: GitRepository) {
         self.repository = repository; super.init(frame:.zero)
         search.placeholderString = L.text("Filter submodules"); search.delegate = self
-        recursive.state = .on; caption.font = .systemFont(ofSize:12); caption.textColor = Theme.secondary
-        detail.font = .monospacedSystemFont(ofSize:12,weight:.regular); detail.textColor = Theme.secondary; detail.maximumNumberOfLines = 5
+        recursive.state = .on; caption.font = .systemFont(ofSize:12); caption.textColor = Theme.liveSecondary
+        detail.font = .monospacedSystemFont(ofSize:12,weight:.regular); detail.textColor = Theme.liveSecondary; detail.maximumNumberOfLines = 5
         let column = NSTableColumn(identifier:NSUserInterfaceItemIdentifier("submodule")); table.addTableColumn(column); table.headerView = nil
-        table.rowHeight = 65; table.backgroundColor = Theme.panel; table.dataSource = self; table.delegate = self
+        table.rowHeight = 65; table.backgroundColor = Theme.livePanel; table.dataSource = self; table.delegate = self
         table.target = self; table.doubleAction = #selector(openRepository); table.setAccessibilityLabel(L.text("Git submodules"))
         let scroll = ResponsiveScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true; scroll.drawsBackground = false
         updateButton = button("Initialize / Update",#selector(updateSelected)); openButton = button("Open Repository",#selector(openRepository))
@@ -32,7 +32,7 @@ final class GitSubmoduleView: NSView, NSTableViewDataSource, NSTableViewDelegate
         let reference = Theme.stack([button("Stage Reference",#selector(stageReference)),openButton,NSView()],spacing:8)
         let advanced = Theme.stack([button("Tracking Branch…",#selector(changeBranch)),button("Change URL…",#selector(changeURL)),NSView()],spacing:8)
         let removal = Theme.stack([button("Update to Branch Tip…",#selector(updateRemote)),button("Remove…",#selector(removeSelected)),NSView()],spacing:8)
-        let help = NSTextField(wrappingLabelWithString:L.text("Update checks out the commit recorded by the parent repository. Stage Reference records a changed submodule commit; commit it in the parent repository. Local changes are never force-discarded.")); help.font = .systemFont(ofSize:12); help.textColor = Theme.secondary
+        let help = NSTextField(wrappingLabelWithString:L.text("Update checks out the commit recorded by the parent repository. Stage Reference records a changed submodule commit; commit it in the parent repository. Local changes are never force-discarded.")); help.font = .systemFont(ofSize:12); help.textColor = Theme.liveSecondary
         let outer = ResponsiveScrollView(); outer.hasVerticalScroller = true; outer.drawsBackground = false
         let document = SubmoduleDocument(); document.translatesAutoresizingMaskIntoConstraints = false; outer.documentView = document
         Theme.pin(outer,in:self)
@@ -112,7 +112,7 @@ final class GitSubmoduleView: NSView, NSTableViewDataSource, NSTableViewDelegate
         confirm(title:"Remove Submodule",text:"The clean checkout will be removed and the removal staged in the parent repository. Git object history is retained. Modified, conflicted or unrecorded commits block removal.") { [weak self] in guard let self else { return }; let repo = self.repository; self.perform { try repo.removeSubmodule(path:module.path) } }
     }
     @objc func addModule() {
-        guard let window else { return }; let alert = NSAlert(); alert.messageText = L.text("Add Submodule")
+        guard let window else { return }; let alert = ThemedAlert(); alert.messageText = L.text("Add Submodule")
         let url = NSTextField(),path = NSTextField(),branch = NSTextField(); url.placeholderString = "https://… / git@…"; path.placeholderString = "vendor/library"; branch.placeholderString = L.text("Default branch")
         let stack = Theme.stack([Theme.label("Repository URL",size:12),url,Theme.label("Folder inside this repository",size:12),path,Theme.label("Branch (optional)",size:12),branch],orientation:.vertical,spacing:8)
         stack.frame = NSRect(x:0,y:0,width:460,height:180); alert.accessoryView = stack
@@ -120,13 +120,13 @@ final class GitSubmoduleView: NSView, NSTableViewDataSource, NSTableViewDelegate
         alert.beginSheetModal(for:window) { [weak self] response in guard let self,response == .alertFirstButtonReturn else { return }; let repo = self.repository,u = url.stringValue,p = path.stringValue,b = branch.stringValue; self.perform { try repo.addSubmodule(url:u,path:p,branch:b) } }
     }
     private func input(title: String,value: String,accept: @escaping (String) -> Void) {
-        guard let window else { return }; let alert = NSAlert(); alert.messageText = L.text(title)
+        guard let window else { return }; let alert = ThemedAlert(); alert.messageText = L.text(title)
         let field = NSTextField(frame:NSRect(x:0,y:0,width:440,height:28)); field.stringValue = value; alert.accessoryView = field
         alert.addButton(withTitle:L.text("Apply")); alert.addButton(withTitle:L.text("Cancel"))
         alert.beginSheetModal(for:window) { response in if response == .alertFirstButtonReturn { accept(field.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)) } }
     }
     private func confirm(title: String,text: String,accept: @escaping () -> Void) {
-        guard let window else { return }; let alert = NSAlert(); alert.messageText = L.text(title); alert.informativeText = L.text(text)
+        guard let window else { return }; let alert = ThemedAlert(); alert.messageText = L.text(title); alert.informativeText = L.text(text)
         alert.addButton(withTitle:L.text("Continue")); alert.addButton(withTitle:L.text("Cancel"))
         alert.beginSheetModal(for:window) { response in if response == .alertFirstButtonReturn { accept() } }
     }

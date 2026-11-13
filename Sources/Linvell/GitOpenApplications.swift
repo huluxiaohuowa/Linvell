@@ -32,7 +32,7 @@ extension GitWorkspace {
         var seen: Set<String> = []
         let all = (ordered+applications).filter { seen.insert($0.id).inserted }
         let add = PickerOption(title:L.text("Add Application…"),detail:"") { [weak self] in
-            let panel = NSOpenPanel(); panel.appearance = window.effectiveAppearance; panel.allowedContentTypes = [.applicationBundle]; panel.directoryURL = URL(fileURLWithPath:"/Applications"); panel.allowsMultipleSelection = true
+            let panel = Theme.openPanel(); panel.appearance = window.effectiveAppearance; panel.allowedContentTypes = [.applicationBundle]; panel.directoryURL = URL(fileURLWithPath:"/Applications"); panel.allowsMultipleSelection = true
             panel.beginSheetModal(for:window) { response in
                 guard response == .OK else { return }; var updated = saved
                 for url in panel.urls where GitExternalApplication.read(url) != nil && !updated.contains(url.path) { updated.append(url.path) }
@@ -45,7 +45,7 @@ extension GitWorkspace {
                 NSWorkspace.shared.open([self.repository.root],withApplicationAt:URL(fileURLWithPath:app.path),configuration:NSWorkspace.OpenConfiguration()) { _,error in
                     DispatchQueue.main.async {
                         GitApplicationOpening.opening = false
-                        if let error { let alert = NSAlert(error:error); alert.window.appearance = window.effectiveAppearance; alert.beginSheetModal(for:window) }
+                        if let error { let alert = Theme.errorAlert(error); alert.window.appearance = window.effectiveAppearance; alert.beginSheetModal(for:window) }
                         else { var recents = defaults.stringArray(forKey:"git.openApplicationRecents") ?? []; recents.removeAll { $0 == app.id }; recents.insert(app.id,at:0); defaults.set(Array(recents.prefix(6)),forKey:"git.openApplicationRecents") }
                     }
                 }

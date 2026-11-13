@@ -17,7 +17,7 @@ final class GitRepositoryBrowserPanel: GitNativeSheet, NSOutlineViewDataSource, 
         var children: [Node]
         init(id: String,title: String,location: WorkspaceSession? = nil,children: [Node] = []) { self.id = id; self.title = title; self.location = location; self.children = children }
     }
-    let search = NSSearchField(),outline = GitRepositoryOutlineView(),sort = NSPopUpButton()
+    let search = Theme.searchField(),outline = GitRepositoryOutlineView(),sort = Theme.choiceButton()
     let onOpen: (WorkspaceSession) -> Void,onClone: () -> Void,onAdd: () -> Void,onGroup: (String?,Set<String>?) -> Void
     private var nodes: [Node] = [],worktreeSearch: [String:String] = [:],timer: Timer?
     private let defaults = UserDefaults.standard,dragType = NSPasteboard.PasteboardType("Linvell.RepositoryBrowser")
@@ -93,7 +93,7 @@ final class GitRepositoryBrowserPanel: GitNativeSheet, NSOutlineViewDataSource, 
     @objc func clone() { closeSheet(); onClone() }
     @objc func newGroup() { closeSheet(); onGroup(nil,Set(selected.compactMap { $0.location?.repositoryID })) }
     @objc func importFolder() {
-        guard let window else { return }; let panel = NSOpenPanel(); panel.appearance = window.effectiveAppearance; panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.allowsMultipleSelection = true
+        guard let window else { return }; let panel = Theme.openPanel(); panel.appearance = window.effectiveAppearance; panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.allowsMultipleSelection = true
         panel.beginSheetModal(for:window) { [self] response in guard response == .OK else { return }; let urls = panel.urls
             run("Discovering repositories…",{ try GitRepositoryGroupEditor.discovered(urls) }) { [self] found in
                 guard !found.isEmpty else { message.stringValue = L.text("No Git repositories were found directly inside this folder."); return }

@@ -33,19 +33,19 @@ final class GitActionsView: NSView, NSTextFieldDelegate, LocalProcessTerminalVie
         let console = Theme.actionButton("Interactive Git Console",target:self,action:#selector(startConsole))
         let stop = Theme.actionButton("Stop Console",target:self,action:#selector(stopConsole))
         output.isEditable = false; output.isRichText = false; output.font = .monospacedSystemFont(ofSize:12,weight:.regular)
-        output.backgroundColor = Theme.canvas; output.textColor = Theme.foreground; output.textContainerInset = NSSize(width:12,height:12)
+        output.backgroundColor = Theme.liveCanvas; output.textColor = Theme.liveForeground; output.textContainerInset = NSSize(width:12,height:12)
         output.isVerticallyResizable = true; output.autoresizingMask = .width; output.usesFindBar = true
         let scroll = ResponsiveScrollView(); scroll.documentView = output; scroll.hasVerticalScroller = true; scroll.drawsBackground = false
         Theme.pin(scroll,in:resultHost)
         let help = NSTextField(wrappingLabelWithString:L.text("Choose an operation and fill its fields. Advanced arguments are a JSON array, without shell expansion. Interactive rebase, patch selection and every other Git command are available in the console on this repository’s host."))
-        help.font = .systemFont(ofSize:12); help.textColor = Theme.secondary
+        help.font = .systemFont(ofSize:12); help.textColor = Theme.liveSecondary
         Theme.pin(Theme.stack([operations,parameters,Theme.label("Git argument array",size:12),argv,Theme.stack([runButton,console,stop,NSView()]),help,status,resultHost],orientation:.vertical,spacing:10),in:self)
         operationChanged()
     }
     required init?(coder: NSCoder) { fatalError() }
     deinit { terminate() }
     func refreshTheme() {
-        output.backgroundColor = Theme.canvas; output.textColor = Theme.foreground
+        output.backgroundColor = Theme.liveCanvas; output.textColor = Theme.liveForeground
         terminal?.nativeBackgroundColor = Theme.canvas; terminal?.nativeForegroundColor = Theme.foreground
     }
     func selectOperation(_ title: String,path: String? = nil,values: [String:String] = [:]) {
@@ -86,7 +86,7 @@ final class GitActionsView: NSView, NSTextFieldDelegate, LocalProcessTerminalVie
             let expected = try? operation?.arguments(Dictionary(uniqueKeysWithValues:fields.map { ($0.0,$0.1.stringValue) }))
             if operation?.writes != false || expected != arguments {
                 guard let window else { return }
-                let alert = NSAlert(); alert.messageText = L.text("Execute Git operation?")
+                let alert = ThemedAlert(); alert.messageText = L.text("Execute Git operation?")
                 alert.informativeText = repository.directory+"\n\ngit "+arguments.map(SSHRemote.quote).joined(separator:" ")+"\n\n"+L.text("This can change files, repository history or remotes. Review the exact arguments before continuing.")
                 alert.addButton(withTitle:L.text("Execute")); alert.addButton(withTitle:L.text("Cancel"))
                 alert.beginSheetModal(for:window) { [weak self] response in if response == .alertFirstButtonReturn { self?.perform(arguments) } }

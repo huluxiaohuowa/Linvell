@@ -20,17 +20,17 @@ final class PluginDataView: NSView, NSOutlineViewDataSource, NSOutlineViewDelega
         self.definition = definition
         table = definition.kind == .tree ? NSOutlineView() : NSTableView()
         super.init(frame:.zero)
-        let header = NSTextField(labelWithString:definition.title); header.font = .systemFont(ofSize:15,weight:.semibold); header.textColor = Theme.foreground
+        let header = NSTextField(labelWithString:definition.title); header.font = .systemFont(ofSize:15,weight:.semibold); header.textColor = Theme.liveForeground
         headerIcon.isHidden = true; headerIcon.widthAnchor.constraint(equalToConstant:18).isActive = true; headerIcon.heightAnchor.constraint(equalToConstant:18).isActive = true
         var actions: [NSView] = [headerIcon,header,NSView()]
         if definition.refreshCommand != nil { actions.append(Theme.button("arrow.clockwise",help:"Refresh Plugin View",target:self,action:#selector(refreshView))) }
         actions.append(Theme.actionButton("Run Selected",target:self,action:#selector(activateSelection)))
         let heading = Theme.stack(actions); heading.detachesHiddenViews = true; heading.heightAnchor.constraint(equalToConstant:36).isActive = true
-        summary.font = .systemFont(ofSize:13); summary.textColor = Theme.foreground; summary.isSelectable = true; summary.isEditable = false; summary.isRichText = false; summary.backgroundColor = Theme.canvas
+        summary.font = .systemFont(ofSize:13); summary.textColor = Theme.liveForeground; summary.isSelectable = true; summary.isEditable = false; summary.isRichText = false; summary.backgroundColor = Theme.liveCanvas
         summary.isVerticallyResizable = true; summary.autoresizingMask = .width; summary.textContainer?.widthTracksTextView = true
         summaryScroll.documentView = summary; summaryScroll.hasVerticalScroller = true; summaryScroll.heightAnchor.constraint(equalToConstant:100).isActive = true
         let column = NSTableColumn(identifier:.init("plugin.item")); column.title = definition.title; table.addTableColumn(column)
-        table.headerView = nil; table.rowHeight = 46; table.backgroundColor = Theme.canvas; table.selectionHighlightStyle = .regular; table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
+        table.headerView = nil; table.rowHeight = 46; table.backgroundColor = Theme.liveCanvas; table.selectionHighlightStyle = .regular; table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         table.doubleAction = #selector(activateSelection); table.target = self
         table.setAccessibilityLabel(definition.title)
         if let outline = table as? NSOutlineView { outline.outlineTableColumn = column; outline.dataSource = self; outline.delegate = self }
@@ -55,7 +55,7 @@ final class PluginDataView: NSView, NSOutlineViewDataSource, NSOutlineViewDelega
             if let selected { for index in 0..<outline.numberOfRows where (outline.item(atRow:index) as? PluginRow)?.value.id == selected { outline.selectRowIndexes(IndexSet(integer:index),byExtendingSelection:false) } }
         } else if let selected,let index = rows.firstIndex(where:{ $0.value.id == selected }) { table.selectRowIndexes(IndexSet(integer:index),byExtendingSelection:false) }
     }
-    func refreshAppearance() { table.backgroundColor = Theme.canvas; summary.textColor = Theme.foreground; summary.backgroundColor = Theme.canvas; table.reloadData() }
+    func refreshAppearance() { table.backgroundColor = Theme.liveCanvas; summary.textColor = Theme.liveForeground; summary.backgroundColor = Theme.liveCanvas; table.reloadData() }
     private func selectedRow() -> PluginRow? {
         guard table.selectedRow >= 0 else { return nil }
         if let outline = table as? NSOutlineView { return outline.item(atRow:outline.selectedRow) as? PluginRow }
@@ -76,8 +76,8 @@ final class PluginDataView: NSView, NSOutlineViewDataSource, NSOutlineViewDelega
     private func cell(_ row: PluginRow) -> NSView {
         let cell = NSTableCellView(),title = NSTextField(labelWithString:row.value.title)
         cell.toolTip = row.value.title+"\n"+(row.value.detail ?? "")
-        title.font = .systemFont(ofSize:13); title.textColor = Theme.foreground; title.lineBreakMode = .byTruncatingTail
-        let detail = NSTextField(labelWithString:row.value.detail ?? ""); detail.font = .systemFont(ofSize:11); detail.textColor = Theme.secondary; detail.lineBreakMode = .byTruncatingTail
+        title.font = .systemFont(ofSize:13); title.textColor = Theme.liveForeground; title.lineBreakMode = .byTruncatingTail
+        let detail = NSTextField(labelWithString:row.value.detail ?? ""); detail.font = .systemFont(ofSize:11); detail.textColor = Theme.liveSecondary; detail.lineBreakMode = .byTruncatingTail
         var content: [NSView] = []
         if let id = row.value.icon,let image = icon?(id) { let view = NSImageView(image:image); view.widthAnchor.constraint(equalToConstant:18).isActive = true; view.heightAnchor.constraint(equalToConstant:18).isActive = true; content.append(view) }
         content.append(Theme.stack([title,detail],orientation:.vertical,spacing:2))
@@ -90,15 +90,14 @@ class PluginOwnedWindow: NSWindowController, NSWindowDelegate {
     init(owner: WorkspaceController,title: String) {
         self.workspaceOwner = owner
         let window = NSWindow(contentRect:NSRect(x:0,y:0,width:680,height:520),styleMask:[.titled,.closable,.resizable],backing:.buffered,defer:false)
-        window.appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua); window.backgroundColor = Theme.canvas
+        ThemedWindow.install(window)
         window.title = title; window.minSize = NSSize(width:400,height:320); window.isReleasedWhenClosed = false
         super.init(window:window); window.delegate = self; window.center()
     }
     required init?(coder: NSCoder) { fatalError() }
     func refreshAppearance() {
-        window?.appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua); window?.backgroundColor = Theme.canvas
-        func refresh(_ view: NSView) { if let label = view as? NSTextField,!label.isEditable { label.textColor = Theme.foreground }; (view as? ThemedLabel)?.refreshTheme(); (view as? PluginDataView)?.refreshAppearance(); view.subviews.forEach(refresh) }
-        if let view = window?.contentView { refresh(view) }
+        window?.appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua); window?.backgroundColor = Theme.liveCanvas
+        if let view = window?.contentView { Theme.refreshViews(view) }
     }
     func windowDidBecomeKey(_ notification: Notification) { PluginMenus.refresh(workspace:workspaceOwner) }
 }

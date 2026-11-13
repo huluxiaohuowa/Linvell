@@ -22,7 +22,7 @@ extension WorkspaceController {
         let at = editor.selectedRange().location,word = EditorTextView.codeWord(in:editor.string,at:at)
         guard word.length > 0 else { return }
         let oldName = (editor.string as NSString).substring(with:word)
-        let alert = NSAlert(); alert.messageText = L.text("Rename Symbol")
+        let alert = ThemedAlert(); alert.messageText = L.text("Rename Symbol")
         alert.informativeText = L.text("The language service updates this symbol's definition and references across the workspace.")
         let name = NSTextField(frame:NSRect(x:0,y:0,width:350,height:28)); name.stringValue = oldName
         alert.accessoryView = name; alert.window.initialFirstResponder = name
@@ -98,7 +98,7 @@ extension WorkspaceController {
     }
     private func previewCodeRename(_ prepared: [PreparedCodeRename],newName: String) {
         guard let window else { return }
-        let alert = NSAlert(); alert.messageText = L.format("Rename to “%@”",newName)
+        let alert = ThemedAlert(); alert.messageText = L.format("Rename to “%@”",newName)
         let count = prepared.reduce(0) { $0+$1.edits.edits.count }
         let paths = prepared.prefix(12).compactMap { URL(string:$0.edits.uri)?.lastPathComponent }.joined(separator:"\n")
         alert.informativeText = L.format("%d changes in %d files. Changes remain unsaved and can be undone together.",count,prepared.count)+"\n\n"+paths

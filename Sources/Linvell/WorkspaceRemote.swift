@@ -12,9 +12,9 @@ extension WorkspaceController {
                 switch result {
                 case .success(let reply):
                     let options = (reply.entries ?? []).map { entry in
-                        PickerOption(title:entry.name,detail:L.text("Remote file"),invoke:{ [weak self] in self?.openRemote(entry.path,connection:connection) })
+                        PickerOption(title:(entry.name as NSString).lastPathComponent,detail:entry.name,invoke:{ [weak self] in self?.openRemote(entry.path,connection:connection) })
                     }
-                    self.picker = QuickPicker(title:L.text("Search remote files by name"),options:options,owner:window)
+                    self.picker = QuickPicker(title:L.text("Search remote files by name"),options:options,owner:window,compact:true)
                 case .failure(let error): self.show(error)
                 }
             }
@@ -24,7 +24,7 @@ extension WorkspaceController {
         let hosts = SSHConfig.hosts()
         var options = hosts.map { host in PickerOption(title:host,detail:L.text("SSH configuration"),invoke:{ [weak self] in self?.connectToSSH(host) }) }
         options.append(PickerOption(title:L.text("Enter SSH host…"),detail:L.text("Uses system SSH keys, agent and configuration"),invoke:{ [weak self] in
-            let alert = NSAlert(); alert.messageText = L.text("SSH host or config alias")
+            let alert = ThemedAlert(); alert.messageText = L.text("SSH host or config alias")
             let input = NSTextField(frame:NSRect(x:0,y:0,width:340,height:28)); alert.accessoryView = input
             alert.addButton(withTitle:L.text("Connect")); alert.addButton(withTitle:L.text("Cancel")); alert.window.initialFirstResponder = input
             if alert.runModal() == .alertFirstButtonReturn { self?.connectToSSH(input.stringValue) }
@@ -45,7 +45,7 @@ extension WorkspaceController {
             if terminal != nil {
                 guard mayCloseTerminal() else { return }; terminateTerminal(); terminalHost?.removeFromSuperview(); terminalHost = nil; terminal = nil
             }
-            latestOpenRequest = nil; stopPlugins(); resetLanguageServices()
+            latestOpenRequest = nil; tabRestoreGeneration = UUID(); stopPlugins(); resetLanguageServices()
             remoteConnection = connection; remoteDirectory = "~"; root = nil; fileIndex = []
             projectTitle.stringValue = "SSH · "+host; window?.title = "SSH · "+host
             sidebarKind = "files"; sidebar.subviews.forEach { $0.removeFromSuperview() }
@@ -54,7 +54,9 @@ extension WorkspaceController {
         } catch { show(error) }
     }
     func setupRemoteSidebar(_ connection: SSHRemote) {
+        sidebar.layer?.backgroundColor = NSColor.clear.cgColor
         let browser = RemoteExplorer(connection:connection,path:remoteDirectory); remoteBrowser = browser
+        browser.onSearch = { [weak self] in self?.quickOpenRemote(connection) }
         browser.onOpen = { [weak self] in self?.openRemote($0,connection:connection) }
         browser.onRootLoaded = { [weak self,weak browser] path in
             guard let self,self.remoteBrowser === browser else { return }
@@ -71,7 +73,7 @@ extension WorkspaceController {
         let picker = RemoteFolderPicker(connection:connection,path:remoteDirectory,owner:window); remoteFolderPicker = picker
         picker.onChoose = { [weak self] path in
             guard let self,self.remoteConnection?.host == connection.host else { return }
-            self.stopPlugins(); self.resetLanguageServices()
+            self.tabRestoreGeneration = UUID(); self.stopPlugins(); self.resetLanguageServices()
             self.remoteDirectory = path; self.sidebar.subviews.forEach { $0.removeFromSuperview() }
             self.setupRemoteSidebar(connection); self.sidebar.isHidden = false; self.body.adjustSubviews(); self.selectActivity(0); self.agentProjectDidChange()
         }
@@ -82,24 +84,28 @@ extension WorkspaceController {
         let request = UUID(); latestOpenRequest = request
         status.stringValue = L.text("Opening remote file…")
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
-            let result = Result { () throws -> (OpenDocument,RemoteDocument) in
-                let reply = try connection.request("read",path:path)
-                guard let content = reply.content,let data = Data(base64Encoded:content),let digest = reply.digest else { throw GitError.command("The remote response is incomplete.") }
-                let remote = try RemoteDocument(connection:connection,path:reply.path ?? path,digest:digest,data:data)
-                let document = try OpenDocument.load(remote.localURL)
-                document.remote = remote
-                return (document,remote)
-            }
+            let result = Result { try Self.loadRemoteDocument(path,connection:connection) }
             DispatchQueue.main.async {
                 guard let self else { return }
                 switch result {
-                case .success(let (document,_)):
+                case .success(let document):
                     self.finishRemoteOpen(document,request:request,completion:completion)
                 case .failure(let error): if self.latestOpenRequest == request { self.show(error) }
                 }
             }
         }
     }
+    static func loadRemoteDocument(_ path: String,connection: SSHRemote) throws -> OpenDocument {
+        let reply = try connection.request("read",path:path)
+        guard let content = reply.content,let data = Data(base64Encoded:content),let digest = reply.digest else {
+            throw GitError.command("The remote response is incomplete.")
+        }
+        let remote = try RemoteDocument(connection:connection,path:reply.path ?? path,digest:digest,data:data)
+        let document = try OpenDocument.load(remote.localURL)
+        document.remote = remote
+        return document
+    }
+
     func finishRemoteOpen(_ document: OpenDocument,request: UUID,completion: (() -> Void)?) {
         let existing = documents.first { $0.remote?.connection.host == document.remote?.connection.host && $0.remote?.path == document.remote?.path }
         if latestOpenRequest == request { activate(existing ?? document); completion?() }

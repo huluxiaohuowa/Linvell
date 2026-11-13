@@ -11,7 +11,7 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
     private let installationGuidance = NSStackView()
     var onStart: (() -> Void)?
     var onOpenFile: ((String, SSHRemote?, Int?) -> Void)?
-    let openSessions = NSPopUpButton()
+    let openSessions = Theme.choiceButton()
     let openFile = NSButton()
     let settingsToggle = NSButton()
     private let configurationDetails = NSStackView()
@@ -20,9 +20,9 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
     let project: String
     var isolatesProject = false
     let remote: SSHRemote?
-    let kindPicker = NSPopUpButton(),installationsPicker = NSPopUpButton()
-    let location = NSSegmentedControl(labels:[L.text("This Mac"),L.text("SSH Host")],trackingMode:.selectOne,target:nil,action:nil)
-    let path = NSTextField(),agentHome = NSTextField(),search = NSSearchField()
+    let kindPicker = Theme.choiceButton(),installationsPicker = Theme.choiceButton()
+    let location = Theme.segmented([L.text("This Mac"),L.text("SSH Host")])
+    let path = NSTextField(),agentHome = NSTextField(),search = Theme.searchField()
     let table = ResponsiveTableView(),terminalHost = NSView()
     let historyStatus = Theme.label("",size:11,color:Theme.secondary)
     let status = Theme.label("",size:12,color:Theme.secondary)
@@ -104,7 +104,7 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         button(browse,"Choose CLI…",#selector(chooseCLI)); button(connectSync,"Connect with Mutagen",#selector(connectProject))
         button(reviewConflicts,"Review Sync Conflicts…",#selector(showSyncConflicts)); reviewConflicts.isHidden = true
         let column = NSTableColumn(identifier:NSUserInterfaceItemIdentifier("agentSessions")); table.addTableColumn(column); table.headerView = nil
-        table.delegate = self; table.dataSource = self; table.rowHeight = 54; table.backgroundColor = Theme.panel
+        table.delegate = self; table.dataSource = self; table.rowHeight = 54; table.backgroundColor = Theme.livePanel
         table.target = self; table.doubleAction = #selector(resumeSelected); table.setAccessibilityLabel(L.text("Project agent sessions"))
         let scroll = ResponsiveScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true
         scroll.heightAnchor.constraint(greaterThanOrEqualToConstant:180).isActive = true
@@ -300,7 +300,7 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
         updateControls()
     }
     @objc private func chooseCLI() {
-        let panel = NSOpenPanel(); panel.message = L.text("Choose the agent executable or its desktop application.")
+        let panel = Theme.openPanel(); panel.message = L.text("Choose the agent executable or its desktop application.")
         panel.canChooseDirectories = false; panel.canChooseFiles = true
         guard panel.runModal() == .OK,let url = panel.url else { return }
         if url.pathExtension == "app" {
@@ -501,7 +501,7 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
     }
     func refreshTheme() {
         layer?.backgroundColor = Theme.canvas.cgColor; appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua)
-        table.backgroundColor = Theme.panel
+        table.backgroundColor = Theme.livePanel
         for runtime in runtimes {
             let terminal = runtime.terminal
             terminal.nativeBackgroundColor = Theme.canvas; terminal.nativeForegroundColor = Theme.foreground
@@ -517,7 +517,7 @@ final class AgentWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, 
     }
     func mayClose() -> Bool {
         guard running else { return true }
-        let alert = NSAlert(); alert.messageText = L.text("Stop running agent sessions?")
+        let alert = ThemedAlert(); alert.messageText = L.text("Stop running agent sessions?")
         alert.informativeText = L.text("The running CLIs will stop. Saved sessions remain in the agent’s own storage.")
         alert.addButton(withTitle:L.text("Stop")); alert.addButton(withTitle:L.text("Cancel"))
         return alert.runModal() == .alertFirstButtonReturn

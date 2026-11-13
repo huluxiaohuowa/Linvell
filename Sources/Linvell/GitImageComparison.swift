@@ -17,7 +17,7 @@ final class GitImageComparison: NSView {
     private let zoom = Theme.choiceButton()
     private var imageScrolls: [GitReviewCodeScroll] = []
     private var columns: [(NSImageView,NSScrollView,NSBitmapImageRep)] = []
-    private let layoutMode = NSSegmentedControl(labels:[L.text("Auto"),L.text("Unified"),L.text("Side by Side")],trackingMode:.selectOne,target:nil,action:nil)
+    private let layoutMode = Theme.segmented([L.text("Auto"),L.text("Unified"),L.text("Side by Side")])
 
     init(before: Data?,after: Data?) {
         super.init(frame:NSRect(x:0,y:0,width:700,height:500))

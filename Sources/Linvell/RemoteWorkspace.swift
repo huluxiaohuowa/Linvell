@@ -26,7 +26,7 @@ final class RemoteDocument {
 enum RemoteProgress {
     static func perform<T>(_ title: String,work: @escaping () throws -> T) throws -> T {
         let panel = NSPanel(contentRect:NSRect(x:0,y:0,width:380,height:105),styleMask:[.titled],backing:.buffered,defer:false)
-        panel.title = L.text(title); panel.center(); panel.isReleasedWhenClosed = false
+        panel.title = L.text(title); ThemedWindow.install(panel,panel:true); panel.center(); panel.isReleasedWhenClosed = false
         let spinner = NSProgressIndicator(); spinner.style = .spinning; spinner.startAnimation(nil)
         Theme.pin(Theme.stack([spinner,Theme.label(title,size:14)],spacing:16),in:panel.contentView!,inset:26)
         var outcome: Result<T,Error>?
@@ -63,10 +63,11 @@ final class RemoteBrowser: NSView, NSTableViewDelegate, NSTableViewDataSource {
         create.isHidden = directoriesOnly
         pathField.placeholderString = L.text("Remote folder path"); pathField.stringValue = initialPath; pathField.target = self; pathField.action = #selector(go)
         pathField.font = .systemFont(ofSize:13)
+        Theme.styleInput(pathField)
         let column = NSTableColumn(identifier:NSUserInterfaceItemIdentifier("remote")); table.addTableColumn(column); table.headerView = nil
-        table.rowHeight = 34; table.dataSource = self; table.delegate = self; table.target = self; table.action = #selector(selectionChanged); table.doubleAction = #selector(openSelected)
-        table.backgroundColor = Theme.panel; table.setAccessibilityLabel(L.text("Remote files"))
-        let scroll = ResponsiveScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true
+        table.rowHeight = 27; table.dataSource = self; table.delegate = self; table.target = self; table.action = #selector(selectionChanged); table.doubleAction = #selector(openSelected)
+        table.backgroundColor = .clear; table.setAccessibilityLabel(L.text("Remote files"))
+        let scroll = ResponsiveScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true; scroll.drawsBackground = false; scroll.autohidesScrollers = true
         Theme.pin(Theme.stack([Theme.stack([heading,NSView(),create,terminal,up,refresh],spacing:6),pathField,note,scroll],orientation:.vertical,spacing:12),in:self,inset:14)
         if autoLoad { browse(initialPath) }
     }
@@ -92,7 +93,7 @@ final class RemoteBrowser: NSView, NSTableViewDelegate, NSTableViewDataSource {
     @objc private func parent() { browse((directory as NSString).deletingLastPathComponent) }
     @objc private func shell() { onTerminal?() }
     @objc func createFile() {
-        let alert = NSAlert(); alert.messageText = L.text("New remote file")
+        let alert = ThemedAlert(); alert.messageText = L.text("New remote file")
         let input = NSTextField(frame:NSRect(x:0,y:0,width:320,height:28)); input.placeholderString = L.text("File name")
         alert.accessoryView = input; alert.window.initialFirstResponder = input
         alert.addButton(withTitle:L.text("Create")); alert.addButton(withTitle:L.text("Cancel"))
@@ -132,7 +133,7 @@ final class RemoteBrowser: NSView, NSTableViewDelegate, NSTableViewDataSource {
         }
     }
     private func apply(_ reply: RemoteReply,fallback: String) {
-        let updated = (reply.entries ?? []).filter { !directoriesOnly || $0.directory }
+        let updated = (reply.entries ?? []).filter { $0.name != ".git" && (!directoriesOnly || $0.directory) }
         let path = reply.path ?? fallback
         let changed = directory != path || entries != updated
         let selected = directory == path && entries.indices.contains(table.selectedRow) ? entries[table.selectedRow].path : nil

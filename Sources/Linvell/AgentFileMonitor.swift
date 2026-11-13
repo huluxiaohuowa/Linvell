@@ -150,6 +150,7 @@ extension WorkspaceController {
         for item in expanded { outline.expandItem(item) }
         if let selected { let row = outline.row(forItem:selected); if row >= 0 { outline.selectRowIndexes(IndexSet(integer:row),byExtendingSelection:false) } }
         if let root {
+            updateIgnoredFiles(for:root)
             let url = root.url
             DispatchQueue.global(qos:.utility).async { [weak self] in
                 let files = ProjectFiles.list(url)

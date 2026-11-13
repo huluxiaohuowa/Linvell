@@ -17,7 +17,7 @@ final class ProjectTools: NSView {
     private var refreshing = false
     init(project: URL,remote: SSHRemote? = nil,directory: String? = nil,owner: WorkspaceController? = nil,reportLoader: ((Int) throws -> Reports)? = nil) {
         self.project = project; self.workingDirectory = directory ?? project.path; self.remote = remote; self.workspaceOwner = owner; self.reportLoader = reportLoader
-        tabs = NSSegmentedControl(labels:["Overview","Runtime & Packages","Git Details","System"].map(L.text),trackingMode:.selectOne,target:nil,action:nil)
+        tabs = Theme.segmented(["Overview","Runtime & Packages","Git Details","System"].map(L.text))
         super.init(frame:.zero)
         tabs.selectedSegment = 0; tabs.target = self; tabs.action = #selector(refresh)
         let title = Theme.label("Project Tools",size:28,weight:.semibold)
@@ -157,12 +157,12 @@ private final class CoreHeatmap: NSView {
 
 private final class ToolsPage: NSView { override var isFlipped: Bool { true } }
 
-private final class ToolCard: NSView {
+private final class ToolCard: Surface {
     init(title: String,body: String) {
-        super.init(frame:.zero); wantsLayer = true; layer?.backgroundColor = Theme.panel.cgColor
+        super.init(Theme.panel)
         layer?.borderColor = Theme.secondary.withAlphaComponent(0.2).cgColor; layer?.borderWidth = 1; layer?.cornerRadius = 10
         let heading = Theme.label(title,size:14,color:Theme.accent,weight:.semibold)
-        let value = NSTextField(wrappingLabelWithString:body); value.isSelectable = true; value.font = .monospacedSystemFont(ofSize:12,weight:.regular); value.textColor = Theme.foreground
+        let value = NSTextField(wrappingLabelWithString:body); value.isSelectable = true; value.font = .monospacedSystemFont(ofSize:12,weight:.regular); value.textColor = Theme.liveForeground
         Theme.pin(Theme.stack([heading,value],orientation:.vertical,spacing:12),in:self,inset:20)
     }
     required init?(coder: NSCoder) { fatalError() }

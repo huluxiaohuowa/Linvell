@@ -5,13 +5,13 @@ import LinvellPluginKit
 extension WorkspaceController {
     @objc func loadDevelopmentPlugin() {
         guard let window else { return }
-        let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true
+        let panel = Theme.openPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true
         panel.message = L.text("Choose a plugin folder containing plugin.json.")
         panel.beginSheetModal(for:window) { [weak self] response in
             guard response == .OK,let self,let directory = panel.url else { return }
             do {
                 let package = try PluginPackage(directory:directory)
-                let alert = NSAlert(); alert.messageText = L.format("Load plugin: %@?",package.manifest.name)
+                let alert = ThemedAlert(); alert.messageText = L.format("Load plugin: %@?",package.manifest.name)
                 let remoteWarning = package.manifest.execution == "workspace" && self.remoteConnection != nil
                     ? L.text("Workspace programs will be copied to and executed on the connected SSH host.")+"\n\n" : ""
                 let warning = L.text("Only load code you trust. Plugins run as your user account, outside a security sandbox. Declared permissions restrict editor APIs, not direct file, network or process access.")

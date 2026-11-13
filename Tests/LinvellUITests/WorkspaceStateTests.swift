@@ -26,6 +26,33 @@ final class WorkspaceStateTests: XCTestCase {
         XCTAssertTrue(WorkspaceSession.shouldRestore(defaults:defaults))
         XCTAssertEqual(WorkspaceSession.load(defaults:defaults),location)
     }
+    func testSavedTabsOnlyRestoreForTheirWorkspace() throws {
+        let name = "Linvell.WorkspaceTabsTests."+UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName:name))
+        defer { defaults.removePersistentDomain(forName:name) }
+        let location = WorkspaceSession.ssh(host:"test-host",path:"/project")
+        let tabs = WorkspaceTabs(workspace:location,paths:["/project/a.swift","/project/b.swift"],active:"/project/a.swift")
+        tabs.save(defaults:defaults)
+        XCTAssertEqual(WorkspaceTabs.load(for:location,defaults:defaults)?.paths,tabs.paths)
+        XCTAssertEqual(WorkspaceTabs.load(for:location,defaults:defaults)?.active,tabs.active)
+        XCTAssertNil(WorkspaceTabs.load(for:.local(path:"/project"),defaults:defaults))
+        XCTAssertNil(WorkspaceTabs.load(for:.ssh(host:"other-host",path:"/project"),defaults:defaults))
+        XCTAssertFalse(PreferencesSync.defaults.keys.contains(WorkspaceTabs.key))
+    }
+
+    func testTabReorderRetainsSelection() {
+        _ = NSApplication.shared
+        let workspace = WorkspaceController()
+        defer { workspace.recoveryTimer?.invalidate(); workspace.window?.orderOut(nil) }
+        let a = OpenDocument(DocumentBuffer()), b = OpenDocument(DocumentBuffer())
+        workspace.documents = [a,b]; workspace.current = a
+        workspace.moveTab(a.buffer.id,by:1)
+        XCTAssertEqual(workspace.documents.map { $0.buffer.id },[b.buffer.id,a.buffer.id])
+        XCTAssertTrue(workspace.current === a)
+        workspace.moveTab(a.buffer.id,by:1)
+        XCTAssertEqual(workspace.documents.map { $0.buffer.id },[b.buffer.id,a.buffer.id])
+    }
+
     func testActivityKeepsOneVisibleSelectedButton() {
         _ = NSApplication.shared
         let workspace = WorkspaceController()

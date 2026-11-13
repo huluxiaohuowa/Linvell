@@ -19,7 +19,7 @@ final class GitPatchTextView: NSTextView {
     }
     @objc func applyLines() {
         do { apply?(try GitHunk.selection(in:string,range:selectedRange(),unstage:unstaging)) }
-        catch { if let window { NSAlert(error:error).beginSheetModal(for:window) } }
+        catch { if let window { Theme.errorAlert(error).beginSheetModal(for:window) } }
     }
     @objc func applyHunk() {
         let source = string as NSString
@@ -33,7 +33,7 @@ final class GitPatchTextView: NSTextView {
             if position >= range.location && (next.location == NSNotFound || position <= next.location) {
                 // The callback accepts an index-directed patch, so reverse selected hunk lines here too.
                 do { apply?(try GitHunk.selection(in:string,range:NSRange(location:range.location,length:(next.location == NSNotFound ? source.length : next.location)-range.location),unstage:unstaging)) }
-                catch { if let window { NSAlert(error:error).beginSheetModal(for:window) } }
+                catch { if let window { Theme.errorAlert(error).beginSheetModal(for:window) } }
                 return
             }
         }

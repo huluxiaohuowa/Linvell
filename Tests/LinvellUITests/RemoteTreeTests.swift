@@ -16,6 +16,7 @@ final class RemoteTreeTests: XCTestCase {
         let remote = try SSHRemote(host:try XCTUnwrap(object["host"])),root = try XCTUnwrap(object["root"])
         let browser = RemoteExplorer(connection:remote,path:root)
         XCTAssertTrue(waitUntil { browser.rootNode.children != nil })
+        XCTAssertFalse(browser.rootNode.children?.contains { $0.name == ".git" } == true)
         let nested = try XCTUnwrap(browser.rootNode.children?.first { $0.name == "nested" })
         browser.table.expandItem(nested)
         XCTAssertTrue(waitUntil { nested.children != nil })

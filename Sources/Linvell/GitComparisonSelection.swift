@@ -6,7 +6,7 @@ final class GitComparisonSelection: NSView {
         super.init(frame:NSRect(x:0,y:0,width:420,height:100))
         for picker in [from,to] { picker.addItems(withObjectValues:refs); picker.usesDataSource = false; picker.completes = true }
         from.stringValue = refs.first ?? "HEAD"; to.stringValue = refs.dropFirst().first ?? "HEAD"
-        let swap = NSButton(title:L.text("Swap Commits"),target:self,action:#selector(swapRevisions))
+        let swap = Theme.actionButton("Swap Commits",target:self,action:#selector(swapRevisions))
         Theme.pin(Theme.stack([Theme.stack([Theme.label("Base"),from]),
                                Theme.stack([Theme.label("Target"),to]),swap],orientation:.vertical,spacing:6),in:self)
     }

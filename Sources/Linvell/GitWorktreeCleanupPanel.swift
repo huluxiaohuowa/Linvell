@@ -11,10 +11,10 @@ final class GitWorktreeCleanupPanel: NSWindowController, NSWindowDelegate {
     private let list = NSStackView()
     private let scroll = NSScrollView()
     private let status = Theme.label("",size:12,color:Theme.secondary)
-    private let refresh = NSButton(title:L.text("Refresh"),target:nil,action:nil)
-    private let all = NSButton(title:L.text("Select All"),target:nil,action:nil)
-    private let remove = NSButton(title:L.text("Remove Selected Worktrees"),target:nil,action:nil)
-    private let closeButton = NSButton(title:L.text("Cancel"),target:nil,action:nil)
+    private let refresh = Theme.actionButton("Refresh",target:nil,action:nil)
+    private let all = Theme.actionButton("Select All",target:nil,action:nil)
+    private let remove = Theme.actionButton("Remove Selected Worktrees",target:nil,action:nil)
+    private let closeButton = Theme.actionButton("Cancel",target:nil,action:nil)
     let deleteBranches = NSButton(checkboxWithTitle:L.text("Delete merged local branches"),target:nil,action:nil)
     private(set) var candidates: [GitRepository.CleanupCandidate] = []
     private(set) var selected: Set<String> = []
@@ -29,8 +29,7 @@ final class GitWorktreeCleanupPanel: NSWindowController, NSWindowDelegate {
         let panel = NSPanel(contentRect:NSRect(x:0,y:0,width:700,height:500),styleMask:[.titled,.resizable,.closable],backing:.buffered,defer:false)
         super.init(window:panel)
         panel.title = L.text("Clean Up Merged Worktrees…"); panel.delegate = self; panel.minSize = NSSize(width:640,height:380)
-        panel.appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua)
-        panel.backgroundColor = Theme.panel
+        ThemedWindow.install(panel,panel:true)
         list.orientation = .vertical; list.alignment = .leading; list.spacing = 8
         list.frame = NSRect(x:0,y:0,width:650,height:350)
         scroll.documentView = list; scroll.hasVerticalScroller = true; scroll.drawsBackground = false
@@ -94,7 +93,7 @@ final class GitWorktreeCleanupPanel: NSWindowController, NSWindowDelegate {
                 list.addArrangedSubview(label)
                 label.widthAnchor.constraint(lessThanOrEqualToConstant:620).isActive = true
                 if let command = result.command {
-                    let copy = NSButton(title:L.text("Copy Delete Command"),target:self,action:#selector(copyCommand(_:)))
+                    let copy = Theme.actionButton("Copy Delete Command",target:self,action:#selector(copyCommand(_:)))
                     copy.identifier = NSUserInterfaceItemIdentifier(command); list.addArrangedSubview(copy)
                 }
             }

@@ -5,7 +5,7 @@ import Ink
 import LinvellCore
 
 enum MarkdownRendering {
-    static func html(_ text: String,colors: [UInt32]) -> String {
+    static func html(_ text: String,colors: [UInt32],profile: Theme.Profile? = nil) -> String {
         let color = { (index: Int) in String(format:"#%06X",colors[index]) }
         let lines = LineIndex(text)
         var parser = MarkdownParser()
@@ -13,20 +13,54 @@ enum MarkdownRendering {
             parser.addModifier(Modifier(target:target) { input in
                 guard input.markdown.base == text,let tagEnd = input.html.firstIndex(of:">") else { return input.html }
                 let range = NSRange(input.markdown.startIndex..<input.markdown.endIndex,in:text)
-                var html = input.html
+                var html = target == .codeBlocks ? highlightedCodeBlock(input.html) : input.html
                 html.insert(contentsOf:" data-source-line=\"\(lines.line(at:range.location)+1)\"",at:tagEnd)
                 return html
             })
         }
+        let syntaxCSS = SourceTokenKind.allCases.map { kind in
+            let hex = String(format:"#%06X",Theme.syntaxHex(kind,palette:colors,profile:profile))
+            return ".syntax-\(kind.rawValue){color:\(hex)}"
+        }.joined()
         let content = text.utf8.count <= 2*1024*1024 ? parser.html(from:text) : "<p>Markdown preview is limited to 2 MiB. The source remains available in the editor.</p>"
         return """
         <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
         <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src linvell-preview: data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
         <style>
         :root{color-scheme:light dark}*{box-sizing:border-box}body{margin:0;padding:32px clamp(24px,5vw,64px);background:\(color(0));color:\(color(2));font:16px/1.7 -apple-system,BlinkMacSystemFont,sans-serif;overflow-wrap:anywhere}
-        main{max-width:900px;margin:auto}h1,h2,h3,h4,h5,h6{line-height:1.3;margin:1.7em 0 .65em;font-weight:650}h1{font-size:2em}h2{font-size:1.5em;border-bottom:1px solid \(color(7));padding-bottom:.3em}main>:first-child{margin-top:0}a{color:\(color(4));text-underline-offset:3px}p,ul,ol,pre,blockquote,table{margin:0 0 1.1em}li+li{margin-top:.25em}code{font: .88em/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;background:\(color(1));padding:.15em .35em;border-radius:4px}pre{padding:18px 20px;background:\(color(1));border:1px solid \(color(7));border-radius:8px;overflow:auto;overflow-wrap:normal}pre code{padding:0;background:none;white-space:pre}blockquote{margin-left:0;padding:6px 20px;border-left:4px solid \(color(4));color:\(color(3))}blockquote p:last-child{margin-bottom:0}img{max-width:100%;height:auto;border-radius:6px}table{border-collapse:collapse;display:block;overflow:auto}th,td{padding:9px 14px;border:1px solid \(color(7));text-align:left}th{background:\(color(1))}hr{border:0;border-top:1px solid \(color(7));margin:2em 0}
+        main{max-width:900px;margin:auto}h1,h2,h3,h4,h5,h6{line-height:1.3;margin:1.7em 0 .65em;font-weight:650}h1{font-size:2em}h2{font-size:1.5em;border-bottom:1px solid \(color(7));padding-bottom:.3em}main>:first-child{margin-top:0}a{color:\(color(4));text-underline-offset:3px}p,ul,ol,pre,blockquote,table{margin:0 0 1.1em}li+li{margin-top:.25em}code{font: .88em/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;background:\(color(1));padding:.15em .35em;border-radius:4px}pre{padding:18px 20px;background:\(color(1));border:1px solid \(color(7));border-radius:8px;overflow:auto;overflow-wrap:normal}pre code{padding:0;background:none;white-space:pre}\(syntaxCSS)blockquote{margin-left:0;padding:6px 20px;border-left:4px solid \(color(4));color:\(color(3))}blockquote p:last-child{margin-bottom:0}img{max-width:100%;height:auto;border-radius:6px}table{border-collapse:collapse;display:block;overflow:auto}th,td{padding:9px 14px;border:1px solid \(color(7));text-align:left}th{background:\(color(1))}hr{border:0;border-top:1px solid \(color(7));margin:2em 0}
         </style></head><body><main data-source-lines="\(lines.starts.count)">\(content)</main></body></html>
         """
+    }
+    private static func highlightedCodeBlock(_ html: String) -> String {
+        let prefix = "<pre><code class=\"language-"
+        let suffix = "</code></pre>"
+        guard html.hasPrefix(prefix), html.hasSuffix(suffix),
+              let openingEnd = html.range(of:"\">") else { return html }
+        let language = html[html.index(html.startIndex,offsetBy:prefix.count)..<openingEnd.lowerBound].lowercased()
+        let extensions = ["javascript":"js","typescript":"ts","python":"py","rust":"rs","ruby":"rb",
+                          "shell":"sh","bash":"sh","c++":"cpp","c#":"cs","kotlin":"kt","dockerfile":"dockerfile"]
+        guard !language.isEmpty, language.utf8.count <= 24,
+              language.utf8.allSatisfy({ (97...122).contains($0) || (48...57).contains($0) || $0 == 43 || $0 == 35 })
+        else { return html }
+        let escaped = html[openingEnd.upperBound..<html.index(html.endIndex,offsetBy:-suffix.count)]
+        let code = escaped.replacingOccurrences(of:"&lt;",with:"<")
+            .replacingOccurrences(of:"&gt;",with:">").replacingOccurrences(of:"&amp;",with:"&")
+        guard code.utf8.count <= 128*1024 else { return html }
+        let source = code as NSString
+        let tokens = SourceSyntax.analyze(code,path:"code."+(extensions[language] ?? language)).tokens
+        var result = String(html[..<openingEnd.upperBound])
+        var position = 0
+        func escapedHTML(_ text: String) -> String {
+            text.replacingOccurrences(of:"&",with:"&amp;").replacingOccurrences(of:"<",with:"&lt;")
+                .replacingOccurrences(of:">",with:"&gt;")
+        }
+        for token in tokens {
+            result += escapedHTML(source.substring(with:NSRange(location:position,length:token.range.location-position)))
+            result += "<span class=\"syntax-\(token.kind.rawValue)\">" + escapedHTML(source.substring(with:token.range)) + "</span>"
+            position = NSMaxRange(token.range)
+        }
+        return result + escapedHTML(source.substring(from:position)) + suffix
     }
     static func localURL(_ url: URL,root: URL) -> URL? {
         guard url.scheme == "linvell-preview",url.host == "document" else { return nil }
@@ -75,10 +109,11 @@ final class MarkdownPreview: NSView, WKNavigationDelegate {
     func render(_ text: String) {
         sourceLines = LineIndex(text).starts.count
         work?.cancel(); let token = UUID(); generation = token
-        let colors = Theme.profile.colors
+        let colors = Theme.palette
+        let profile = Theme.pluginTheme == nil ? Theme.profile : nil
         let rawHTML = isHTML
         let item = DispatchWorkItem { [weak self] in
-            let html = rawHTML ? Self.documentHTML(text) : MarkdownRendering.html(text,colors:colors)
+            let html = rawHTML ? Self.documentHTML(text) : MarkdownRendering.html(text,colors:colors,profile:profile)
             DispatchQueue.main.async { [weak self] in
                 guard let self,self.generation == token else { return }
                 self.webView.loadHTMLString(html,baseURL:URL(string:"linvell-preview://document/")!)

@@ -27,7 +27,7 @@ final class GitCommitSummaryView: NSView {
     func render(_ commit: GitCommit,mergedIn: GitCommit?,canGoBack: Bool) {
         isHidden = false
         navigation.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        let back = NSButton(title:L.text("Back"),target:self,action:#selector(goBack)); back.isEnabled = canGoBack
+        let back = Theme.actionButton("Back",target:self,action:#selector(goBack)); back.isEnabled = canGoBack
         navigation.addArrangedSubview(back)
         let copy = NSButton(title:String(commit.hash.prefix(12)),target:self,action:#selector(copyHash(_:)))
         copy.identifier = NSUserInterfaceItemIdentifier(commit.hash); copy.toolTip = commit.hash

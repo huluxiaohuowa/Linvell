@@ -5,7 +5,7 @@ extension WorkspaceController {
     @objc func newAgentTask() {
         guard remoteConnection == nil,let root else { show(GitError.command("Task workspaces currently require a local repository.")); return }
         let repository = GitRepository(root:root.url)
-        let alert = NSAlert(); alert.messageText = L.text("New Task Workspace…")
+        let alert = ThemedAlert(); alert.messageText = L.text("New Task Workspace…")
         alert.informativeText = L.text("Create an isolated branch and worktree from HEAD. Your current uncommitted changes stay in this window.")
         let name = NSTextField(frame:NSRect(x:0,y:0,width:380,height:26)); name.placeholderString = L.text("Task name")
         alert.accessoryView = name; alert.addButton(withTitle:L.text("Create")); alert.addButton(withTitle:L.text("Cancel"))
@@ -48,7 +48,7 @@ extension WorkspaceController {
     private func removeAgentTask(_ task: AgentTask,repository: GitRepository) {
         let open = (NSApp.delegate as? AppDelegate)?.workspaces.contains { $0.root?.url.path == task.directory && ($0.window?.isVisible == true || $0.agentsRunning) } ?? false
         guard !open else { show(GitError.command("Close the task window and stop its agents before removing its worktree.")); return }
-        let alert = NSAlert(); alert.messageText = L.text("Remove Clean Task Workspace…")
+        let alert = ThemedAlert(); alert.messageText = L.text("Remove Clean Task Workspace…")
         alert.informativeText = task.title+"\n"+L.text("Only a clean, unlocked worktree can be removed. The branch and its commits are kept.")
         alert.addButton(withTitle:L.text("Remove")); alert.addButton(withTitle:L.text("Cancel"))
         alert.beginSheetModal(for:window!) { [weak self] response in

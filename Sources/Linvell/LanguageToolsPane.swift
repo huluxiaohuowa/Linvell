@@ -32,20 +32,20 @@ final class LanguageToolsPane: NSView {
         for control in [runtime as NSView,server,arguments] { control.heightAnchor.constraint(equalToConstant:26).isActive = true }
         enabled.heightAnchor.constraint(equalToConstant:24).isActive = true
         runtime.placeholderString = L.text("Interpreter or compiler path"); server.placeholderString = L.text("Language server executable"); arguments.placeholderString = "[\"--stdio\"]"
-        state.font = .systemFont(ofSize:12); state.textColor = Theme.secondary
+        state.font = .systemFont(ofSize:12); state.textColor = Theme.liveSecondary
         let detect = Theme.actionButton("Detect Tools",target:self,action:#selector(detectTools))
         let apply = Theme.actionButton("Apply Toolchain",target:self,action:#selector(applyToolchain))
         storage.addItems(withTitles:[L.text("Project folder (.linvell/tools)"),L.text("Host user folder (~/.linvell/language-services)")]); storage.target = self; storage.action = #selector(storageChanged)
         advanced.target = self; advanced.action = #selector(toggleAdvanced)
-        ignoreNotice.font = .systemFont(ofSize:12); ignoreNotice.textColor = Theme.secondary
+        ignoreNotice.font = .systemFont(ofSize:12); ignoreNotice.textColor = Theme.liveSecondary
         installButton = Theme.actionButton("Download and Install…",target:self,action:#selector(installService))
         clearButton = Theme.actionButton("Clear Language Service…",target:self,action:#selector(clearService))
         ignoreButton = Theme.actionButton("Add Git Ignore Rule",target:self,action:#selector(addIgnoreRule))
         cancelButton = Theme.actionButton("Cancel",target:self,action:#selector(cancelInstallation)); cancelButton.isHidden = true
         actionControls = [languages,runtime,server,arguments,enabled,storage,autoIgnore,advanced,detect,apply,installButton,clearButton,ignoreButton]
         let scope = Theme.label(remote.map { "SSH · "+$0.host } ?? L.text("This Mac"),size:13,color:Theme.accent)
-        let info = NSTextField(wrappingLabelWithString:L.text("Choose this project’s interpreter and install code intelligence only when needed. Remote packages are downloaded on this Mac, transferred to the selected host and then removed from the Mac. Automatic installation currently supports Python and JavaScript/TypeScript; other languages can use installed SDKs or custom servers.")); info.font = .systemFont(ofSize:13); info.textColor = Theme.secondary
-        let location = NSTextField(wrappingLabelWithString:L.format("Project settings: %@",".linvell/settings.json")); location.font = .systemFont(ofSize:11); location.textColor = Theme.secondary
+        let info = NSTextField(wrappingLabelWithString:L.text("Choose this project’s interpreter and install code intelligence only when needed. Remote packages are downloaded on this Mac, transferred to the selected host and then removed from the Mac. Automatic installation currently supports Python and JavaScript/TypeScript; other languages can use installed SDKs or custom servers.")); info.font = .systemFont(ofSize:13); info.textColor = Theme.liveSecondary
+        let location = NSTextField(wrappingLabelWithString:L.format("Project settings: %@",".linvell/settings.json")); location.font = .systemFont(ofSize:11); location.textColor = Theme.liveSecondary
         Theme.pin(Theme.stack([Theme.label("Language server",size:12),Theme.stack([server,Theme.actionButton("Browse…",target:self,action:#selector(browseServer))]),Theme.label("Arguments (JSON array)",size:12),arguments],orientation:.vertical,spacing:10),in:advancedBox)
         advancedBox.isHidden = true
         let rows: [NSView] = [scope,location,info,languages,enabled,Theme.label("Interpreter / compiler",size:12),Theme.stack([runtime,Theme.actionButton("Browse…",target:self,action:#selector(browseRuntime))]),Theme.label("Language service installation location",size:12),storage,ignoreNotice,autoIgnore,Theme.stack([ignoreButton,NSView()]),Theme.stack([installButton,clearButton,cancelButton,NSView()]),advanced,advancedBox,Theme.stack([detect,apply,NSView()]),state]
@@ -123,7 +123,7 @@ final class LanguageToolsPane: NSView {
         guard let window else { return }
         if let remote { remotePicker = RemoteToolPicker(remote:remote,root:root,owner:window,chosen:chosen) }
         else {
-            let panel = NSOpenPanel(); panel.canChooseDirectories = false; panel.canChooseFiles = true; panel.showsHiddenFiles = true
+            let panel = Theme.openPanel(); panel.canChooseDirectories = false; panel.canChooseFiles = true; panel.showsHiddenFiles = true
             panel.beginSheetModal(for:window) { result in if result == .OK,let path = panel.url?.path { chosen(path) } }
         }
     }
@@ -136,7 +136,7 @@ final class RemoteToolPicker: NSWindowController {
     init(remote: SSHRemote,root: String,owner: NSWindow,chosen: @escaping (String) -> Void) {
         browser = RemoteBrowser(connection:remote,initialPath:root); self.parentWindow = owner; self.chosen = chosen
         let panel = NSPanel(contentRect:NSRect(x:0,y:0,width:680,height:520),styleMask:[.titled,.closable,.resizable],backing:.buffered,defer:false)
-        panel.title = L.text("Choose Remote Executable"); super.init(window:panel)
+        panel.title = L.text("Choose Remote Executable"); ThemedWindow.install(panel,panel:true); super.init(window:panel)
         let cancel = Theme.actionButton("Cancel",target:self,action:#selector(cancel)),choose = Theme.actionButton("Choose",target:self,action:#selector(chooseFile))
         Theme.pin(Theme.stack([browser,Theme.stack([NSView(),cancel,choose])],orientation:.vertical),in:panel.contentView!,inset:16)
         browser.onOpen = { [weak self] in self?.finish($0) }

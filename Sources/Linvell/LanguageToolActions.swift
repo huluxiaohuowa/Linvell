@@ -20,7 +20,7 @@ extension LanguageToolsPane {
         let language = language,remote = remote,root = root,storage = selectedStorage,addIgnore = autoIgnore.state == .on
         var profile = LanguageTools.cached(language,remote:remote,root:root)
         profile.runtime = runtime.stringValue.trimmingCharacters(in:.whitespacesAndNewlines); profile.storage = storage; profile.addGitIgnore = addIgnore
-        let alert = NSAlert(); alert.messageText = L.text("Install project code intelligence?")
+        let alert = ThemedAlert(); alert.messageText = L.text("Install project code intelligence?")
         alert.informativeText = language.title+"\n"+(remote.map { "SSH · "+$0.host } ?? L.text("This Mac"))+"\n"+root+"\n\n"+L.text(storage == .project ? "Installs only inside this project’s .linvell/tools folder. This Mac retains no relay package after remote installation." : "Installs under the target host user’s ~/.linvell/language-services folder. Shared files are removed only when no other project uses them.")
         alert.addButton(withTitle:L.text("Download and Install")); alert.addButton(withTitle:L.text("Cancel"))
         alert.beginSheetModal(for:window) { [weak self] response in
@@ -45,7 +45,7 @@ extension LanguageToolsPane {
     @objc func clearService() {
         guard installTask == nil,let window else { return }
         let language = language,remote = remote,root = root,storage = selectedStorage
-        let alert = NSAlert(); alert.messageText = L.text("Clear this language service?")
+        let alert = ThemedAlert(); alert.messageText = L.text("Clear this language service?")
         alert.informativeText = L.text("Only Linvell-managed files at the selected location are eligible for removal. Shared user-folder services remain if another project uses them. The interpreter, project source and other language services are preserved. JavaScript and TypeScript share one service.")
         alert.addButton(withTitle:L.text("Clear")); alert.addButton(withTitle:L.text("Cancel"))
         alert.beginSheetModal(for:window) { [weak self] response in

@@ -4,7 +4,7 @@ import LinvellPluginKit
 
 final class PluginSettingsWindow: PluginOwnedWindow {
     let session: PluginSession
-    let scope = NSSegmentedControl(labels:[L.text("User"),L.text("Workspace")],trackingMode:.selectOne,target:nil,action:nil)
+    let scope = Theme.segmented([L.text("User"),L.text("Workspace")])
     let form = NSStackView(),feedback = NSTextField(wrappingLabelWithString:"")
     private var controls: [String:NSControl] = [:]
     private var snapshot: PluginPersistence.ConfigurationSnapshot?
@@ -15,13 +15,18 @@ final class PluginSettingsWindow: PluginOwnedWindow {
         self.session = session; super.init(owner:owner,title:session.package.manifest.name+" — "+L.text("Plugin Settings"))
         scope.selectedSegment = 0; scope.target = self; scope.action = #selector(reloadSettings)
         scope.setEnabled(owner.pluginWorkspace != nil,forSegment:1)
-        let save = Theme.actionButton("Save Plugin Settings",target:self,action:#selector(saveSettings))
+        let save = Theme.actionButton("Save Plugin Settings",target:self,action:#selector(saveSettings),primary:true)
         let reload = Theme.actionButton("Reload",target:self,action:#selector(reloadSettings))
         let header = Theme.stack([scope,NSView(),reload,save]); header.heightAnchor.constraint(equalToConstant:36).isActive = true
         form.orientation = .vertical; form.alignment = .leading; form.spacing = 16
-        let scroll = ResponsiveScrollView(); scroll.hasVerticalScroller = true; scroll.documentView = form
-        form.translatesAutoresizingMaskIntoConstraints = false; form.widthAnchor.constraint(equalTo:scroll.widthAnchor,constant:-20).isActive = true
-        feedback.font = .systemFont(ofSize:12); feedback.textColor = Theme.secondary
+        let scroll = ResponsiveScrollView(); scroll.hasVerticalScroller = true; scroll.drawsBackground = false
+        let document = PluginSettingsDocument()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        scroll.documentView = document
+        Theme.pin(Theme.stack([form,NSView()],orientation:.vertical,spacing:0),in:document,inset:4)
+        document.widthAnchor.constraint(equalTo:scroll.contentView.widthAnchor).isActive = true
+        document.heightAnchor.constraint(greaterThanOrEqualTo:scroll.contentView.heightAnchor).isActive = true
+        feedback.font = .systemFont(ofSize:12); feedback.textColor = Theme.liveSecondary
         Theme.pin(Theme.stack([header,scroll,feedback],orientation:.vertical,spacing:16),in:window!.contentView!,inset:20)
         reloadSettings()
     }
@@ -48,22 +53,29 @@ final class PluginSettingsWindow: PluginOwnedWindow {
     }
     private func render(_ values: [String:PluginValue]) {
         for field in session.package.manifest.settings ?? [] {
-            let label = NSTextField(labelWithString:field.title); label.font = .systemFont(ofSize:14,weight:.medium); label.textColor = Theme.foreground
+            let label = NSTextField(labelWithString:field.title); label.font = .systemFont(ofSize:14,weight:.medium); label.textColor = Theme.liveForeground
             let control: NSControl
             switch field.kind {
             case .boolean:
                 let button = NSButton(checkboxWithTitle:field.title,target:nil,action:nil)
                 button.state = values[field.key] == .bool(true) ? .on : .off; control = button
             case .choice:
-                let choice = NSPopUpButton(); choice.addItems(withTitles:field.choices ?? []); choice.selectItem(withTitle:values[field.key]?.string ?? ""); control = choice
+                let choice = Theme.choiceButton()
+                choice.addItems(withTitles:field.choices ?? [])
+                if let value = values[field.key]?.string { choice.selectItem(withTitle:value) }
+                control = choice
             case .string,.number:
                 let value = values[field.key]
                 let text = NSTextField(string:field.kind == .number ? value?.number.map(String.init(describing:)) ?? "0" : value?.string ?? "")
-                text.widthAnchor.constraint(greaterThanOrEqualToConstant:260).isActive = true; control = text
+                Theme.styleInput(text); text.widthAnchor.constraint(greaterThanOrEqualToConstant:260).isActive = true; control = text
             }
             control.setAccessibilityLabel(field.title); controls[field.key] = control
-            let description = NSTextField(wrappingLabelWithString:field.description ?? ""); description.font = .systemFont(ofSize:12); description.textColor = Theme.secondary
-            let row = Theme.stack([label,control,description],orientation:.vertical,spacing:5); form.addArrangedSubview(row); row.widthAnchor.constraint(equalTo:form.widthAnchor).isActive = true
+            let description = NSTextField(wrappingLabelWithString:field.description ?? ""); description.font = .systemFont(ofSize:12); description.textColor = Theme.liveSecondary
+            var fields: [NSView] = [label,Theme.stack([control,NSView()],spacing:0)]
+            if !description.stringValue.isEmpty { fields.append(description) }
+            let row = Theme.stack(fields,orientation:.vertical,spacing:5)
+            form.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo:form.widthAnchor).isActive = true
         }
     }
     @objc func saveSettings() {
@@ -98,3 +110,5 @@ final class PluginSettingsWindow: PluginOwnedWindow {
         } catch { feedback.stringValue = L.existing(error.localizedDescription) }
     }
 }
+
+private final class PluginSettingsDocument: NSView { override var isFlipped: Bool { true } }

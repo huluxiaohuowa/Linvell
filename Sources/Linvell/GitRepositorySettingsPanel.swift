@@ -29,7 +29,7 @@ final class GitRepositorySettingsPanel: GitNativeSheet {
         list.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for (index,location) in locations.enumerated() {
             let key = GitAutoFetchScheduler.key(location),row = NSStackView(); row.spacing = 8
-            let choice = NSPopUpButton(); choice.addItems(withTitles:[L.text("Use Default"),L.text("Off")]+[1,5,15,30,60].map { L.format("%d min",$0) }+[L.text("Custom…")])
+            let choice = Theme.choiceButton(); choice.addItems(withTitles:[L.text("Use Default"),L.text("Off")]+[1,5,15,30,60].map { L.format("%d min",$0) }+[L.text("Custom…")])
             if let enabled = defaults.object(forKey:key) as? Bool {
                 let minutes = defaults.object(forKey:key+".minutes") as? Int ?? defaults.object(forKey:"git.defaultFetchMinutes") as? Int ?? 5
                 choice.selectItem(at:enabled ? ([1,5,15,30,60].firstIndex(of:minutes).map { $0+2 } ?? 7) : 1)

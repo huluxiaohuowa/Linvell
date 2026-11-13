@@ -26,6 +26,13 @@ final class EditorSyntaxState {
         }
         Self.queue.async { ticket.run() }
     }
+    func invalidate() {
+        ticket?.cancel()
+        ticket = nil
+        pendingRevision = nil
+        version = -1
+        analysis = SourceAnalysis()
+    }
     deinit { ticket?.cancel() }
 }
 
@@ -64,7 +71,7 @@ extension EditorPane {
     var folding: FoldingLayoutManager { textView.layoutManager as! FoldingLayoutManager }
     @objc func sourceAnalysisChanged(_ notification: Notification) {
         guard notification.object as? OpenDocument === document else { return }
-        paintSyntax(); highlightBrackets(); gutter.needsDisplay = true
+        paintSyntax(); highlightBrackets(); gutter.needsDisplay = true; minimap.needsDisplay = true
     }
     func paintSyntax() {
         guard document.syntax.version == document.buffer.revision,!textView.hasMarkedText(),let container = textView.textContainer,let manager = textView.layoutManager else { return }
@@ -78,15 +85,7 @@ extension EditorPane {
         var i = max(0,low-1)
         while i < tokens.count,tokens[i].range.location < NSMaxRange(visible) {
             let token = tokens[i],range = NSIntersectionRange(token.range,visible)
-            let color: NSColor
-            switch token.kind {
-            case .keyword: color = Theme.keyword
-            case .string: color = Theme.accent
-            case .number: color = Theme.number
-            case .comment: color = Theme.secondary
-            case .type,.directive: color = Theme.keyword.withAlphaComponent(0.85)
-            }
-            if range.length > 0 { manager.addTemporaryAttribute(.foregroundColor,value:color,forCharacterRange:range) }; i += 1
+            if range.length > 0 { manager.addTemporaryAttribute(.foregroundColor,value:Theme.syntaxColor(token.kind),forCharacterRange:range) }; i += 1
         }
     }
     func highlightBrackets() {

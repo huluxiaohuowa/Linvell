@@ -7,7 +7,7 @@ import Darwin
 final class RunWorkspace: NSView, LocalProcessTerminalViewDelegate {
     let remote: SSHRemote?
     let directory: String
-    let command = NSTextField(),url = NSTextField(),presets = NSPopUpButton()
+    let command = NSTextField(),url = NSTextField(),presets = Theme.choiceButton()
     let output = NSView()
     let preview: WKWebView
     let status = Theme.label("",size:12,color:Theme.secondary)
@@ -40,7 +40,7 @@ final class RunWorkspace: NSView, LocalProcessTerminalViewDelegate {
     var running: Bool { terminal?.process.running == true }
     func mayClose() -> Bool {
         guard running else { return true }
-        let alert = NSAlert(); alert.messageText = L.text("Stop the running task?")
+        let alert = ThemedAlert(); alert.messageText = L.text("Stop the running task?")
         alert.addButton(withTitle:L.text("Stop")); alert.addButton(withTitle:L.text("Cancel"))
         return alert.runModal() == .alertFirstButtonReturn
     }
@@ -91,7 +91,7 @@ final class RunWorkspace: NSView, LocalProcessTerminalViewDelegate {
     func shutdown() { terminate(); closeForward() }
     func refreshTheme() {
         layer?.backgroundColor = Theme.canvas.cgColor; appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua)
-        terminal?.nativeBackgroundColor = Theme.canvas; terminal?.nativeForegroundColor = Theme.foreground
+        terminal?.nativeBackgroundColor = Theme.canvas; terminal?.nativeForegroundColor = Theme.foreground; terminal?.caretColor = Theme.accent
         terminal?.font = .monospacedSystemFont(ofSize:Theme.fontSize,weight:.regular)
     }
     func sizeChanged(source: LocalProcessTerminalView,newCols: Int,newRows: Int) {}

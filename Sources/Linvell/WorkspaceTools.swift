@@ -17,9 +17,13 @@ enum ProjectFiles {
     static func relative(_ url: URL,root: URL) -> String { String(url.path.dropFirst(root.path.count+1)) }
     static func matches(_ query: String,_ text: String) -> Bool {
         if query.isEmpty { return true }
-        var remaining = Array(query.lowercased())
-        for c in text.lowercased() where remaining.first == c { remaining.removeFirst(); if remaining.isEmpty { return true } }
-        return remaining.isEmpty
+        var characters = query.lowercased().makeIterator()
+        var next = characters.next()
+        for character in text.lowercased() where character == next {
+            next = characters.next()
+            if next == nil { return true }
+        }
+        return false
     }
 }
 
@@ -32,10 +36,20 @@ struct PickerOption {
     init(title: String,detail: String,fileURL: URL? = nil,reorderID: String? = nil,invoke: @escaping () -> Void) { self.title = title; self.detail = detail; self.fileURL = fileURL; self.reorderID = reorderID; self.invoke = invoke }
 }
 
+private final class QuickPickerPanel: NSPanel {
+    var onCancel: (() -> Void)?
+    override func cancelOperation(_ sender: Any?) { onCancel?() }
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 { cancelOperation(nil) }
+        else { super.keyDown(with:event) }
+    }
+}
+
 final class QuickPicker: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate, NSMenuDelegate {
-    let input = NSSearchField()
+    let input = Theme.searchField()
     let table = ResponsiveTableView()
     private(set) var options: [PickerOption]
+    private let compact: Bool
     private let reorderType = NSPasteboard.PasteboardType("com.linvell.repository-order")
     var onReorder: (([String]) -> Void)? {
         didSet {
@@ -86,22 +100,37 @@ final class QuickPicker: NSWindowController, NSTableViewDataSource, NSTableViewD
     private var queryGeneration = UUID()
     var results: [PickerOption] = []
     weak var parentWindow: NSWindow?
-    init(title: String,options: [PickerOption],owner: NSWindow) {
+    init(title: String,options: [PickerOption],owner: NSWindow,compact: Bool = false) {
+        self.compact = compact
         self.options = options; self.results = Array(options.prefix(80)); self.parentWindow = owner
-        let panel = NSPanel(contentRect:NSRect(x:0,y:0,width:660,height:420),styleMask:[.titled],backing:.buffered,defer:false)
-        panel.title = title; panel.appearance = owner.appearance; panel.backgroundColor = Theme.panel
+        let panel = QuickPickerPanel(contentRect:NSRect(x:0,y:0,width:compact ? 620 : 660,height:compact ? 360 : 420),styleMask:[.titled],backing:.buffered,defer:false)
+        panel.title = title; ThemedWindow.install(panel,panel:true)
         super.init(window:panel)
+        panel.onCancel = { [weak self] in self?.dismiss() }
         input.placeholderString = title; input.font = .systemFont(ofSize:16); input.delegate = self
         input.heightAnchor.constraint(equalToConstant:38).isActive = true
         let c = NSTableColumn(identifier:NSUserInterfaceItemIdentifier("results")); table.addTableColumn(c); table.headerView = nil
-        table.rowHeight = 46; table.dataSource = self; table.delegate = self; table.backgroundColor = Theme.panel
+        table.rowHeight = compact ? 32 : 46; table.dataSource = self; table.delegate = self; table.backgroundColor = Theme.panel
         table.target = self; table.doubleAction = #selector(choose); table.allowsEmptySelection = false
         table.setAccessibilityLabel(title+" results")
         let scroll = ResponsiveScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true
         let hint = Theme.label("↑↓ Navigate     ↵ Open     Esc Cancel",size:12,color:Theme.secondary)
         selectionBar.spacing = 6; selectionBar.isHidden = true
         let stack = Theme.stack([input,scroll,selectionBar,hint],orientation:.vertical,spacing:12)
-        Theme.pin(stack,in:panel.contentView!,inset:18)
+        if compact {
+            panel.titleVisibility = .hidden
+            panel.titlebarAppearsTransparent = true
+            panel.styleMask.insert(.fullSizeContentView)
+            table.backgroundColor = .clear
+            scroll.drawsBackground = false
+            let contents = NSView()
+            Theme.pin(stack,in:contents,inset:12)
+            let surface = WorkspaceGlass.surface(containing:contents,radius:14)
+            WorkspaceGlass.tintEditor(surface)
+            Theme.pin(surface,in:panel.contentView!,inset:6)
+        } else {
+            Theme.pin(stack,in:panel.contentView!,inset:18)
+        }
         table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false)
         owner.beginSheet(panel); panel.makeFirstResponder(input)
     }
@@ -109,8 +138,10 @@ final class QuickPicker: NSWindowController, NSTableViewDataSource, NSTableViewD
     func numberOfRows(in tableView: NSTableView) -> Int { results.count }
     func tableView(_ tableView: NSTableView,viewFor tableColumn: NSTableColumn?,row: Int) -> NSView? {
         let result = results[row]
-        let title = Theme.label(result.title,size:14), detail = Theme.label(result.detail,size:11,color:Theme.secondary)
-        let stack = NSStackView(views:[title,detail]); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 3
+        let title = Theme.label(result.title,size:compact ? 13 : 14), detail = Theme.label(result.detail,size:compact ? 10 : 11,color:Theme.secondary)
+        title.lineBreakMode = .byTruncatingMiddle; detail.lineBreakMode = .byTruncatingMiddle
+        let lines: [NSView] = compact && result.title == result.detail ? [title] : [title,detail]
+        let stack = NSStackView(views:lines); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = compact ? 0 : 3
         if let url = result.fileURL { return Theme.stack([FileIcon.view(for:url),stack],spacing:10) }
         return stack
     }
@@ -163,7 +194,24 @@ final class QuickPicker: NSWindowController, NSTableViewDataSource, NSTableViewD
             }
             queryWork = work; DispatchQueue.main.asyncAfter(deadline:.now()+0.2,execute:work); return
         }
-        results = Array(options.lazy.filter { ProjectFiles.matches(query,$0.title+" "+$0.detail) }.prefix(selectionActions.isEmpty ? 80 : Int.max))
+        if compact, !query.trimmingCharacters(in:.whitespaces).isEmpty {
+            let needle = query.trimmingCharacters(in:.whitespaces).lowercased()
+            var ranked = Array(repeating:[PickerOption](),count:5)
+            for option in options {
+                let name = option.title.lowercased(), path = option.detail.lowercased()
+                let rank: Int
+                if name == needle { rank = 0 }
+                else if name.hasPrefix(needle) { rank = 1 }
+                else if name.contains(needle) { rank = 2 }
+                else if ProjectFiles.matches(needle,name) { rank = 3 }
+                else if ProjectFiles.matches(needle,path) { rank = 4 }
+                else { continue }
+                if ranked[rank].count < 80 { ranked[rank].append(option) }
+            }
+            results = Array(ranked.joined().prefix(80))
+        } else {
+            results = Array(options.lazy.filter { ProjectFiles.matches(query,$0.title+" "+$0.detail) }.prefix(selectionActions.isEmpty ? 80 : Int.max))
+        }
         table.reloadData(); if !results.isEmpty { table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false) }
     }
     func control(_ control: NSControl,textView: NSTextView,doCommandBy selector: Selector) -> Bool {
@@ -192,7 +240,7 @@ final class QuickPicker: NSWindowController, NSTableViewDataSource, NSTableViewD
 
 final class ToolSidebar: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
     struct Result { let title: String; let detail: String; let url: URL; let line: Int }
-    let query = NSSearchField()
+    let query = Theme.searchField()
     let table = ResponsiveTableView()
     let caption = Theme.label("",size:11,color:Theme.secondary)
     var results: [Result] = []

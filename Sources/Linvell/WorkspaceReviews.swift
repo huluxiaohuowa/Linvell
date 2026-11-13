@@ -23,7 +23,7 @@ extension WorkspaceController {
     func composeReview(_ snapshot: ReviewComment) {
         guard let scope = reviewScope,let window else { return }
         let store = ReviewCommentStore(project:scope.project,host:scope.host)
-        let alert = NSAlert(); alert.messageText = L.text("Add Review Comment…"); alert.informativeText = snapshot.location
+        let alert = ThemedAlert(); alert.messageText = L.text("Add Review Comment…"); alert.informativeText = snapshot.location
         let note = NSTextView(frame:NSRect(x:0,y:0,width:440,height:130)); note.isRichText = false; note.font = Theme.editorFont; note.isAutomaticQuoteSubstitutionEnabled = false
         let scroll = NSScrollView(frame:note.frame); scroll.documentView = note; scroll.hasVerticalScroller = true; scroll.borderType = .bezelBorder
         note.setAccessibilityLabel(L.text("Review feedback"))
@@ -91,7 +91,7 @@ final class ReviewCommentsPanel: NSWindowController, NSTableViewDataSource, NSTa
     init(store: ReviewCommentStore,owner: NSWindow) throws {
         self.store = store; comments = try store.load(); self.parentWindow = owner
         let panel = NSPanel(contentRect:NSRect(x:0,y:0,width:760,height:560),styleMask:[.titled],backing:.buffered,defer:false)
-        panel.title = L.text("Review Comments…"); panel.appearance = owner.appearance; panel.backgroundColor = Theme.panel
+        panel.title = L.text("Review Comments…"); ThemedWindow.install(panel,panel:true)
         super.init(window:panel)
         let column = NSTableColumn(identifier:NSUserInterfaceItemIdentifier("review")); table.addTableColumn(column); table.headerView = nil; table.rowHeight = 48
         table.dataSource = self; table.delegate = self; table.setAccessibilityLabel(L.text("Saved review comments"))
@@ -122,7 +122,7 @@ final class ReviewCommentsPanel: NSWindowController, NSTableViewDataSource, NSTa
         do {
             var updated = comments; updated.remove(at:table.selectedRow); try store.save(updated); comments = updated
             table.reloadData(); if !comments.isEmpty { table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false) }; updatePreview()
-        } catch { let alert = NSAlert(error:error); if let window { alert.beginSheetModal(for:window) } }
+        } catch { let alert = Theme.errorAlert(error); if let window { alert.beginSheetModal(for:window) } }
     }
     private var project: String { (parentWindow?.windowController as? WorkspaceController)?.reviewScope?.project ?? "" }
     @objc func copyDraft() { guard !comments.isEmpty else { return }; NSPasteboard.general.clearContents(); NSPasteboard.general.setString(ReviewComment.prompt(comments,directory:project),forType:.string) }

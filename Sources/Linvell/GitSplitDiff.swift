@@ -127,7 +127,7 @@ final class GitSplitDiff: NSView {
         oldLines = left.1; newLines = right.1
         for (text,scroll,value,columnWidth) in [(oldText,oldScroll,left.0,oldWidth),(newText,newScroll,right.0,newWidth)] {
             let selection = text.selectedRange()
-            text.backgroundColor = Theme.canvas
+            text.backgroundColor = Theme.liveCanvas
             text.isHorizontallyResizable = !wrapping; text.autoresizingMask = wrapping ? .width : []
             text.textContainer?.widthTracksTextView = false
             text.textContainer?.containerSize = NSSize(width:wrapping ? columnWidth : 100_000,height:CGFloat.greatestFiniteMagnitude)

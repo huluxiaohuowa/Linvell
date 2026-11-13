@@ -33,9 +33,9 @@ private final class WelcomePage: NSView {
         name.heightAnchor.constraint(equalToConstant:73).isActive = true
         let brand = NSStackView(views:[logo,name]); brand.orientation = .horizontal; brand.spacing = 18; brand.alignment = .centerY
         let eyebrow = Theme.label("A LITTLE ROOM TO THINK",size:10,color:Theme.accent,weight:.semibold)
-        let subtitle = NSTextField(wrappingLabelWithString:L.text("Make space for your next idea.")); subtitle.font = .systemFont(ofSize:23,weight:.medium); subtitle.textColor = Theme.foreground
+        let subtitle = NSTextField(wrappingLabelWithString:L.text("Make space for your next idea.")); subtitle.font = .systemFont(ofSize:23,weight:.medium); subtitle.textColor = Theme.liveForeground
         let description = NSTextField(wrappingLabelWithString:L.text("Open a project. Find your flow.\nA native workspace that stays out of your way."))
-        description.font = .systemFont(ofSize:14); description.textColor = Theme.secondary
+        description.font = .systemFont(ofSize:14); description.textColor = Theme.liveSecondary
         hero = NSStackView(views:[eyebrow,brand,subtitle,description]); hero.orientation = .vertical; hero.alignment = .leading; hero.spacing = 16
         hero.frame = NSRect(x:0,y:0,width:350,height:290)
         subtitle.widthAnchor.constraint(equalTo:hero.widthAnchor).isActive = true

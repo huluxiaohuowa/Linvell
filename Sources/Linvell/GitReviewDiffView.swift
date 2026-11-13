@@ -5,7 +5,7 @@ final class GitReviewDiffView: NSView {
     let editor = GitPatchTextView()
     private let scroll = GitReviewCodeScroll()
     private let split = GitSplitDiff()
-    private let mode = NSSegmentedControl(labels:[L.text("Auto"),L.text("Unified"),L.text("Side by Side")],trackingMode:.selectOne,target:nil,action:nil)
+    private let mode = Theme.segmented([L.text("Auto"),L.text("Unified"),L.text("Side by Side")])
     private let wrap = NSButton(checkboxWithTitle:L.text("Wrap Lines"),target:nil,action:nil)
     private let host = NSView()
     private let indexActions = NSStackView()
@@ -31,7 +31,7 @@ final class GitReviewDiffView: NSView {
     override init(frame: NSRect) {
         super.init(frame:frame)
         editor.isEditable = false; editor.font = Theme.editorFont
-        editor.backgroundColor = Theme.canvas; editor.textColor = Theme.foreground
+        editor.backgroundColor = Theme.liveCanvas; editor.textColor = Theme.liveForeground
         editor.isVerticallyResizable = true; editor.usesFindBar = true; editor.isIncrementalSearchingEnabled = true
         editor.textContainerInset = NSSize(width:8,height:8)
         scroll.documentView = editor; scroll.hasVerticalScroller = true
@@ -40,7 +40,7 @@ final class GitReviewDiffView: NSView {
         mode.target = self; mode.action = #selector(updateMode(_:))
         wrap.target = self; wrap.action = #selector(updateMode(_:))
         for (title,action) in [("Selected Lines",#selector(applyLines)),("Hunk",#selector(applyHunk)),("File",#selector(applyFile))] {
-            indexActions.addArrangedSubview(NSButton(title:L.text(title),target:self,action:action))
+            indexActions.addArrangedSubview(Theme.actionButton(title,target:self,action:action))
         }
         indexActions.isHidden = true; indexActions.spacing = 4
         controlsBar.spacing = 4; controlsBar.alignment = .centerY; controlsBar.distribution = .fill; controlsBar.clipsToBounds = true
@@ -111,7 +111,7 @@ final class GitReviewDiffView: NSView {
     @objc private func applyLines() {
         guard let range = selectedRange() else { return }
         do { apply?(try GitHunk.selection(in:editor.string,range:range,unstage:unstaging)) }
-        catch { if let window { NSAlert(error:error).beginSheetModal(for:window) } }
+        catch { if let window { Theme.errorAlert(error).beginSheetModal(for:window) } }
     }
     @objc private func applyHunk() {
         guard let range = selectedRange(allowCaret:true) else { return }

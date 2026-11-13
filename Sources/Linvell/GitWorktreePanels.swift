@@ -11,7 +11,7 @@ class GitNativeSheet: NSWindowController, NSWindowDelegate {
     init(title: String,owner: NSWindow,width: CGFloat = 650) {
         let panel = NSPanel(contentRect:NSRect(x:0,y:0,width:width,height:480),styleMask:[.titled,.closable,.resizable],backing:.buffered,defer:false)
         super.init(window:panel); retained = self; panel.title = L.text(title); panel.delegate = self
-        panel.appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua); panel.backgroundColor = Theme.panel
+        ThemedWindow.install(panel,panel:true)
         body.orientation = .vertical; body.alignment = .leading; body.spacing = 10
         footer.orientation = .horizontal; footer.spacing = 8
         message.textColor = .secondaryLabelColor; message.maximumNumberOfLines = 5; message.isSelectable = true
@@ -33,9 +33,9 @@ class GitNativeSheet: NSWindowController, NSWindowDelegate {
     }
     required init?(coder: NSCoder) { fatalError() }
     static func alert(owner: NSWindow) -> NSAlert {
-        let alert = NSAlert(); alert.window.appearance = owner.effectiveAppearance; return alert
+        let alert = ThemedAlert(); alert.window.appearance = owner.effectiveAppearance; return alert
     }
-    func button(_ title: String,_ action: Selector) -> NSButton { NSButton(title:L.text(title),target:self,action:action) }
+    func button(_ title: String,_ action: Selector) -> NSButton { Theme.actionButton(title,target:self,action:action) }
     func installDocumentStack(_ stack: NSStackView,in scroll: NSScrollView) {
         scroll.documentView = stack; stack.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo:scroll.contentView.leadingAnchor),
@@ -90,7 +90,7 @@ enum GitWorktreePanels {
 
 final class GitWorktreeCreatePanel: GitNativeSheet {
     let repository: GitRepository,onCreated: (String) -> Void
-    let mode = NSPopUpButton(),branch = NSTextField(),revision = NSTextField(string:"HEAD"),parent = NSTextField(),name = NSTextField(),existing = NSPopUpButton()
+    let mode = Theme.choiceButton(),branch = NSTextField(),revision = NSTextField(string:"HEAD"),parent = NSTextField(),name = NSTextField(),existing = Theme.choiceButton()
     init(repository: GitRepository,owner: NSWindow,onCreated: @escaping (String) -> Void) {
         self.repository = repository; self.onCreated = onCreated
         super.init(title:"New Worktree",owner:owner)
@@ -114,7 +114,7 @@ final class GitWorktreeCreatePanel: GitNativeSheet {
         row("Folder Name",name); fit()
     }
     @objc func chooseParent() {
-        guard let window else { return }; let panel = NSOpenPanel(); panel.appearance = window.effectiveAppearance; panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true
+        guard let window else { return }; let panel = Theme.openPanel(); panel.appearance = window.effectiveAppearance; panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true
         panel.directoryURL = URL(fileURLWithPath:parent.stringValue)
         panel.beginSheetModal(for:window) { [self] response in if response == .OK,let url = panel.url { parent.stringValue = url.path } }
     }
@@ -201,7 +201,7 @@ final class GitWorktreeManagePanel: GitNativeSheet {
 
 final class GitWorktreeFinishPanel: GitNativeSheet {
     let entry: GitWorktreeEntry,repository: GitRepository,canRemove: (String) -> Bool,onOpen: (String) -> Void,onOpenFile: (GitRepository,String) -> Void,onChanged: () -> Void
-    let targets = NSPopUpButton(),removeFolder = NSButton(checkboxWithTitle:L.text("Remove Worktree Folder"),target:nil,action:nil),deleteBranch = NSButton(checkboxWithTitle:L.text("Delete Local Source Branch"),target:nil,action:nil)
+    let targets = Theme.choiceButton(),removeFolder = NSButton(checkboxWithTitle:L.text("Remove Worktree Folder"),target:nil,action:nil),deleteBranch = NSButton(checkboxWithTitle:L.text("Delete Local Source Branch"),target:nil,action:nil)
     let proceed = NSButton()
     var plan: GitWorktreeCompletionPlan?,merged = false
     let onRelocated: ((String,String?) -> Void)?

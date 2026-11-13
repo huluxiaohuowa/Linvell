@@ -2,8 +2,8 @@ import AppKit
 
 /// Shared diff presentation preferences with the same renderer used by reviews.
 final class GitDiffSettingsPanel: GitNativeSheet {
-    private let layout = NSPopUpButton(),wrap = NSButton(checkboxWithTitle:L.text("Wrap Lines"),target:nil,action:nil)
-    private let font = NSPopUpButton(),size = NSTextField()
+    private let layout = Theme.choiceButton(),wrap = NSButton(checkboxWithTitle:L.text("Wrap Lines"),target:nil,action:nil)
+    private let font = Theme.choiceButton(),size = NSTextField()
     private let preview = GitReviewDiffView(frame:NSRect(x:0,y:0,width:720,height:220))
     private let fonts: [EditorFonts.Option]
     private let patch = "diff --git a/Example.swift b/Example.swift\n--- a/Example.swift\n+++ b/Example.swift\n@@ -1,3 +1,3 @@\n struct Example {\n-    let title = \"Before\"\n+    let title = \"After\" // Preview\n }\n"

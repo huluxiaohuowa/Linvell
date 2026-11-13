@@ -44,7 +44,8 @@ final class GitReviewParityTests: XCTestCase {
         let patch = "diff --git a/a.swift b/a.swift\n--- a/a.swift\n+++ b/a.swift\n@@ -1,2 +1,3 @@\n-let answer = 1\n+// inserted note\n+let answer = 2\n return answer\n"
         let styled = GitDiffRendering.styled(patch,path:"a.swift")
         let keyword = (patch as NSString).range(of:"let answer = 2").location
-        XCTAssertEqual(styled.attribute(.foregroundColor,at:keyword,effectiveRange:nil) as? NSColor,Theme.keyword)
+        let keywordColor = try XCTUnwrap(styled.attribute(.foregroundColor,at:keyword,effectiveRange:nil) as? NSColor)
+        XCTAssertEqual(keywordColor.usingColorSpace(.deviceRGB),Theme.keyword.usingColorSpace(.deviceRGB))
         let split = GitSplitDiff(frame:NSRect(x:0,y:0,width:800,height:500))
         split.render(styled)
         let left = split.oldText.string.components(separatedBy:"\n"),right = split.newText.string.components(separatedBy:"\n")

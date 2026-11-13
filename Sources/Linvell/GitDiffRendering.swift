@@ -13,17 +13,13 @@ enum GitDiffRendering {
         }
         return L.format("%d files · +%d · −%d",files,added,removed)
     }
-    static func color(_ kind: SourceTokenKind) -> NSColor {
-        switch kind {
-        case .keyword,.type,.directive: return Theme.keyword
-        case .string: return Theme.accent
-        case .number: return Theme.number
-        case .comment: return Theme.secondary
-        }
-    }
+    private static let syntaxColors = Dictionary(uniqueKeysWithValues:SourceTokenKind.allCases.map { kind in
+        (kind,NSColor(name:nil) { _ in Theme.syntaxColor(kind) })
+    })
+    static func color(_ kind: SourceTokenKind) -> NSColor { syntaxColors[kind] ?? Theme.liveForeground }
 
     static func styled(_ value: String,path: String? = nil) -> NSMutableAttributedString {
-        let patch = NSMutableAttributedString(string:value,attributes:[.font:Theme.editorFont,.foregroundColor:Theme.foreground])
+        let patch = NSMutableAttributedString(string:value,attributes:[.font:Theme.editorFont,.foregroundColor:Theme.liveForeground])
         let source = value as NSString
         var currentPath = path ?? "",inHunk = false
         var oldSource = "",newSource = ""
@@ -49,7 +45,7 @@ enum GitDiffRendering {
             guard let line else { return }
             if line.hasPrefix("diff --git ") { flush(); inHunk = false }
             if line.hasPrefix("+++ b/"),path == nil { currentPath = String(line.dropFirst(6)) }
-            if line.hasPrefix("@@ ") { flush(); inHunk = true; patch.addAttribute(.foregroundColor,value:Theme.accent,range:range); return }
+            if line.hasPrefix("@@ ") { flush(); inHunk = true; patch.addAttribute(.foregroundColor,value:Theme.liveAccent,range:range); return }
             guard inHunk,let prefix = line.first,[" ","+","-"].contains(prefix) else { return }
             let content = String(line.dropFirst()),length = max(0,range.length-1)
             let output = NSRange(location:range.location+1,length:length)

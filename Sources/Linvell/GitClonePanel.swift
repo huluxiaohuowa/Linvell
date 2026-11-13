@@ -22,7 +22,7 @@ final class GitClonePanel: GitNativeSheet, NSTextFieldDelegate {
         let suggested = component.hasSuffix(".git") ? String(component.dropLast(4)) : component
         if folder.stringValue.isEmpty || folder.stringValue == previousSuggestion { folder.stringValue = suggested }; previousSuggestion = suggested
     }
-    @objc func chooseParent() { guard !working,let window else { return }; let panel = NSOpenPanel(); panel.appearance = window.effectiveAppearance; panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true; panel.beginSheetModal(for:window) { [self] response in if response == .OK,let url = panel.url { parent.stringValue = url.path } } }
+    @objc func chooseParent() { guard !working,let window else { return }; let panel = Theme.openPanel(); panel.appearance = window.effectiveAppearance; panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true; panel.beginSheetModal(for:window) { [self] response in if response == .OK,let url = panel.url { parent.stringValue = url.path } } }
     @objc func clone() {
         guard !working else { return }; let name = folder.stringValue.trimmingCharacters(in:.whitespacesAndNewlines),remote = address.stringValue.trimmingCharacters(in:.whitespacesAndNewlines)
         guard !remote.isEmpty,!name.isEmpty,name != ".",name != "..",!name.contains("/"),!name.contains("\0"),parent.stringValue.hasPrefix("/") else { message.stringValue = L.text("Enter a repository address and a valid destination folder."); return }

@@ -5,8 +5,8 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
     private(set) var repository: GitRepository
     let workspaceDirectory: String
     let table = ResponsiveTableView(),diff = GitPatchTextView()
-    let mode = NSSegmentedControl(labels:[L.text("Changes"),L.text("Commit Graph"),L.text("Submodules"),L.text("Git Operations")],trackingMode:.selectOne,target:nil,action:nil)
-    let side = NSSegmentedControl(labels:[L.text("Working Tree"),L.text("Staged")],trackingMode:.selectOne,target:nil,action:nil)
+    let mode = Theme.segmented([L.text("Changes"),L.text("Commit Graph"),L.text("Submodules"),L.text("Git Operations")])
+    let side = Theme.segmented([L.text("Working Tree"),L.text("Staged")])
     let message = NSTextField(),caption = Theme.label("",size:12,color:Theme.secondary)
     var changes: [GitChange] = [],commits: [GitCommit] = []
     var graph: [GitGraphRow] = []
@@ -26,7 +26,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
     var running: Bool { busy || actionsPage?.running == true }
     func shutdown() { autoFetchTimer?.invalidate(); repositoryRefresh?.invalidate(); repositoryRefresh = nil; actionsPage?.terminate() }
     let branchesTable = ResponsiveTableView()
-    private let sidebarScope = NSSegmentedControl(labels:[L.text("Branches"),L.text("Worktrees")],trackingMode:.selectOne,target:nil,action:nil)
+    private let sidebarScope = Theme.segmented([L.text("Branches"),L.text("Worktrees")])
     private var location: WorkspaceSession {
         repository.remote.map { .ssh(host:$0.host,path:repository.directory) } ?? .local(path:repository.directory)
     }
@@ -45,8 +45,8 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
     var onWorktreeRelocated: ((String,String?) -> Void)?
     var onCanRemoveWorktree: ((String) -> Bool)?
     var onOpenTerminal: (() -> Void)?
-    private let historySearch = NSSearchField()
-    private let historyScope = NSSegmentedControl(labels:[L.text("Current Branch"),L.text("All References")],trackingMode:.selectOne,target:nil,action:nil)
+    private let historySearch = Theme.searchField()
+    private let historyScope = Theme.segmented([L.text("Current Branch"),L.text("All References")])
     private var historyControls: NSStackView!
     private var moreHistory: NSButton!
     private var historyLimit = 150
@@ -75,8 +75,8 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         side.selectedSegment == 0 ? changes.filter(\.staged) : changes.filter(\.unstaged)
     }
     private var historyIndex = GitHistoryIndex()
-    private let swapComparison = NSButton(title:L.text("Swap Commits"),target:nil,action:nil)
-    private let inspectComparison = NSButton(title:L.text("Review Comparison…"),target:nil,action:nil)
+    private let swapComparison = Theme.actionButton("Swap Commits",target:nil,action:nil)
+    private let inspectComparison = Theme.actionButton("Review Comparison…",target:nil,action:nil)
     private let commitSummary = GitCommitSummaryView(frame:.zero)
     private var commitNavigation: [String] = []
     private var navigatedCommit: GitCommit?
@@ -107,7 +107,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
     private var fileGroups: [Int:String] = [:]
     private var collapsedFolders: Set<String> = []
     private var groupFiles: Bool { UserDefaults.standard.bool(forKey:"git.groupChangedFiles") }
-    private let fileSearch = NSSearchField()
+    private let fileSearch = Theme.searchField()
     private var autoFetchTimer: Timer?
     private var autoFetchKey: String { "git.autoFetch."+(repository.remote?.host ?? "local")+":"+workspaceDirectory }
     private var autoFetch: Bool { UserDefaults.standard.object(forKey:autoFetchKey) as? Bool ?? UserDefaults.standard.bool(forKey:"git.defaultAutoFetch") }
@@ -126,7 +126,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
     private var review: NSButton!
     private var changesControls: NSStackView!
     private var commitControls: NSStackView!
-    let diffMode = NSSegmentedControl(labels:[L.text("Auto"),L.text("Unified"),L.text("Side by Side")],trackingMode:.selectOne,target:nil,action:nil)
+    let diffMode = Theme.segmented([L.text("Auto"),L.text("Unified"),L.text("Side by Side")])
     private let diffHost = NSView()
     private let splitDiff = GitSplitDiff()
     private var unifiedPreview: NSScrollView!
@@ -148,22 +148,24 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua)
         mode.selectedSegment = 0; mode.target = self; mode.action = #selector(modeChanged)
         side.selectedSegment = 0; side.target = self; side.action = #selector(changeSide)
-        message.placeholderString = L.text("Commit message — staged changes only")
-        message.font = .systemFont(ofSize:14)
+        message.placeholderAttributedString = Theme.placeholder("Commit message — staged changes only")
+        Theme.styleInput(message)
+        message.font = .systemFont(ofSize:13)
         message.maximumNumberOfLines = 3; message.usesSingleLineMode = false; message.cell?.wraps = true
-        message.heightAnchor.constraint(equalToConstant:62).isActive = true
+        message.heightAnchor.constraint(equalToConstant:52).isActive = true
         message.delegate = self
         let refresh = button("Refresh",#selector(reload))
         stage = button("Stage",#selector(stageSelected))
         unstage = button("Unstage",#selector(unstageSelected))
         unstageAll = button("Unstage All",#selector(unstageAllChanges))
         stageAll = button("Stage All",#selector(stageAllChanges))
-        commit = button("Commit",#selector(commitStaged))
+        commit = Theme.actionButton("Commit",target:self,action:#selector(commitStaged),primary:true)
+        actions.append(commit)
         open = button("Open File",#selector(openSelected))
         review = button("Add Review Comment…",#selector(addReviewComment))
         let branches = button("Branches and Tags",#selector(browseReferences)),fetch = button("Fetch",#selector(fetch)),pull = button("Pull",#selector(pull)),push = button("Push",#selector(push))
-        let bar = Theme.stack([Theme.label("Source Control",size:20,weight:.semibold),NSView(),refresh],spacing:12)
-        fileSearch.placeholderString = L.text("Filter changed files")
+        let bar = Theme.stack([Theme.label("Source Control",size:17,weight:.semibold),NSView(),refresh],spacing:12)
+        fileSearch.placeholderAttributedString = Theme.placeholder("Filter changed files")
         fileSearch.delegate = self
         let operations = Theme.stack([side,stage,unstage,stageAll,unstageAll,fileSearch],spacing:8)
         historySearch.placeholderString = L.text("Search hash, author, email, message or reference")
@@ -180,7 +182,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         let menu = NSMenu(); menu.delegate = self; table.menu = menu
         let branchMenu = NSMenu(); branchMenu.delegate = self; branchesTable.menu = branchMenu
         favoriteSnippets.spacing = 6
-        let snippetScroll = NSScrollView(); snippetScroll.hasHorizontalScroller = true; snippetScroll.drawsBackground = false
+        let snippetScroll = ResponsiveScrollView(); snippetScroll.hasHorizontalScroller = true; snippetScroll.autohidesScrollers = true; snippetScroll.drawsBackground = false
         snippetScroll.documentView = favoriteSnippets
         reloadQuickSnippets()
         let manage = button("Commit Snippets…",#selector(showCommitSnippets))
@@ -194,10 +196,10 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         let column = NSTableColumn(identifier:NSUserInterfaceItemIdentifier("changes")); column.width = 360; column.resizingMask = .autoresizingMask; table.addTableColumn(column)
         table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle; table.autoresizingMask = [.width]
         table.headerView = nil; table.rowHeight = 58; table.intercellSpacing = .zero; table.dataSource = self; table.delegate = self
-        table.backgroundColor = Theme.panel; table.style = .plain; table.target = self; table.doubleAction = #selector(activateRow)
+        table.backgroundColor = Theme.livePanel; table.style = .plain; table.target = self; table.doubleAction = #selector(activateRow)
         table.setAccessibilityLabel(L.text("Git changes and history"))
         let list = ResponsiveScrollView(); list.documentView = table; list.hasVerticalScroller = true; list.drawsBackground = false; list.scrollerStyle = .overlay
-        diff.isEditable = false; diff.isRichText = false; diff.font = Theme.editorFont; diff.backgroundColor = Theme.canvas; diff.textColor = Theme.foreground
+        diff.isEditable = false; diff.isRichText = false; diff.font = Theme.editorFont; diff.backgroundColor = Theme.liveCanvas; diff.textColor = Theme.liveForeground
         diff.isHorizontallyResizable = true; diff.textContainer?.widthTracksTextView = false; diff.textContainer?.containerSize = NSSize(width:100000,height:CGFloat.greatestFiniteMagnitude)
         diff.frame = NSRect(x:0,y:0,width:600,height:400); diff.isVerticallyResizable = true; diff.textContainerInset = NSSize(width:16,height:16)
         diff.setAccessibilityLabel(L.text("Git diff"))
@@ -221,7 +223,8 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         let detailActions = Theme.stack([open,review,wrap,swapComparison,inspectComparison,NSView()],spacing:8)
         commitSummary.onNavigate = { [weak self] hash in self?.navigateToCommit(hash) }
         commitSummary.onBack = { [weak self] in self?.navigateBack() }
-        let diffPage = Theme.stack([detailTitle,detailMetadata,commitSummary,diffMode,detailActions,diffHost],orientation:.vertical,spacing:8)
+        let diffModeRow = Theme.stack([diffMode,NSView()],spacing:0)
+        let diffPage = Theme.stack([detailTitle,detailMetadata,commitSummary,diffModeRow,detailActions,diffHost],orientation:.vertical,spacing:8)
         let diffPane = NSView()
         Theme.pin(diffPage,in:diffPane,inset:10)
         let otherColumn = NSTableColumn(identifier:NSUserInterfaceItemIdentifier("otherChanges"))
@@ -239,20 +242,21 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
         let repoName = Theme.label(project.lastPathComponent,size:14,weight:.semibold); repoName.lineBreakMode = .byTruncatingMiddle
         let branchColumn = NSTableColumn(identifier:NSUserInterfaceItemIdentifier("branches")); branchColumn.width = 180; branchColumn.resizingMask = .autoresizingMask
         branchesTable.addTableColumn(branchColumn); branchesTable.headerView = nil; branchesTable.rowHeight = 30; branchesTable.dataSource = self; branchesTable.delegate = self
-        branchesTable.backgroundColor = Theme.panel; branchesTable.autoresizingMask = [.width]
+        branchesTable.backgroundColor = Theme.livePanel; branchesTable.autoresizingMask = [.width]
         branchesTable.target = self; branchesTable.doubleAction = #selector(activateSidebarRow)
         sidebarScope.selectedSegment = 0
         sidebarScope.target = self; sidebarScope.action = #selector(changeSidebarScope)
         let branchScroll = ResponsiveScrollView(); branchScroll.documentView = branchesTable; branchScroll.hasVerticalScroller = true; branchScroll.drawsBackground = false
         let manageWorktrees = button("Manage Worktrees…",#selector(browseWorktrees)); manageWorktreesControl = manageWorktrees; manageWorktrees.isHidden = !worktreesEnabled
-        Theme.pin(Theme.stack([repoName,button("Repositories…",#selector(browseRepositories)),sidebarScope,branchScroll,manageWorktrees,branches],orientation:.vertical,spacing:12),in:navigation,inset:14)
+        Theme.pin(Theme.stack([repoName,button("Repositories…",#selector(browseRepositories)),sidebarScope,branchScroll,manageWorktrees,branches],orientation:.vertical,spacing:8),in:navigation,inset:12)
         mainPage = split; Theme.pin(split,in:pages)
-        let details = Theme.stack([bar,mode,network,operations,historyControls,hunkControls,pages,commitBar],orientation:.vertical,spacing:10)
+        let modeRow = Theme.stack([mode,NSView()],spacing:0)
+        let details = Theme.stack([bar,modeRow,network,operations,historyControls,hunkControls,pages,commitBar],orientation:.vertical,spacing:8)
         let content = NSView()
         Theme.pin(details,in:content,inset:10)
         let root = ResizablePanes(); root.firstMinimum = 150; root.secondMinimum = 540; root.position = 190
         root.addArrangedSubview(navigation); root.addArrangedSubview(content)
-        Theme.pin(root,in:self,inset:16)
+        Theme.pin(root,in:self,inset:8)
         for scroll in [list,branchScroll,otherScroll] {
             scroll.postsFrameChangedNotifications = true
             NotificationCenter.default.addObserver(self,selector:#selector(resizeTable(_:)),name:NSView.frameDidChangeNotification,object:scroll)
@@ -323,7 +327,12 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
     }
     func refreshTheme() {
         layer?.backgroundColor = Theme.canvas.cgColor; appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua)
-        table.backgroundColor = Theme.panel; diff.backgroundColor = Theme.canvas
+        table.backgroundColor = Theme.livePanel
+        branchesTable.backgroundColor = Theme.livePanel
+        otherChanges.backgroundColor = Theme.livePanel
+        diff.backgroundColor = Theme.liveCanvas
+        diff.textColor = Theme.liveForeground
+        branchesTable.reloadData(); otherChanges.reloadData()
         table.reloadData(); selectionChanged()
         actionsPage?.refreshTheme()
     }
@@ -857,7 +866,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
             let patch = try GitHunk.selection(in:diff.string,range:range,unstage:side.selectedSegment == 1)
             let repo = repository
             perform("Updating index…",onSuccess:{ [weak self] in if let path = self?.selectedChange?.path { self?.markLanding([path],staged:self?.side.selectedSegment == 0) } }) { try repo.applyHunk(patch,unstage:false) }
-        } catch { if let window { NSAlert(error:error).beginSheetModal(for:window) } }
+        } catch { if let window { Theme.errorAlert(error).beginSheetModal(for:window) } }
     }
 
     @objc private func applySelectedHunk() {
@@ -1061,7 +1070,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
                               Theme.stack([Theme.label("External editor"),editor]),
                               Theme.stack([Theme.label("External terminal"),terminal])],
                              orientation:.vertical,spacing:6),in:accessory)
-        let alert = NSAlert(); alert.window.appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua); alert.messageText = L.text("Git Settings…"); alert.accessoryView = accessory
+        let alert = ThemedAlert(); alert.window.appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua); alert.messageText = L.text("Git Settings…"); alert.accessoryView = accessory
         alert.addButton(withTitle:L.text("Save")); alert.addButton(withTitle:L.text("Cancel"))
         alert.beginSheetModal(for:window) { [weak self] response in
             guard response == .alertFirstButtonReturn,let self else { return }
@@ -1339,7 +1348,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
             }
             options.append(PickerOption(title:L.text("Abort Merge"),detail:L.text("Keep the source worktree and undo this merge")) { [weak self] in
                 guard let self,let window = self.window else { return }
-                let alert = NSAlert(); alert.messageText = L.text("Abort Merge?")
+                let alert = ThemedAlert(); alert.messageText = L.text("Abort Merge?")
                 alert.informativeText = L.text("Edits made while resolving this merge may be discarded.")
                 alert.addButton(withTitle:L.text("Abort Merge")); alert.addButton(withTitle:L.text("Cancel"))
                 alert.beginSheetModal(for:window) { [weak self] response in
@@ -1364,7 +1373,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
             },
             PickerOption(title:L.text("Delete Conflicted File…"),detail:path) { [weak self] in
                 guard let self,let window = self.window else { return }
-                let alert = NSAlert(); alert.messageText = L.text("Delete Conflicted File…"); alert.informativeText = path
+                let alert = ThemedAlert(); alert.messageText = L.text("Delete Conflicted File…"); alert.informativeText = path
                 alert.addButton(withTitle:L.text("Delete")); alert.addButton(withTitle:L.text("Cancel"))
                 alert.beginSheetModal(for:window) { [weak self] result in
                     guard result == .alertFirstButtonReturn else { return }
@@ -1397,7 +1406,7 @@ final class GitWorkspace: NSView, NSTableViewDataSource, NSTableViewDelegate, NS
             panes.addArrangedSubview(column(merge.source.branch,versions.incoming))
             let accessory = NSView(frame:NSRect(x:0,y:0,width:650,height:300))
             Theme.pin(panes,in:accessory)
-            let alert = NSAlert(); alert.messageText = L.text("Compare Conflict Versions")
+            let alert = ThemedAlert(); alert.messageText = L.text("Compare Conflict Versions")
             alert.informativeText = path; alert.accessoryView = accessory
             alert.addButton(withTitle:L.text("Use Current Side"))
             alert.addButton(withTitle:L.text("Use Incoming Side"))
@@ -1423,7 +1432,7 @@ extension GitWorkspace {
         if let view = scroll.documentView as? NSTextView {
             view.isEditable = false; view.font = Theme.editorFont; view.string = text
         }
-        let alert = NSAlert(); alert.messageText = L.text(title); alert.accessoryView = scroll
+        let alert = ThemedAlert(); alert.messageText = L.text(title); alert.accessoryView = scroll
         alert.addButton(withTitle:L.text("Close"))
         alert.addButton(withTitle:L.text("Copy"))
         if export { alert.addButton(withTitle:L.text("Export Log…")) }
@@ -1432,11 +1441,11 @@ extension GitWorkspace {
                 NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text,forType:.string); return
             }
             guard export,response == .alertThirdButtonReturn else { return }
-            let panel = NSSavePanel(); panel.nameFieldStringValue = "linvell-git.log"
+            let panel = Theme.savePanel(); panel.nameFieldStringValue = "linvell-git.log"
             panel.beginSheetModal(for:window) { response in
                 guard response == .OK,let url = panel.url else { return }
                 do { try text.write(to:url,atomically:true,encoding:.utf8) }
-                catch { NSAlert(error:error).beginSheetModal(for:window) }
+                catch { Theme.errorAlert(error).beginSheetModal(for:window) }
             }
         }
     }
@@ -1497,7 +1506,7 @@ private extension GitWorkspace {
 
     func showFetchFailure(_ error: String) {
         guard let window else { return }
-        let alert = NSAlert()
+        let alert = ThemedAlert()
         alert.messageText = L.text("Fetch Failure Details…")
         alert.informativeText = error
         alert.addButton(withTitle:L.text("Close"))
@@ -1542,7 +1551,7 @@ private extension GitWorkspace {
         favorite.state = snippet?.favorite == false ? .off : .on
         let accessory = NSView(frame:NSRect(x:0,y:0,width:430,height:185))
         Theme.pin(Theme.stack([scroll,favorite],orientation:.vertical,spacing:6),in:accessory)
-        let alert = NSAlert(); alert.messageText = L.text(snippet == nil ? "Add Snippet…" : "Edit Snippet…"); alert.accessoryView = accessory
+        let alert = ThemedAlert(); alert.messageText = L.text(snippet == nil ? "Add Snippet…" : "Edit Snippet…"); alert.accessoryView = accessory
         alert.addButton(withTitle:L.text("Save")); alert.addButton(withTitle:L.text("Cancel"))
         alert.beginSheetModal(for:window) { [weak self] response in
             guard response == .alertFirstButtonReturn,!editor.string.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { return }

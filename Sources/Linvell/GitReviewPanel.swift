@@ -30,9 +30,9 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
     private let metadata = Theme.label("",size:11,color:Theme.secondary)
     private let historyMessage = NSTextField(wrappingLabelWithString:"")
     private let messageScroll = NSScrollView()
-    private let retry = NSButton(title:L.text("Retry"),target:nil,action:nil)
+    private let retry = Theme.actionButton("Retry",target:nil,action:nil)
     private let sourceWrap = NSButton(checkboxWithTitle:L.text("Wrap Lines"),target:nil,action:nil)
-    private let fileLayout = NSSegmentedControl(labels:[L.text("List"),L.text("Directory Tree")],trackingMode:.selectOne,target:nil,action:nil)
+    private let fileLayout = Theme.segmented([L.text("List"),L.text("Directory Tree")])
     private var largePaths: Set<String> = []
     private var historyEntries: [GitFileHistoryEntry] = []
     private var historyTip: String?
@@ -45,16 +45,15 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
     private let initialIndexSide: Bool?
     private let repository: GitRepository
     private var files: [File]
-    private let search = NSSearchField()
-    private let modes = NSSegmentedControl(labels:[L.text("File Content"),L.text("File History"),L.text("Diff")],
-                                           trackingMode:.selectOne,target:nil,action:nil)
-    private let revisions = NSPopUpButton()
-    private let copyRevision = NSButton(title:L.text("Copy Commit Hash"),target:nil,action:nil)
+    private let search = Theme.searchField()
+    private let modes = Theme.segmented([L.text("File Content"),L.text("File History"),L.text("Diff")])
+    private let revisions = Theme.choiceButton()
+    private let copyRevision = Theme.actionButton("Copy Commit Hash",target:nil,action:nil)
     private let diffControls = NSStackView()
     private let fileCount = Theme.label("",size:11,color:Theme.secondary)
-    private let large = NSButton(title:L.text("Load Large Plain Text"),target:nil,action:nil)
-    private let find = NSButton(title:L.text("Find in File"),target:nil,action:nil)
-    private let more = NSButton(title:L.text("Load More"),target:nil,action:nil)
+    private let large = Theme.actionButton("Load Large Plain Text",target:nil,action:nil)
+    private let find = Theme.actionButton("Find in File",target:nil,action:nil)
+    private let more = Theme.actionButton("Load More",target:nil,action:nil)
     private let openFile: ((URL) -> Void)?
     private let text = GitPatchTextView.scrollableTextView()
     private let sections = NSStackView()
@@ -62,7 +61,7 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
     private let detail = NSView()
     private let multi = NSView()
     private let imagePane = NSView()
-    private let toggle = NSButton(title:L.text("Multiple Diffs"),target:nil,action:nil)
+    private let toggle = Theme.actionButton("Multiple Diffs",target:nil,action:nil)
     private var active: File?
     private var commits: [GitCommit] = []
     private var expanded: Set<String> = []
@@ -86,7 +85,7 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
         super.init(window:panel)
         panel.title = context.title ?? L.text("Repository Review")
         panel.delegate = self
-        panel.appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua)
+        ThemedWindow.install(panel)
         search.placeholderString = L.text("Filter files")
         search.target = self; search.action = #selector(renderFileList)
         search.sendsSearchStringImmediately = true
@@ -121,14 +120,14 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
         Theme.pin(imagePane,in:detail); imagePane.isHidden = true
         toggle.target = self; toggle.action = #selector(toggleMultiple)
         toggle.isHidden = !files.contains { $0.patch != nil }
-        let expandFolders = NSButton(title:L.text("Expand Folders"),target:self,action:#selector(expandFolders))
-        let collapseFolders = NSButton(title:L.text("Collapse Folders"),target:self,action:#selector(collapseFolders))
-        let expand = NSButton(title:L.text("Expand Diffs"),target:self,action:#selector(expandDiffs))
-        let collapse = NSButton(title:L.text("Collapse Diffs"),target:self,action:#selector(collapseDiffs))
+        let expandFolders = Theme.actionButton("Expand Folders",target:self,action:#selector(expandFolders))
+        let collapseFolders = Theme.actionButton("Collapse Folders",target:self,action:#selector(collapseFolders))
+        let expand = Theme.actionButton("Expand Diffs",target:self,action:#selector(expandDiffs))
+        let collapse = Theme.actionButton("Collapse Diffs",target:self,action:#selector(collapseDiffs))
         expand.keyEquivalent = String(UnicodeScalar(NSRightArrowFunctionKey)!); expand.keyEquivalentModifierMask = .option
         collapse.keyEquivalent = String(UnicodeScalar(NSLeftArrowFunctionKey)!); collapse.keyEquivalentModifierMask = .option
         sidebar.addArrangedSubview(Theme.stack([expandFolders,collapseFolders],spacing:4))
-        let close = NSButton(title:L.text("Close"),target:self,action:#selector(closeReview))
+        let close = Theme.actionButton("Close",target:self,action:#selector(closeReview))
         expand.isHidden = toggle.isHidden; collapse.isHidden = toggle.isHidden
         sourceWrap.target = self; sourceWrap.action = #selector(toggleSourceWrap)
         sourceWrap.state = UserDefaults.standard.bool(forKey:"git.wrapDiff") ? .on : .off
@@ -139,7 +138,7 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
         bar.heightAnchor.constraint(equalToConstant:30).isActive = true
         find.target = self; find.action = #selector(findInFile)
         find.keyEquivalent = "f"; find.keyEquivalentModifierMask = .command
-        let open = NSButton(title:L.text("Open File"),target:self,action:#selector(openActiveFile))
+        let open = Theme.actionButton("Open File",target:self,action:#selector(openActiveFile))
         open.isHidden = onOpen == nil
         diffControls.spacing = 5
         for control in [toggle,fileLayout,expand,collapse] as [NSView] { diffControls.addArrangedSubview(control) }
@@ -155,8 +154,8 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
         if let base = context.base,let target = context.target {
             contextControls.append(Theme.label(base+" → "+target,size:12,weight:.semibold))
         }
-        if context.onSwap != nil { contextControls.append(NSButton(title:L.text("Swap Commits"),target:self,action:#selector(swapComparison))) }
-        if let title = context.primaryActionTitle,context.primaryAction != nil { contextControls.append(NSButton(title:title,target:self,action:#selector(primaryAction))) }
+        if context.onSwap != nil { contextControls.append(Theme.actionButton("Swap Commits",target:self,action:#selector(swapComparison))) }
+        if let title = context.primaryActionTitle,context.primaryAction != nil { contextControls.append(Theme.actionButton(title,target:self,action:#selector(primaryAction),primary:true)) }
         if context.statistics != nil || context.statisticsProvider != nil {
             contextStatistics.stringValue = context.statistics ?? L.text("Reading repository…")
             contextControls.append(contextStatistics)
@@ -477,7 +476,7 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
             }
             DispatchQueue.main.async {
                 self.applyingIndex = false
-                if case .failure(let error) = result,let window = self.window { NSAlert(error:error).beginSheetModal(for:window) }
+                if case .failure(let error) = result,let window = self.window { Theme.errorAlert(error).beginSheetModal(for:window) }
                 self.refreshFromDisk(force:true)
             }
         }
@@ -502,8 +501,8 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
         view.usesFindBar = true; view.isIncrementalSearchingEnabled = true
         view.isEditable = false
         view.font = Theme.editorFont
-        view.backgroundColor = Theme.canvas
-        view.textColor = Theme.foreground
+        view.backgroundColor = Theme.liveCanvas
+        view.textColor = Theme.liveForeground
         view.textContainerInset = NSSize(width:8,height:8)
     }
 

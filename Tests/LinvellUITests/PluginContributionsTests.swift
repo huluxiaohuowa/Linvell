@@ -78,7 +78,8 @@ final class PluginContributionsTests: XCTestCase {
         controller.window?.contentView?.layoutSubtreeIfNeeded()
         XCTAssertGreaterThan(controller.form.fittingSize.height,0)
         let row = try XCTUnwrap(controller.form.arrangedSubviews.first as? NSStackView)
-        let input = try XCTUnwrap(row.arrangedSubviews.compactMap { $0 as? NSTextField }.first(where:{ $0.isEditable }))
+        let inputRow = try XCTUnwrap(row.arrangedSubviews.compactMap { $0 as? NSStackView }.first)
+        let input = try XCTUnwrap(inputRow.arrangedSubviews.compactMap { $0 as? NSTextField }.first(where:{ $0.isEditable }))
         input.stringValue = "Saved by native form"; controller.saveSettings()
         let saved = XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in
             (try? store.environment(package:session.package,workspace:nil).configuration["greeting"]) == .string("Saved by native form")

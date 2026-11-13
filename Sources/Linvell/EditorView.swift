@@ -198,6 +198,36 @@ final class EditorTextView: NSTextView {
     @objc private func codeReferences() { codeAction?("references",nil) }
     @objc private func codeRename() { codeAction?("rename",nil) }
     override func selectAll(_ sender: Any?) { clearExtraSelections(); super.selectAll(sender) }
+    override func drawBackground(in rect: NSRect) {
+        super.drawBackground(in:rect)
+        guard PreferencesSync.value("indentGuides") == "true",let document,
+              let manager = layoutManager,let container = textContainer else { return }
+        let origin = textContainerOrigin
+        let visible = rect.offsetBy(dx:-origin.x,dy:-origin.y)
+        let glyphs = manager.glyphRange(forBoundingRect:visible,in:container)
+        let text = string as NSString
+        let tab = max(1,Int(PreferencesSync.value("tabWidth")) ?? 4)
+        let advance = (" " as NSString).size(withAttributes:[.font:Theme.editorFont]).width
+        Theme.secondary.withAlphaComponent(0.22).setFill()
+        manager.enumerateLineFragments(forGlyphRange:glyphs) { fragment,_,_,range,_ in
+            guard range.length > 0 else { return }
+            let offset = manager.characterIndexForGlyph(at:range.location)
+            guard document.lines.starts[document.lines.line(at:offset)] == offset else { return }
+            var position = offset, column = 0
+            while position < text.length,column < 256 {
+                let unit = text.character(at:position)
+                if unit == 32 { column += 1 }
+                else if unit == 9 { column += tab-column%tab }
+                else { break }
+                position += 1
+            }
+            guard column >= tab,position < text.length,text.character(at:position) != 10 else { return }
+            let start = origin.x+container.lineFragmentPadding
+            for indentation in stride(from:0,to:column,by:tab) {
+                NSRect(x:start+CGFloat(indentation)*advance,y:origin.y+fragment.minY,width:0.75,height:fragment.height).fill()
+            }
+        }
+    }
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         if let rect = normalCaretRect {
@@ -395,6 +425,7 @@ final class EditorPane: NSView, NSTextViewDelegate {
     var onFocus: (() -> Void)?
     var onScroll: ((DocumentScrollAnchor) -> Void)?
     private var followingPreviewScroll = false
+    let minimap = EditorMinimap()
     private var highlighting = false
     private var highlightWork: DispatchWorkItem?
 
@@ -408,26 +439,33 @@ final class EditorPane: NSView, NSTextViewDelegate {
         textView.clipsToBounds = true; scroll.clipsToBounds = true
         textView.document = document; textView.vimEnabled = vim
         gutter.pane = self
+        minimap.pane = self
+        minimap.setAccessibilityLabel(L.text("Code minimap"))
         NotificationCenter.default.addObserver(self,selector:#selector(sourceAnalysisChanged(_:)),name:EditorSyntaxState.changed,object:document)
         textView.registerForDraggedTypes(textView.registeredDraggedTypes+[.fileURL])
         textView.delegate = self; textView.isRichText = false; textView.allowsUndo = true
         textView.isAutomaticQuoteSubstitutionEnabled = false; textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false; textView.isContinuousSpellCheckingEnabled = false
         textView.font = Theme.editorFont
-        textView.textColor = Theme.foreground; textView.backgroundColor = Theme.canvas
+        textView.textColor = Theme.foreground; textView.drawsBackground = false
         textView.insertionPointColor = Theme.accent
         textView.selectedTextAttributes = [.backgroundColor:Theme.selection]
-        textView.textContainerInset = NSSize(width:12,height:18)
+        textView.textContainerInset = NSSize(width:8,height:12)
         textView.isVerticallyResizable = true; textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
         textView.minSize = NSSize(width:0,height:0); textView.maxSize = NSSize(width:CGFloat.greatestFiniteMagnitude,height:CGFloat.greatestFiniteMagnitude)
         textView.usesFindBar = true; textView.isIncrementalSearchingEnabled = true
         textView.setAccessibilityLabel("Source editor")
-        scroll.documentView = textView; scroll.hasVerticalScroller = true; scroll.drawsBackground = true; scroll.backgroundColor = Theme.canvas
+        scroll.documentView = textView; scroll.hasVerticalScroller = true; scroll.drawsBackground = false
         scroll.borderType = .noBorder
         gutter.editor = textView
         scroll.verticalRulerView = gutter; scroll.hasVerticalRuler = true; scroll.rulersVisible = true
-        Theme.pin(scroll,in:self)
+        minimap.widthAnchor.constraint(equalToConstant:68).isActive = true
+        let row = Theme.stack([scroll,minimap],spacing:0)
+        scroll.heightAnchor.constraint(equalTo:row.heightAnchor).isActive = true
+        scroll.setContentCompressionResistancePriority(.defaultLow,for:.horizontal)
+        minimap.heightAnchor.constraint(equalTo:row.heightAnchor).isActive = true
+        Theme.pin(row,in:self)
         textView.statusChanged = { [weak self] in self?.onChange?() }
         NotificationCenter.default.addObserver(self, selector:#selector(scrolled),name:NSView.boundsDidChangeNotification,object:scroll.contentView)
         scroll.contentView.postsBoundsChangedNotifications = true
@@ -436,7 +474,7 @@ final class EditorPane: NSView, NSTextViewDelegate {
     }
     required init?(coder: NSCoder) { fatalError() }
     deinit { NotificationCenter.default.removeObserver(self) }
-    @objc private func scrolled() { textView.cancelCodeHover(); gutter.needsDisplay = true; paintSyntax(); if !followingPreviewScroll { onScroll?(scrollAnchor) } }
+    @objc private func scrolled() { textView.cancelCodeHover(); gutter.needsDisplay = true; minimap.needsDisplay = true; paintSyntax(); if !followingPreviewScroll { onScroll?(scrollAnchor) } }
     var scrollAnchor: DocumentScrollAnchor {
         guard let manager = textView.layoutManager,let container = textView.textContainer,manager.numberOfGlyphs > 0 else { return DocumentScrollAnchor(line:1,progress:0) }
         let y = scroll.contentView.bounds.minY,origin = textView.textContainerOrigin
@@ -447,6 +485,15 @@ final class EditorPane: NSView, NSTextViewDelegate {
         let fraction = max(0,min(0.999,(y-origin.y-rect.minY)/max(1,rect.height)))
         let maximum = max(0,textView.frame.height-scroll.contentView.bounds.height)
         return DocumentScrollAnchor(line:Double(row+1)+Double(fraction),progress:maximum > 0 ? Double(max(0,min(1,y/maximum))) : 0)
+    }
+    var lastVisibleSourceLine: Int {
+        guard let manager = textView.layoutManager, let container = textView.textContainer,
+              manager.numberOfGlyphs > 0 else { return 0 }
+        let origin = textView.textContainerOrigin
+        let visible = textView.visibleRect.offsetBy(dx:-origin.x,dy:-origin.y)
+        let glyphs = manager.glyphRange(forBoundingRect:visible,in:container)
+        let glyph = min(manager.numberOfGlyphs-1,max(0,NSMaxRange(glyphs)-1))
+        return document.lines.line(at:manager.characterIndexForGlyph(at:glyph))
     }
     func scrollFromPreview(_ anchor: DocumentScrollAnchor) {
         guard let manager = textView.layoutManager,let container = textView.textContainer else { return }
@@ -476,7 +523,7 @@ final class EditorPane: NSView, NSTextViewDelegate {
         document.buffer.update(document.storage.string)
         document.syntax.request(document)
         onTextChanged?()
-        gutter.needsDisplay = true; onChange?()
+        gutter.needsDisplay = true; minimap.needsDisplay = true; onChange?()
         highlightWork?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.highlight() }
         highlightWork = work; DispatchQueue.main.asyncAfter(deadline:.now()+0.15,execute:work)
@@ -492,6 +539,7 @@ final class EditorPane: NSView, NSTextViewDelegate {
         textView.typingAttributes[.paragraphStyle] = paragraph; gutter.needsDisplay = true
     }
     func updatePreferences() {
+        minimap.isHidden = PreferencesSync.value("showMinimap") != "true"
         updateFont(); scroll.rulersVisible = PreferencesSync.value("lineNumbers") == "true"
         let wrap = PreferencesSync.value("wordWrap") == "true"
         textView.isHorizontallyResizable = !wrap; scroll.hasHorizontalScroller = !wrap
@@ -507,9 +555,9 @@ final class EditorPane: NSView, NSTextViewDelegate {
         }
     }
     func updateTheme() {
-        textView.textColor = Theme.foreground; textView.backgroundColor = Theme.canvas; textView.insertionPointColor = Theme.accent
-        textView.selectedTextAttributes = [.backgroundColor:Theme.selection]; scroll.backgroundColor = Theme.canvas
-        gutter.needsDisplay = true; highlight()
+        textView.textColor = Theme.foreground; textView.insertionPointColor = Theme.accent
+        textView.selectedTextAttributes = [.backgroundColor:Theme.selection]
+        gutter.needsDisplay = true; minimap.needsDisplay = true; highlight()
     }
     func refreshCodePresentation() { gutter.needsDisplay = true; highlight(); applyCodeDiagnostics(); onChange?() }
     func applyCodeDiagnostics() {
@@ -538,14 +586,14 @@ final class LineNumbers: NSRulerView {
         if let hit = foldHits.first(where:{ $0.0.contains(point) }) { pane?.toggleFold(line:hit.1) }
         else { super.mouseDown(with:event) }
     }
-    init() { super.init(scrollView:nil,orientation:.verticalRuler); ruleThickness = 72; clipsToBounds = true; wantsLayer = true }
+    init() { super.init(scrollView:nil,orientation:.verticalRuler); ruleThickness = 46; clipsToBounds = true; wantsLayer = true }
     required init(coder: NSCoder) { fatalError() }
+    override func draw(_ dirtyRect: NSRect) { drawHashMarksAndLabels(in:dirtyRect) }
     override func drawHashMarksAndLabels(in rect: NSRect) {
         NSGraphicsContext.saveGraphicsState(); bounds.clip(); defer { NSGraphicsContext.restoreGraphicsState() }
-        Theme.canvas.setFill(); bounds.fill()
         guard let editor, let lm = editor.layoutManager, let tc = editor.textContainer else { return }
         let digits = String((editor as? EditorTextView)?.document?.lines.starts.count ?? 1).count
-        let desired = max(72,CGFloat(digits)*8+30)
+        let desired = max(46,CGFloat(digits)*8+24)
         if ruleThickness != desired { ruleThickness = desired }
         foldHits.removeAll()
         let visible = editor.visibleRect
@@ -570,7 +618,7 @@ final class LineNumbers: NSRulerView {
                     let mark = (pane.folding.hides(fold.range.location) ? "▸" : "▾") as NSString
                     mark.draw(at:NSPoint(x:2,y:y),withAttributes:[.font:NSFont.systemFont(ofSize:12),.foregroundColor:Theme.accent])
                 }
-                let attrs: [NSAttributedString.Key:Any] = [.font:NSFont.monospacedDigitSystemFont(ofSize:12,weight:.regular),.foregroundColor:Theme.secondary]
+                let attrs: [NSAttributedString.Key:Any] = [.font:NSFont.monospacedDigitSystemFont(ofSize:11,weight:row == current ? .medium : .regular),.foregroundColor:row == current ? Theme.foreground : Theme.secondary]
                 label.draw(at:NSPoint(x:ruleThickness-14-label.size(withAttributes:attrs).width,y:y),withAttributes:attrs)
                 line += 1
             }

@@ -12,17 +12,17 @@ final class ProjectSettingsController: NSWindowController {
         let window = NSWindow(contentRect:NSRect(x:0,y:0,width:850,height:720),styleMask:[.titled,.closable,.resizable],backing:.buffered,defer:false)
         window.title = L.text("Project Settings")+" — "+URL(fileURLWithPath:root).lastPathComponent
         window.minSize = NSSize(width:660,height:560); window.center(); window.isReleasedWhenClosed = false
-        window.appearance = NSAppearance(named:Theme.isDark ? .darkAqua : .aqua)
+        ThemedWindow.install(window)
         super.init(window:window)
         let canvas = Surface(Theme.canvas); window.contentView = canvas
-        let folder = NSTextField(wrappingLabelWithString:root); folder.font = .monospacedSystemFont(ofSize:12,weight:.regular); folder.textColor = Theme.secondary; folder.isSelectable = true
+        let folder = NSTextField(wrappingLabelWithString:root); folder.font = .monospacedSystemFont(ofSize:12,weight:.regular); folder.textColor = Theme.liveSecondary; folder.isSelectable = true
         let host = Theme.label(remote.map { "SSH · "+$0.host } ?? L.text("This Mac"),size:13,color:Theme.accent)
         languageTools.onRootResolved = { [weak self,weak window] path in
             folder.stringValue = path; window?.title = L.text("Project Settings")+" — "+URL(fileURLWithPath:path).lastPathComponent
             self?.scope = LanguageTools.scope(remote:remote,root:path)
         }
         let title = Theme.label("Project Settings",size:28,weight:.semibold)
-        let description = NSTextField(wrappingLabelWithString:L.text("Applies only to this folder. Configuration is stored in its .linvell/settings.json.")); description.font = .systemFont(ofSize:13); description.textColor = Theme.secondary
+        let description = NSTextField(wrappingLabelWithString:L.text("Applies only to this folder. Configuration is stored in its .linvell/settings.json.")); description.font = .systemFont(ofSize:13); description.textColor = Theme.liveSecondary
         let scroll = ResponsiveScrollView(); scroll.hasVerticalScroller = true; scroll.drawsBackground = false
         let document = ProjectSettingsDocument(); document.translatesAutoresizingMaskIntoConstraints = false; scroll.documentView = document
         Theme.pin(Theme.stack([title,host,folder,description,Theme.label("Language Tools",size:18,weight:.semibold),languageTools,NSView()],orientation:.vertical,spacing:14),in:document,inset:24)

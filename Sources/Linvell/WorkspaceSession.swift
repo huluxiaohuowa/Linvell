@@ -34,3 +34,22 @@ enum WorkspaceSession: Codable, Equatable {
         return defaults.string(forKey:"lastProject").map { .local(path:$0) }
     }
 }
+
+
+/// Saves only paths, in the same local preference domain as recent workspaces.
+struct WorkspaceTabs: Codable {
+    let workspace: WorkspaceSession
+    let paths: [String]
+    let active: String?
+    static let key = "lastWorkspaceTabs"
+    static let limit = 30
+
+    func save(defaults: UserDefaults = .standard) {
+        if let data = try? JSONEncoder().encode(self) { defaults.set(data,forKey:Self.key) }
+    }
+    static func load(for workspace: WorkspaceSession,defaults: UserDefaults = .standard) -> Self? {
+        guard let data = defaults.data(forKey:key),
+              let snapshot = try? JSONDecoder().decode(Self.self,from:data),snapshot.workspace == workspace else { return nil }
+        return snapshot
+    }
+}

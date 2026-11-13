@@ -75,6 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
     }
     @objc private func preferencesApplied() {
+        ThemedWindow.refreshAll()
         for workspace in workspaces {
             workspace.vimEnabled = PreferencesSync.value("vimEnabled") == "true"
             workspace.panes.forEach { $0.textView.vimEnabled = workspace.vimEnabled; $0.updatePreferences() }
@@ -118,8 +119,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
         if UpdateManager.shared.shouldInstallOnQuit {
             do { try UpdateManager.shared.scheduleInstallation() }
-            catch { NSAlert(error:error).runModal(); return .terminateCancel }
+            catch { Theme.errorAlert(error).runModal(); return .terminateCancel }
         }
+        for workspace in workspaces where workspace.window?.isVisible == true { workspace.persistWorkspaceTabs() }
         for workspace in workspaces {
             workspace.shutdownAgent()
             workspace.stopPlugins()
@@ -129,6 +131,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         return .terminateNow
     }
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(selectTheme(_:)) {
+            item.state = Theme.pluginTheme == nil && item.representedObject as? String == Theme.profile.rawValue ? .on : .off
+            return true
+        }
         guard let action = item.representedObject as? String else { return true }
         if action == "showGitWorktrees" { return (NSApp.keyWindow?.windowController as? WorkspaceController)?.worktreeIntegrationEnabled == true }
         let scoped = Set(["commitGitChanges","stageGitChanges","unstageGitChanges","stageGitFile","unstageGitFile","pullGitChanges","pushGitChanges","createGitBranch","createGitTag","stashGitChanges","browseGitStashes","renameGitBranch","mergeGitBranch","amendGitCommit","checkoutGitCommit","revertGitCommit","copyGitCommit","compareGitCommits","createGitWorktree","finishGitWorktree","showGitShortcuts","showGitChanges","refreshGitRepository","openGitTerminal","showGitInFinder","expandGitDirectories","collapseGitDirectories"])
@@ -158,10 +164,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         workspace.showSettings(); workspace.preferences?.showUpdates(); UpdateManager.shared.check()
     }
     @objc func selectTheme(_ item: NSMenuItem) {
-        guard let profile = Theme.Profile(rawValue:item.title) else { return }
-        Theme.profile = profile
+        guard let id = item.representedObject as? String, let profile = Theme.Profile(rawValue:id) else { return }
+        Theme.selectProfile(profile,store:.shared)
         item.menu?.items.forEach { $0.state = $0 === item ? .on : .off }
-        PreferencesSync.shared.changed()
     }
     @objc func about() {
         NSApp.orderFrontStandardAboutPanel(options:[.applicationName:"Linvell",.applicationVersion:UpdateManager.currentVersion,.credits:NSAttributedString(string:"Native Swift editor\nFull Vim and expanded IDE features are in development.\nlinvell.fuluwa.top")])
@@ -253,6 +258,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let view = menu("View")
         item(view,"Command Palette",#selector(WorkspaceController.commandPalette),"p",[.command,.shift],route:true)
         item(view,"Open Quickly…",#selector(WorkspaceController.quickOpen),"p",route:true)
+        item(view,"Go to Line…",#selector(WorkspaceController.promptGoToLine),"l",route:true)
+        item(view,"Filter Files",#selector(WorkspaceController.focusFileFilter),"j",[.command,.option],route:true)
         item(view,"Go to Symbol…",#selector(WorkspaceController.documentSymbols),"o",[.command,.shift],route:true)
         item(view,"Toggle Preview",#selector(WorkspaceController.toggleMarkdownPreview),"v",[.command,.shift],route:true)
         item(view,"Problems",#selector(WorkspaceController.showProblems),"m",[.command,.shift],route:true)
@@ -265,15 +272,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         item(view,"Toggle Sidebar",#selector(WorkspaceController.toggleSidebar),"b",route:true)
         item(view,"Split Editor",#selector(WorkspaceController.toggleSplit),"\\",route:true)
         item(view,"Toggle Terminal",#selector(WorkspaceController.toggleTerminal),"`",[.control],route:true)
+        item(view,"Toggle Word Wrap",#selector(WorkspaceController.toggleWordWrap),"z",[.option],route:true)
+        item(view,"Toggle Minimap",#selector(WorkspaceController.toggleMinimap),route:true)
         item(view,"Toggle Vim Mode",#selector(WorkspaceController.toggleVim),"",route:true)
         view.addItem(.separator())
         let themes = NSMenu(title:L.text("Theme")), themeItem = NSMenuItem(title:L.text("Theme"),action:nil,keyEquivalent:"")
         themeItem.submenu = themes; view.addItem(themeItem)
         for profile in Theme.Profile.allCases {
-            let i = NSMenuItem(title:profile.rawValue,action:#selector(selectTheme(_:)),keyEquivalent:""); i.target = self; i.state = profile == Theme.profile ? .on : .off; themes.addItem(i)
+            let i = NSMenuItem(title:L.text(profile.rawValue),action:#selector(selectTheme(_:)),keyEquivalent:"")
+            i.representedObject = profile.rawValue
+            i.target = self
+            i.state = Theme.pluginTheme == nil && profile == Theme.profile ? .on : .off
+            themes.addItem(i)
         }
         item(view,"Increase Font Size",#selector(WorkspaceController.increaseFont),"=",route:true)
         item(view,"Decrease Font Size",#selector(WorkspaceController.decreaseFont),"-",route:true)
+        item(view,"Reset Font Size",#selector(WorkspaceController.resetFont),"0",route:true)
         let git = menu("Git")
         item(git,"Repositories…",#selector(WorkspaceController.browseGitRepositories),route:true)
         item(git,"Clone Repository…",#selector(WorkspaceController.cloneGitRepositoryFromMenu),route:true)

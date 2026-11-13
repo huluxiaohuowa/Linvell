@@ -1461,3 +1461,27 @@
 "PREVIEW" = "预览";
 
 "This file cannot be previewed." = "暂不支持预览此文件。";
+
+"Quick Open…   ⌘P" = "快速打开…   ⌘P";
+"Go to Line…" = "跳转到行…";
+"Line number" = "行号";
+"Filter Files" = "筛选文件";
+"Toggle Word Wrap" = "切换自动换行";
+"Show Minimap" = "显示代码小地图";
+"Toggle Minimap" = "切换代码小地图";
+"Code minimap" = "代码小地图";
+"Reset Font Size" = "重置字号";
+"Linvell Sea Glass" = "Linvell 海玻璃";
+"Linvell Ember" = "Linvell 余烬";
+"Show indentation guides" = "显示缩进参考线";
+"New File Here…" = "在此新建文件…";
+"New Folder Here…" = "在此新建文件夹…";
+"Move to Trash…" = "移到废纸篓…";
+"Move “%@” to the Trash?" = "将“%@”移到废纸篓？";
+"Finish opening or saving the file and try again." = "请等文件打开或保存完成后重试。";
+"Save or close affected tabs before moving this item to the Trash." = "请先保存或关闭相关标签页，再移到废纸篓。";
+"Enter a single file name." = "请输入单个文件名。";
+"Move Tab Left" = "将标签页左移";
+"Move Tab Right" = "将标签页右移";
+"Close Other Tabs" = "关闭其他标签页";
+"Close Tab" = "关闭标签页";

@@ -1,6 +1,6 @@
 import Foundation
 
-public enum SourceTokenKind { case keyword, string, comment, number, type, directive }
+public enum SourceTokenKind: String, CaseIterable { case keyword, string, comment, number, type, directive }
 public struct SourceToken { public let range: NSRange; public let kind: SourceTokenKind }
 public struct SourceFold: Equatable {
     public let line: Int,endLine: Int,range: NSRange
