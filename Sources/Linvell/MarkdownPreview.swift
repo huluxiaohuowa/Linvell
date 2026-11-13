@@ -38,17 +38,15 @@ enum MarkdownRendering {
         guard html.hasPrefix(prefix), html.hasSuffix(suffix),
               let openingEnd = html.range(of:"\">") else { return html }
         let language = html[html.index(html.startIndex,offsetBy:prefix.count)..<openingEnd.lowerBound].lowercased()
-        let extensions = ["javascript":"js","typescript":"ts","python":"py","rust":"rs","ruby":"rb",
-                          "shell":"sh","bash":"sh","c++":"cpp","c#":"cs","kotlin":"kt","dockerfile":"dockerfile"]
         guard !language.isEmpty, language.utf8.count <= 24,
-              language.utf8.allSatisfy({ (97...122).contains($0) || (48...57).contains($0) || $0 == 43 || $0 == 35 })
+              language.utf8.allSatisfy({ (97...122).contains($0) || (48...57).contains($0) || $0 == 43 || $0 == 35 || $0 == 45 })
         else { return html }
         let escaped = html[openingEnd.upperBound..<html.index(html.endIndex,offsetBy:-suffix.count)]
         let code = escaped.replacingOccurrences(of:"&lt;",with:"<")
             .replacingOccurrences(of:"&gt;",with:">").replacingOccurrences(of:"&amp;",with:"&")
         guard code.utf8.count <= 128*1024 else { return html }
         let source = code as NSString
-        let tokens = SourceSyntax.analyze(code,path:"code."+(extensions[language] ?? language)).tokens
+        let tokens = SourceSyntax.fencedHighlights(code,language:language)
         var result = String(html[..<openingEnd.upperBound])
         var position = 0
         func escapedHTML(_ text: String) -> String {

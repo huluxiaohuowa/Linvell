@@ -13,7 +13,9 @@ final class RemoteDocument {
         let file = cache.appendingPathComponent(URL(fileURLWithPath:path).lastPathComponent)
         try data.write(to:file,options:.atomic); try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:file.path)
     }
-    var localURL: URL { cache.appendingPathComponent(URL(fileURLWithPath:path).lastPathComponent) }
+    private var cacheName: String?
+    var localURL: URL { cache.appendingPathComponent(cacheName ?? URL(fileURLWithPath:path).lastPathComponent) }
+    func retainCache(at url: URL) { cacheName = url.lastPathComponent }
     deinit { try? FileManager.default.removeItem(at:cache) }
     func save(_ data: Data) throws {
         let reply = try connection.request("write",path:path,content:data,digest:digest)

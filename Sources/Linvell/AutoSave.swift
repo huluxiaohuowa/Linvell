@@ -30,6 +30,7 @@ extension WorkspaceController {
             guard let self,let document,!document.externalChange,self.documents.contains(where:{ $0 === document }),PreferencesSync.value("autoSave") == "true" else { return }
             self.autoSaveWork.removeValue(forKey:id)
             guard !self.panes.contains(where:{ $0.document === document && $0.textView.hasMarkedText() }) else { return }
+            if let remote = document.remote,self.isMutatingRemote(remote.path,host:remote.connection.host) { return }
             guard let snapshot = try? document.buffer.saveSnapshot() else { return }
             self.autoSaving.insert(id)
             let remote = document.remote,expected = remote?.digest

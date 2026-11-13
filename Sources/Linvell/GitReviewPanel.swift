@@ -395,14 +395,7 @@ final class GitReviewPanel: NSWindowController, NSWindowDelegate {
                 }
                 let styled = NSMutableAttributedString(string:value,attributes:[.font:Theme.editorFont,.foregroundColor:Theme.foreground])
                 for token in tokens {
-                    let color: NSColor
-                    switch token.kind {
-                    case .keyword,.type,.directive: color = Theme.keyword
-                    case .string: color = Theme.accent
-                    case .number: color = Theme.number
-                    case .comment: color = Theme.secondary
-                    }
-                    styled.addAttribute(.foregroundColor,value:color,range:token.range)
+                    styled.addAttribute(.foregroundColor,value:GitDiffRendering.color(token.kind),range:token.range)
                 }
                 view.textStorage?.setAttributedString(styled)
                 self.configureSourceWrapping()

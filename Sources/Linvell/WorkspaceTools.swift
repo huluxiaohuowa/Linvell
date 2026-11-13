@@ -1,4 +1,5 @@
 import AppKit
+import LinvellCore
 
 enum ProjectFiles {
     static func list(_ root: URL) -> [URL] {
@@ -248,8 +249,11 @@ final class ToolSidebar: NSView, NSTableViewDataSource, NSTableViewDelegate, NSS
     private var generation = UUID()
     let project: URL
     let kind: String
-    init(kind: String,project: URL) {
-        self.project = project; self.kind = kind
+    private let remote: (connection: SSHRemote,directory: String)?
+    private var searchWork: DispatchWorkItem?
+    private static let remoteSearchQueue = DispatchQueue(label:"top.fuluwa.linvell.remote-search",qos:.userInitiated)
+    init(kind: String,project: URL,remote: (SSHRemote,String)? = nil) {
+        self.project = project; self.kind = kind; self.remote = remote
         super.init(frame:.zero)
         let heading = Theme.label(kind == "search" ? "SEARCH" : "SOURCE CONTROL",size:11,color:Theme.secondary,weight:.semibold)
         let refreshButton = NSButton(title:L.text("Refresh"),target:self,action:#selector(refresh)); refreshButton.bezelStyle = .inline
@@ -257,11 +261,11 @@ final class ToolSidebar: NSView, NSTableViewDataSource, NSTableViewDelegate, NSS
         query.placeholderString = L.text("Search project text"); query.delegate = self; query.font = .systemFont(ofSize:13)
         let c = NSTableColumn(identifier:NSUserInterfaceItemIdentifier("results")); table.addTableColumn(c); table.headerView = nil
         table.rowHeight = 48; table.dataSource = self; table.delegate = self; table.backgroundColor = Theme.panel
-        table.target = self; table.action = #selector(selected); table.setAccessibilityLabel(kind == "search" ? "Project search results" : "Changed files")
+        table.target = self; table.action = #selector(selected); table.setAccessibilityLabel(L.text(kind == "search" ? "Project search results" : "Changed files"))
         let scroll = ResponsiveScrollView(); scroll.documentView = table; scroll.hasVerticalScroller = true; scroll.drawsBackground = false
         let stack = Theme.stack(kind == "search" ? [row,query,caption,scroll] : [row,caption,scroll],orientation:.vertical,spacing:12)
         Theme.pin(stack,in:self,inset:16)
-        if kind == "search" { caption.stringValue = "Search is literal and case-insensitive." } else { refresh() }
+        if kind == "search" { caption.stringValue = L.text("Search is literal and case-insensitive.") } else { refresh() }
     }
     required init?(coder: NSCoder) { fatalError() }
     func numberOfRows(in tableView: NSTableView) -> Int { results.count }
@@ -271,13 +275,37 @@ final class ToolSidebar: NSView, NSTableViewDataSource, NSTableViewDelegate, NSS
         let s = NSStackView(views:[a,b]); s.orientation = .vertical; s.alignment = .leading; s.spacing = 3
         return Theme.stack([FileIcon.view(for:item.url),s],spacing:9)
     }
-    @objc func selected() { guard table.selectedRow >= 0 else { return }; let r = results[table.selectedRow]; onSelect?(r.url,r.line) }
+    @objc func selected() { guard results.indices.contains(table.selectedRow) else { return }; let r = results[table.selectedRow]; onSelect?(r.url,r.line) }
     func controlTextDidChange(_ notification: Notification) { refresh() }
+    deinit { searchWork?.cancel() }
     @objc func refresh() {
+        searchWork?.cancel()
         let request = UUID(); generation = request
         let needle = query.stringValue, project = self.project, kind = self.kind
-        if kind == "search" && needle.isEmpty { results = []; table.reloadData(); caption.stringValue = "Search is literal and case-insensitive."; return }
-        caption.stringValue = kind == "search" ? "Searching…" : "Reading repository status…"
+        if kind == "search" && needle.isEmpty { results = []; table.reloadData(); caption.stringValue = L.text("Search is literal and case-insensitive."); return }
+        caption.stringValue = L.text(kind == "search" ? "Searching…" : "Reading repository status…")
+        if let remote, kind == "search" {
+            results = []; table.reloadData()
+            let work = DispatchWorkItem { [weak self] in
+                let result = Swift.Result { try remote.connection.searchText(needle,directory:remote.directory) }
+                DispatchQueue.main.async {
+                    guard let self,self.generation == request else { return }
+                    switch result {
+                    case .success(let reply):
+                        self.results = (reply.matches ?? []).map { match in
+                            Result(title:match.text,detail:"\(match.relative):\(match.line)",url:URL(fileURLWithPath:match.path),line:match.line)
+                        }
+                        self.caption.stringValue = L.format("%@ matches · UTF-8 files under 2 MB",String(self.results.count))
+                            + (reply.truncated == true ? " · "+L.text("limit reached") : "")
+                    case .failure(let error): self.caption.stringValue = error.localizedDescription
+                    }
+                    self.table.reloadData()
+                }
+            }
+            searchWork = work
+            Self.remoteSearchQueue.asyncAfter(deadline:.now()+0.25,execute:work)
+            return
+        }
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
             var found: [Result] = [], note = ""
             if kind == "search" {

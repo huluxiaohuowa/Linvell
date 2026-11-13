@@ -1461,3 +1461,13 @@
 "PREVIEW" = "PREVIEW";
 
 "This file cannot be previewed." = "This file cannot be previewed.";
+
+"Search is literal and case-insensitive." = "Search is literal and case-insensitive.";
+"Searching…" = "Searching…";
+"Project search results" = "Project search results";
+"%@ matches · UTF-8 files under 2 MB" = "%@ matches · UTF-8 files under 2 MB";
+"limit reached" = "limit reached";
+"The item will be moved to the Trash on the SSH host." = "The item will be moved to the Trash on the SSH host.";
+"Moved to remote Trash: %@" = "Moved to remote Trash: %@";
+"Remote item renamed." = "Remote item renamed.";
+"Move to Trash" = "Move to Trash";

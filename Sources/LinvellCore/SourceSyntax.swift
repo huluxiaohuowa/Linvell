@@ -1,7 +1,7 @@
 import Foundation
 
-public enum SourceTokenKind: String, CaseIterable { case keyword, string, comment, number, type, directive }
-public struct SourceToken { public let range: NSRange; public let kind: SourceTokenKind }
+public enum SourceTokenKind: String, CaseIterable, Sendable { case keyword, string, comment, number, type, directive, attribute, preprocessor, function, property, tag, variable, heading, link }
+public struct SourceToken: Sendable { public let range: NSRange; public let kind: SourceTokenKind }
 public struct SourceFold: Equatable {
     public let line: Int,endLine: Int,range: NSRange
 }
@@ -34,6 +34,7 @@ public enum SourceSyntax {
         let name = URL(fileURLWithPath:path).lastPathComponent.lowercased(),language = ext.isEmpty ? name : ext
         let hash = hashComments(language),dash = dashComments(language),markup = ["html","htm","xml","svg","vue","svelte"].contains(language)
         let slash = !hash && !dash && !["json","yaml","yml","toml","md","markdown","txt"].contains(language)
+        let grammar = n <= 2_000_000 ? SilicaLanguage(url:URL(fileURLWithPath:path))?.grammar : nil
         var result = SourceAnalysis(),i = 0,stack: [(UInt16,Int)] = [],nextCheck = 0
         func c(_ at: Int) -> UInt16 { at >= 0 && at < n ? ns.character(at:at) : 0 }
         func starts(_ literal: String,_ at: Int) -> Bool {
@@ -51,7 +52,7 @@ public enum SourceSyntax {
         }
         func add(_ start: Int,_ end: Int,_ kind: SourceTokenKind,_ ignore: Bool = false) {
             let range = NSRange(location:start,length:end-start)
-            if result.tokens.count < 500_000 { result.tokens.append(SourceToken(range:range,kind:kind)) }
+            if grammar == nil,result.tokens.count < 500_000 { result.tokens.append(SourceToken(range:range,kind:kind)) }
             if ignore { result.ignored.append(range) }
         }
         func fold(_ open: Int,_ close: Int) {
@@ -155,9 +156,65 @@ public enum SourceSyntax {
                 else if ["def","class","module","function","if","for","while","case","begin","repeat","process","architecture","entity","task","generate"].contains(word) || (language == "lua" && line.hasPrefix("local function ")) || (language == "rb" && line.hasSuffix(" do")) { blocks.append(row) }
             }
         }
-        result.tokens.sort { $0.range.location < $1.range.location }
+        if let grammar {
+            result.tokens = highlights(grammar,text:ns,cancelled:cancelled)
+        } else { result.tokens.sort { $0.range.location < $1.range.location } }
         result.folds = Array(Dictionary(result.folds.map { ($0.line,$0) },uniquingKeysWith:{ $0.range.length >= $1.range.length ? $0 : $1 }).values).sorted { $0.line < $1.line }
         return result
+    }
+
+    public static func fencedHighlights(_ code: String,language: String) -> [SourceToken] {
+        if let grammar = SilicaLanguage(fenceName:language)?.grammar {
+            return highlights(grammar,text:code as NSString,cancelled:{ false })
+        }
+        return analyze(code,path:"code."+language).tokens
+    }
+
+    // Convert the grammar's last-rule-wins overlaps into disjoint spans for
+    // the editor, Markdown and Git review. The heap ranks active rules by precedence.
+    private static func highlights(_ grammar: SilicaGrammar,text: NSString,cancelled: () -> Bool) -> [SourceToken] {
+        let raw = grammar.tokenize(text,cancelled:cancelled)
+        guard !raw.isEmpty,!cancelled() else { return [] }
+        let order = raw.indices.sorted { raw[$0].range.location < raw[$1].range.location }
+        var active: [Int] = [], next = 0, position = 0, output: [SourceToken] = []
+        func push(_ value: Int) {
+            active.append(value)
+            var child = active.count-1
+            while child > 0 {
+                let parent = (child-1)/2
+                guard active[parent] < value else { break }
+                active.swapAt(parent,child); child = parent
+            }
+        }
+        func pop() {
+            let last = active.removeLast()
+            guard !active.isEmpty else { return }
+            active[0] = last
+            var parent = 0
+            while parent*2+1 < active.count {
+                var child = parent*2+1
+                if child+1 < active.count,active[child+1] > active[child] { child += 1 }
+                guard active[child] > last else { break }
+                active.swapAt(parent,child); parent = child
+            }
+        }
+        while next < order.count || !active.isEmpty {
+            if cancelled() { return [] }
+            while next < order.count,raw[order[next]].range.location <= position {
+                push(order[next]); next += 1
+            }
+            while let first = active.first,NSMaxRange(raw[first].range) <= position { pop() }
+            let following = next < order.count ? raw[order[next]].range.location : text.length
+            guard let first = active.first else { position = following; continue }
+            let end = min(following,NSMaxRange(raw[first].range))
+            if let last = output.last,last.kind == raw[first].kind,NSMaxRange(last.range) == position {
+                output[output.count-1] = SourceToken(range:NSRange(location:last.range.location,length:end-last.range.location),kind:last.kind)
+            } else {
+                output.append(SourceToken(range:NSRange(location:position,length:end-position),kind:raw[first].kind))
+            }
+            position = end
+        }
+        return output
     }
 
     public static func newline(in text: String,at offset: Int,path: String,unit: String) -> (String,Int) {

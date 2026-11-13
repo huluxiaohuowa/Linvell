@@ -102,6 +102,8 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     var remoteConnection: SSHRemote?
     var remoteDirectory = "~"
     var remoteBrowser: RemoteExplorer?
+    var remoteMutation: (host: String,path: String,trash: Bool)?
+    var remoteLoads: [UUID:(host: String,path: String)] = [:]
     var remoteFolderPicker: RemoteFolderPicker?
     var runWorkspaceView: RunWorkspace?
     var gitWorkspaceView: GitWorkspace?
@@ -250,7 +252,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     }
     @objc private func activityClicked(_ sender: NSButton) {
         selectActivity(sender.tag)
-        switch sender.tag { case 0: showSidebar("files"); case 1: showSidebar("search"); case 2: gitWorkspace(); case 3: showSymbols(); case 4: projectTools(); default: showAgents() }
+        switch sender.tag { case 0: showSidebar("files"); case 1: projectSearch(); case 2: gitWorkspace(); case 3: showSymbols(); case 4: projectTools(); default: showAgents() }
     }
     func showSidebar(_ kind: String) {
         sidebar.refreshTheme()
@@ -264,7 +266,15 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         sidebar.subviews.forEach { $0.removeFromSuperview() }
         if kind == "files",let connection = remoteConnection { setupRemoteSidebar(connection) }
         else if kind == "files" { setupSidebar() }
-        else if let project = root?.url {
+        else if kind == "search",let connection = remoteConnection {
+            let directory = remoteDirectory
+            let tool = ToolSidebar(kind:kind,project:URL(fileURLWithPath:directory),remote:(connection,directory))
+            tool.onSelect = { [weak self] url,line in
+                guard let self,self.remoteConnection?.host == connection.host,self.remoteDirectory == directory else { return }
+                self.openRemote(url.path,connection:connection) { [weak self] in self?.goToLine(line) }
+            }
+            Theme.pin(tool,in:sidebar)
+        } else if let project = root?.url {
             let tool = ToolSidebar(kind:kind,project:project)
             tool.onSelect = { [weak self] url,line in self?.open(url) { [weak self] in self?.goToLine(line) } }
             Theme.pin(tool,in:sidebar)
@@ -545,6 +555,9 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     }
     private func makePane(_ document: OpenDocument) -> EditorPane {
         let pane = EditorPane(document:document,vim:vimEnabled)
+        if let remote = document.remote,remoteMutation?.trash == true,isMutatingRemote(remote.path,host:remote.connection.host) {
+            pane.textView.isEditable = false
+        }
         pane.translatesAutoresizingMaskIntoConstraints = false
         pane.onFocus = { [weak self,weak pane] in self?.activePane = pane }
         pane.onChange = { [weak self] in self?.updateStatus(); self?.updateTabTitles() }
@@ -634,6 +647,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         autoSaveWork.removeValue(forKey:doc.buffer.id)?.cancel()
         guard !autoSaving.contains(doc.buffer.id) else { status.stringValue = L.text("Saving changes…"); return false }
         if let remote = doc.remote,!asCopy {
+            guard !isMutatingRemote(remote.path,host:remote.connection.host) else { return false }
             do {
                 let data = try doc.buffer.dataForSaving()
                 try RemoteProgress.perform("Saving remote file…") { try remote.save(data) }
@@ -969,7 +983,10 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         let end = row+1 < current.lines.starts.count ? current.lines.starts[row+1] : current.storage.length
         v.setSelections([NSRange(location:start,length:end-start)])
     }
-    @objc func projectSearch() { showSidebar("search") }
+    @objc func projectSearch() {
+        showSidebar("search")
+        if let search = sidebar.subviews.first(where:{ $0 is ToolSidebar }) as? ToolSidebar { window?.makeFirstResponder(search.query) }
+    }
     @objc func documentSymbols() { showSymbols() }
     @objc func replaceInFile() { activePane?.textView.performFindPanelAction(menuItem(tag:Int(NSTextFinder.Action.showReplaceInterface.rawValue))) }
     @objc func refreshFiles() {

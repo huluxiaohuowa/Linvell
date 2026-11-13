@@ -84,9 +84,14 @@ enum Theme {
         case .keyword: return palette[5]
         case .number: return palette[6]
         case .comment: return palette[3]
+        case .function, .link: return palette[4]
+        case .tag, .heading: return palette[5]
+        case .variable: return palette[4]
         default: break
         }
-        guard let profile else { return kind == .string ? palette[4] : palette[5] }
+        guard let profile else {
+            return kind == .string || kind == .property ? palette[4] : palette[5]
+        }
         // Strings, types, directives. Theme-specific tones are also used in Markdown.
         let tones: (UInt32,UInt32,UInt32)
         switch profile {
@@ -116,7 +121,7 @@ enum Theme {
         }
         switch kind {
         case .string: return tones.0
-        case .type: return tones.1
+        case .type, .property: return tones.1
         default: return tones.2
         }
     }

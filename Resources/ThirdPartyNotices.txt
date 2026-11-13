@@ -296,7 +296,7 @@ SOFTWARE.
 
 Silica (MIT)
 Reference revision: 3a237650463b0c7511df0e6524dbc227aa8577fa
-Selected syntax theme colors adapted from Silica.
+Language highlighting grammars and selected syntax theme colors adapted from Silica.
 
 MIT License
 

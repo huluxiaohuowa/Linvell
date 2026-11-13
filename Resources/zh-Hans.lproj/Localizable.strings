@@ -1485,3 +1485,13 @@
 "Move Tab Right" = "将标签页右移";
 "Close Other Tabs" = "关闭其他标签页";
 "Close Tab" = "关闭标签页";
+
+"Search is literal and case-insensitive." = "按字面搜索，不区分大小写。";
+"Searching…" = "正在搜索…";
+"Project search results" = "项目搜索结果";
+"%@ matches · UTF-8 files under 2 MB" = "%@ 条匹配 · 小于 2 MB 的 UTF-8 文件";
+"limit reached" = "已达搜索上限";
+"The item will be moved to the Trash on the SSH host." = "此项目将移到 SSH 主机的废纸篓。";
+"Moved to remote Trash: %@" = "已移到远程废纸篓：%@";
+"Remote item renamed." = "远程项目已重命名。";
+"Move to Trash" = "移到废纸篓";

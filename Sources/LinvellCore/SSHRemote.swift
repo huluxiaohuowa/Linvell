@@ -49,8 +49,19 @@ public struct RemoteEntry: Decodable, Equatable {
     public let name: String
     public let path: String
     public let directory: Bool
+    public let ignored: Bool?
+
+    public var isIgnored: Bool { ignored == true }
+}
+public struct RemoteTextMatch: Decodable {
+    public let path: String
+    public let relative: String
+    public let line: Int
+    public let text: String
 }
 public struct RemoteReply: Decodable {
+    public let matches: [RemoteTextMatch]?
+    public let truncated: Bool?
     public let fileStates: [String:String]?
     public let reports: [[String]]?
     public let installTarget: LanguageInstallTarget?
@@ -107,8 +118,21 @@ public struct SSHRemote {
         guard let line = result.output.components(separatedBy:.newlines).last(where:{ $0.hasPrefix("LINVELL_JSON:") }) else { throw GitError.command("The remote host needs Python 3 to browse and edit files. Open its SSH terminal to check authentication and Python availability.") }
         let reply = try JSONDecoder().decode(RemoteReply.self,from:Data(line.dropFirst("LINVELL_JSON:".count).utf8))
         if let error = reply.error { throw GitError.command(error) }
-        if operation == "create" || operation == "settings-write" { RemoteDirectoryCache.shared.invalidate(host:host) }
+        if ["create","settings-write","rename","trash"].contains(operation) { RemoteDirectoryCache.shared.invalidate(host:host) }
         return reply
+    }
+    public func searchText(_ query: String,directory: String) throws -> RemoteReply {
+        try request("search-text",path:directory,content:Data(query.utf8))
+    }
+    public func renameItem(at path: String,to name: String,in directory: String) throws -> String {
+        let result = try request("rename",path:path,content:Data(name.utf8),repositoryRoot:directory)
+        guard let destination = result.path else { throw GitError.command("The remote rename was not acknowledged.") }
+        return destination
+    }
+    @discardableResult public func trashItem(at path: String,in directory: String) throws -> String {
+        let result = try request("trash",path:path,repositoryRoot:directory)
+        guard let destination = result.path else { throw GitError.command("The remote Trash move was not acknowledged.") }
+        return destination
     }
     public static func gitCommand(_ arguments: [String],directory: String) -> String {
         let command = (directory == "~" ? "cd && " : "")+"exec env GIT_TERMINAL_PROMPT=0 GIT_OPTIONAL_LOCKS=0 git "+GitRepository.arguments(directory:directory == "~" ? "." : directory,arguments:arguments).map(quote).joined(separator:" ")
@@ -128,6 +152,137 @@ public struct SSHRemote {
     public static let agent = #"""
 import os,sys,json,base64,hashlib,tempfile,stat
 def digest(data): return hashlib.sha256(data).hexdigest()
+
+def ignored_entries(path,entries):
+    import subprocess
+    if not entries: return
+    inputs=b''.join(os.fsencode(e['path'])+b'\0' for e in entries)
+    try:
+        result=subprocess.run(['git','--no-optional-locks','-c','core.fsmonitor=false','-C',path,'check-ignore','-z','--stdin'],input=inputs,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=5)
+        if result.returncode==0:
+            ignored=set(result.stdout.split(b'\0'))
+            for entry in entries:
+                if os.fsencode(entry['path']) in ignored: entry['ignored']=True
+    except (OSError,subprocess.TimeoutExpired): pass
+
+def exclusive_move(source,dest,trash=False):
+    # Atomic on Linux and macOS, including directory and symlink entries.
+    import ctypes,errno
+    libc=ctypes.CDLL(None,use_errno=True)
+    if sys.platform=='darwin' and hasattr(libc,'renamex_np'):
+        result=libc.renamex_np(os.fsencode(source),os.fsencode(dest),4)
+    elif sys.platform.startswith('linux') and hasattr(libc,'renameat2'):
+        result=libc.renameat2(-100,os.fsencode(source),-100,os.fsencode(dest),1)
+    else: raise ValueError('This SSH host does not support moving items without overwriting.')
+    if result!=0:
+        code=ctypes.get_errno()
+        if code==errno.EXDEV and trash: raise ValueError('Could not move to the Trash on the same filesystem. The original item was kept.')
+        raise OSError(code,os.strerror(code))
+
+def workspace_item(path,root):
+    root=os.path.realpath(os.path.expanduser(root))
+    parent=os.path.realpath(os.path.dirname(path))
+    name=os.path.basename(path)
+    if not name or path==root or parent!=os.path.dirname(path) or os.path.commonpath((root,parent))!=root:
+        raise ValueError('Choose a file or folder inside the remote workspace.')
+    target=os.path.join(parent,name)
+    parts=os.path.relpath(target,root).split(os.sep)
+    if target==root or '.git' in parts: raise ValueError('Choose a file or folder inside the remote workspace.')
+    os.lstat(target)
+    return target
+
+def trash_item(path):
+    import datetime,urllib.parse,uuid
+    home=os.path.expanduser('~')
+    uid=os.getuid()
+    def private_folder(folder):
+        os.makedirs(folder,mode=0o700,exist_ok=True)
+        entry=os.lstat(folder)
+        if not stat.S_ISDIR(entry.st_mode) or entry.st_uid!=uid or entry.st_mode&0o077:
+            raise ValueError('The remote Trash folder is not private. The original item was kept.')
+    mount=os.path.dirname(path)
+    source_dev=os.stat(mount).st_dev
+    top=mount
+    while not os.path.ismount(top):
+        above=os.path.dirname(top)
+        if above==top or os.stat(above).st_dev!=source_dev: break
+        top=above
+    if sys.platform=='darwin':
+        trash=os.path.join(home,'.Trash') if os.stat(home).st_dev==source_dev else os.path.join(top,'.Trashes',str(uid))
+        private_folder(trash)
+        for i in range(100):
+            name=os.path.basename(path) if not i else str(i)+'-'+os.path.basename(path)
+            if len(os.fsencode(name))>255: name=uuid.uuid4().hex
+            destination=os.path.join(trash,name)
+            try: exclusive_move(path,destination,trash=True); return destination
+            except FileExistsError: continue
+        raise ValueError('Could not reserve a name in the remote Trash.')
+    data=os.environ.get('XDG_DATA_HOME','')
+    if not os.path.isabs(data): data=os.path.join(home,'.local','share')
+    ancestor=data
+    while not os.path.exists(ancestor): ancestor=os.path.dirname(ancestor)
+    if os.stat(ancestor).st_dev==source_dev:
+        trash=os.path.join(data,'Trash')
+        original=path
+    else:
+        shared=os.path.join(top,'.Trash')
+        shared_ok=False
+        try:
+            mode=os.lstat(shared).st_mode
+            shared_ok=stat.S_ISDIR(mode) and bool(mode&stat.S_ISVTX)
+        except FileNotFoundError: pass
+        trash=os.path.join(shared,str(uid)) if shared_ok else os.path.join(top,'.Trash-'+str(uid))
+        original=os.path.relpath(path,top)
+    for folder in (trash,os.path.join(trash,'files'),os.path.join(trash,'info')): private_folder(folder)
+    # Keep the visible name and extension when possible, with no replacement.
+    stem=os.path.basename(path)
+    for i in range(100):
+        name=stem if not i else str(i)+'-'+stem
+        if len(os.fsencode(name+'.trashinfo'))>255: name=uuid.uuid4().hex
+        destination=os.path.join(trash,'files',name)
+        info=os.path.join(trash,'info',name+'.trashinfo')
+        try:
+            fd=os.open(info,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
+        except FileExistsError: continue
+        try:
+            with os.fdopen(fd,'w',encoding='utf-8') as output:
+                output.write('[Trash Info]\nPath='+urllib.parse.quote_from_bytes(os.fsencode(original))+'\nDeletionDate='+datetime.datetime.now().strftime('%Y-%m-%dT%H:%M:%S')+'\n')
+            exclusive_move(path,destination,trash=True)
+            return destination
+        except FileExistsError: os.unlink(info)
+        except BaseException:
+            os.unlink(info)
+            raise
+    raise ValueError('Could not reserve a name in the remote Trash.')
+
+def search_text(path,query):
+    import time
+    if not query or len(query)>4096: raise ValueError('Enter between 1 and 4,096 characters to search.')
+    matches=[]
+    excluded={'.git','node_modules','dist','build','.build','DerivedData','vendor','__pycache__','.venv'}
+    deadline=time.monotonic()+20
+    scanned=0
+    for base,dirs,names in os.walk(path,followlinks=False):
+        dirs[:]=sorted(name for name in dirs if name not in excluded and not os.path.islink(os.path.join(base,name)))
+        for name in sorted(names):
+            if name=='.git': continue
+            if scanned>=20000 or time.monotonic()>=deadline: return matches,True
+            scanned+=1
+            full=os.path.join(base,name)
+            try:
+                fd=os.open(full,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+                with os.fdopen(fd,'rb') as source:
+                    entry=os.fstat(source.fileno())
+                    if not stat.S_ISREG(entry.st_mode) or entry.st_size>=2000000: continue
+                    data=source.read(2000000)
+                if len(data)>=2000000 or b'\0' in data: continue
+                content=data.decode('utf-8')
+            except (OSError,UnicodeError): continue
+            for i,line in enumerate(content.replace('\r\n','\n').replace('\r','\n').split('\n'),1):
+                if query in line.casefold():
+                    matches.append(dict(path=full,relative=os.path.relpath(full,path),line=i,text=line.strip()[:160]))
+                    if len(matches)>=500: return matches,True
+    return matches,False
 try:
     req=json.load(sys.stdin)
     path=os.path.abspath(os.path.expanduser(req['path'] or '~'))
@@ -139,7 +294,24 @@ try:
             for e in scan:
                 if len(entries)>=20000: raise ValueError('Directory contains more than 20,000 entries; open a smaller directory.')
                 entries.append(dict(name=e.name,path=e.path,directory=e.is_dir()))
+        ignored_entries(path,entries)
         reply=dict(path=path,entries=sorted(entries,key=lambda e:(not e['directory'],e['name'].lower())))
+    elif op=='search-text':
+        path=os.path.realpath(path)
+        if not os.path.isdir(path): raise ValueError('Open a remote project folder to search.')
+        query=base64.b64decode(req['content'],validate=True).decode('utf-8').casefold()
+        matches,truncated=search_text(path,query)
+        reply=dict(path=path,matches=matches,truncated=truncated)
+    elif op in ('rename','trash'):
+        path=workspace_item(path,req['repositoryRoot'])
+        if op=='rename':
+            name=base64.b64decode(req['content'],validate=True).decode('utf-8')
+            if not name.strip() or name in ('.','..','.git') or '/' in name or '\0' in name:
+                raise ValueError('Enter a single file or folder name.')
+            destination=os.path.join(os.path.dirname(path),name)
+            if destination!=path: exclusive_move(path,destination)
+        else: destination=trash_item(path)
+        reply=dict(path=destination)
     elif op=='git-modification':
         import subprocess
         result=subprocess.run(['git','-C',path,'ls-files','-z','--cached','--others','--exclude-standard'],capture_output=True,check=True)

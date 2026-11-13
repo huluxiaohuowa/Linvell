@@ -59,6 +59,10 @@ extension WorkspaceController {
         let browser = RemoteExplorer(connection:connection,path:remoteDirectory); remoteBrowser = browser
         browser.onSearch = { [weak self] in self?.quickOpenRemote(connection) }
         browser.onOpen = { [weak self] in self?.openRemote($0,connection:connection) }
+        browser.onMutation = { [weak self,weak browser] path,name in
+            guard let self,self.remoteBrowser === browser else { return }
+            self.mutateRemoteItem(path,newName:name)
+        }
         browser.onRootLoaded = { [weak self,weak browser] path in
             guard let self,self.remoteBrowser === browser else { return }
             self.remoteDirectory = path; self.syncManagedPlugins(); self.agentProjectDidChange()
@@ -81,14 +85,93 @@ extension WorkspaceController {
         }
         picker.onTerminal = { [weak self] in self?.toggleTerminal() }
     }
+    private func containsRemotePath(_ path: String,under root: String) -> Bool {
+        path == root || path.hasPrefix(root+"/")
+    }
+
+    func isMutatingRemote(_ path: String,host: String) -> Bool {
+        guard let mutation = remoteMutation,mutation.host == host else { return false }
+        return containsRemotePath(path,under:mutation.path)
+    }
+
+    func mutateRemoteItem(_ path: String,newName: String?,completion: ((Result<String,Error>) -> Void)? = nil) {
+        guard let connection = remoteConnection,remoteMutation == nil else { return }
+        let directory = remoteDirectory,trash = newName == nil
+        guard containsRemotePath(path,under:directory),path != directory else { return }
+        let affected = documents.filter { document in
+            guard let remote = document.remote,remote.connection.host == connection.host else { return false }
+            return containsRemotePath(remote.path,under:path)
+        }
+        let busy = remoteLoads.values.contains { $0.host == connection.host && containsRemotePath($0.path,under:path) }
+            || affected.contains { autoSaving.contains($0.buffer.id) || (trash && $0.buffer.isModified) }
+        guard !busy else {
+            status.stringValue = L.text(trash ? "Save or close affected tabs before moving this item to the Trash." : "Finish opening or saving the file and try again.")
+            return
+        }
+        remoteMutation = (connection.host,path,trash)
+        for document in affected {
+            autoSaveWork.removeValue(forKey:document.buffer.id)?.cancel()
+        }
+        if trash {
+            for pane in panes where affected.contains(where:{ $0 === pane.document }) { pane.textView.isEditable = false }
+        }
+        DispatchQueue.global(qos:.userInitiated).async { [weak self] in
+            let result = Result {
+                if let newName { return try connection.renameItem(at:path,to:newName,in:directory) }
+                return try connection.trashItem(at:path,in:directory)
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.remoteMutation = nil
+                for pane in self.panes where affected.contains(where:{ $0 === pane.document }) && trash { pane.textView.isEditable = true }
+                switch result {
+                case .success(let destination):
+                    if trash {
+                        affected.filter { document in self.documents.contains { $0 === document } }.forEach { self.closeDocument($0) }
+                        self.status.stringValue = L.format("Moved to remote Trash: %@",destination)
+                    } else {
+                        for document in affected {
+                            guard let remote = document.remote else { continue }
+                            if let snapshot = self.codeSnapshot(document,forClosing:true) { self.languageServices.close(snapshot) }
+                            self.languageEdits.removeValue(forKey:document.buffer.id)?.cancel()
+                            self.languageDiagnostics.removeValue(forKey:document.buffer.id)?.cancel()
+                            let oldCache = remote.localURL
+                            remote.path = destination+String(remote.path.dropFirst(path.count))
+                            let newCache = remote.localURL
+                            if oldCache != newCache,(try? FileManager.default.moveItem(at:oldCache,to:newCache)) != nil {
+                                if document.previewURL != nil { document.previewURL = newCache }
+                                else { document.buffer.relocate(from:oldCache,to:newCache) }
+                            } else if oldCache != newCache { remote.retainCache(at:oldCache) }
+                            document.syntax.invalidate()
+                        }
+                        if let current = self.current,affected.contains(where:{ $0 === current }) { self.activate(current) }
+                        else { self.renderTabs() }
+                        self.status.stringValue = L.text("Remote item renamed.")
+                    }
+                    if self.remoteConnection?.host == connection.host,self.remoteDirectory == directory {
+                        self.remoteBrowser?.refreshDirectories([(path as NSString).deletingLastPathComponent])
+                    }
+                    if let search = self.sidebar.subviews.first(where:{ $0 is ToolSidebar }) as? ToolSidebar,
+                       self.remoteConnection?.host == connection.host,self.remoteDirectory == directory { search.refresh() }
+                    self.persistWorkspaceTabs()
+                case .failure(let error): self.status.stringValue = error.localizedDescription
+                }
+                for document in affected where self.documents.contains(where:{ $0 === document }) { self.scheduleAutoSave(document) }
+                completion?(result)
+            }
+        }
+    }
+
     func openRemote(_ path: String,connection: SSHRemote,completion: (() -> Void)? = nil) {
+        guard !isMutatingRemote(path,host:connection.host) else { return }
         if let existing = documents.first(where:{ $0.remote?.connection.host == connection.host && $0.remote?.path == path }) { activate(existing); completion?(); return }
-        let request = UUID(); latestOpenRequest = request
+        let request = UUID(); latestOpenRequest = request; remoteLoads[request] = (connection.host,path)
         status.stringValue = L.text("Opening remote file…")
         DispatchQueue.global(qos:.userInitiated).async { [weak self] in
             let result = Result { try Self.loadRemoteDocument(path,connection:connection) }
             DispatchQueue.main.async {
                 guard let self else { return }
+                self.remoteLoads.removeValue(forKey:request)
                 switch result {
                 case .success(let document):
                     self.finishRemoteOpen(document,request:request,completion:completion)
