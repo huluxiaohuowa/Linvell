@@ -22,9 +22,9 @@ enum WorkspaceGlass {
         let clear = workspace && !NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
         if #available(macOS 26.0, *), let glass = surface as? NSGlassEffectView {
             glass.style = clear ? .clear : .regular
-            glass.tintColor = Theme.canvas.withAlphaComponent(clear ? 0.12 : (Theme.isDark ? 0.60 : 0.52))
+            glass.tintColor = Theme.canvas.withAlphaComponent(clear ? 0.04 : (Theme.isDark ? 0.60 : 0.52))
         } else {
-            surface.layer?.backgroundColor = Theme.canvas.withAlphaComponent(clear ? 0.16 : 1).cgColor
+            surface.layer?.backgroundColor = Theme.canvas.withAlphaComponent(clear ? 0.08 : 1).cgColor
         }
     }
 
