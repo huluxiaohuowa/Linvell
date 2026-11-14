@@ -1,6 +1,19 @@
 import AppKit
 
 enum WorkspaceGlass {
+    static let opacityKey = "workspaceGlassOpacity"
+    static let opacityChanged = Notification.Name("Linvell.workspaceGlassOpacityChanged")
+
+    static var opacity: Int {
+        let stored = UserDefaults.standard.object(forKey:opacityKey) as? Int ?? 90
+        return min(100,max(0,stored))
+    }
+
+    static func setOpacity(_ opacity: Int) {
+        UserDefaults.standard.set(min(100,max(0,opacity)),forKey:opacityKey)
+        NotificationCenter.default.post(name:opacityChanged,object:nil)
+    }
+
     static func surface(containing content: NSView, radius: CGFloat) -> NSView {
         if #available(macOS 26.0, *) {
             let glass = NSGlassEffectView()

@@ -63,6 +63,8 @@
 "Language" = "语言";
 "Language changes apply after restarting Linvell. You can also choose its language in macOS System Settings → General → Language & Region → Applications." = "重启 Linvell 后应用新语言。也可在 macOS「系统设置 → 通用 → 语言与地区 → 应用程序」中设置。";
 "COLOR THEME" = "配色主题";
+"Workspace opacity" = "工作区不透明度";
+"Adjusts how much background shows through the file explorer, welcome view, and editor. macOS Reduce Transparency takes priority." = "调节资源管理器、欢迎页和编辑区的透光程度。开启 macOS「降低透明度」时优先使用系统设置。";
 "Themes update the editor, sidebar and terminal together." = "主题同时应用于编辑器、侧栏和终端。";
 "Linvell Dark" = "Linvell 深色";
 "Linvell Light" = "Linvell 浅色";

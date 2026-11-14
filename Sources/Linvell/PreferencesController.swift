@@ -10,6 +10,7 @@ final class PreferencesController: NSWindowController {
     var buttons: [NSButton] = []
     var statusLabel: NSTextField?
     var statusTimer: Timer?
+    private weak var opacityValueLabel: NSTextField?
     init(owner: WorkspaceController? = nil,updates: UpdateManager = .shared) {
         self.updates = updates; self.workspaceOwner = owner
         let window = NSWindow(contentRect:NSRect(x:0,y:0,width:900,height:650),styleMask:[.titled,.closable,.resizable,.miniaturizable],backing:.buffered,defer:false)
@@ -60,6 +61,17 @@ final class PreferencesController: NSWindowController {
         var rows: [NSView] = [Theme.label(title,size:24,weight:.semibold),Theme.label(subtitle,size:14,color:Theme.secondary)]
         switch category {
         case 0:
+            let opacity = NSSlider(value:Double(WorkspaceGlass.opacity),minValue:0,maxValue:100,target:self,action:#selector(opacityChanged(_:)))
+            opacity.isContinuous = true
+            opacity.widthAnchor.constraint(equalToConstant:180).isActive = true
+            opacity.setAccessibilityLabel(L.text("Workspace opacity"))
+            let percentage = Theme.label("\(WorkspaceGlass.opacity)%",size:13,color:Theme.secondary)
+            percentage.font = .monospacedDigitSystemFont(ofSize:13,weight:.regular)
+            percentage.alignment = .right
+            percentage.widthAnchor.constraint(equalToConstant:44).isActive = true
+            opacityValueLabel = percentage
+            rows.append(settingRow("Workspace opacity",Theme.stack([opacity,percentage],spacing:8)))
+            rows.append(text("Adjusts how much background shows through the file explorer, welcome view, and editor. macOS Reduce Transparency takes priority."))
             rows.append(section("STARTUP"))
             let startup = Theme.choiceButton()
             startup.addItems(withTitles:[L.text("Empty window"),L.text("Restore last workspace")])
@@ -178,6 +190,12 @@ final class PreferencesController: NSWindowController {
         if let id = sender.identifier?.rawValue,let session = workspaceOwner?.pluginSessions[id] { workspaceOwner?.openPluginSettings(session) }
     }
     @objc private func themeSelected(_ sender: NSButton) { Theme.selectProfile(Theme.Profile.allCases[sender.tag],store:workspaceOwner?.installedPluginStore ?? .shared) }
+    @objc private func opacityChanged(_ sender: NSSlider) {
+        let opacity = Int(sender.doubleValue.rounded())
+        guard opacity != WorkspaceGlass.opacity else { return }
+        WorkspaceGlass.setOpacity(opacity)
+        opacityValueLabel?.stringValue = "\(opacity)%"
+    }
     @objc private func popupChanged(_ sender: NSPopUpButton) {
         guard let key = sender.identifier?.rawValue,let title = sender.titleOfSelectedItem else { return }
         let value = (sender.selectedItem?.representedObject as? String) ?? title

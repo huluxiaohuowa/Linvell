@@ -43,7 +43,7 @@ final class RemoteExplorer: NSView, NSOutlineViewDataSource, NSOutlineViewDelega
         let column = NSTableColumn(identifier:NSUserInterfaceItemIdentifier("remote-tree")); column.width = 300; column.resizingMask = .autoresizingMask
         table.addTableColumn(column); table.outlineTableColumn = column; table.headerView = nil
         table.dataSource = self; table.delegate = self; table.rowHeight = 23; table.indentationPerLevel = 15
-        table.style = .sourceList
+        table.style = .plain
         table.backgroundColor = .clear; table.autoresizingMask = [.width]; table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         table.autoresizesOutlineColumn = true
         table.target = self; table.action = #selector(selected); table.doubleAction = #selector(toggled)

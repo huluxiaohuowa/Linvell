@@ -4,6 +4,35 @@ import LinvellCore
 @testable import Linvell
 
 final class WorkspaceStateTests: XCTestCase {
+    func testWorkspaceOpacitySliderUpdatesOpenWindowsAndPersists() throws {
+        _ = NSApplication.shared
+        let defaults = UserDefaults.standard
+        let previous = defaults.object(forKey:WorkspaceGlass.opacityKey)
+        defer {
+            defaults.set(previous,forKey:WorkspaceGlass.opacityKey)
+            NotificationCenter.default.post(name:WorkspaceGlass.opacityChanged,object:nil)
+        }
+        let first = WorkspaceController()
+        let second = WorkspaceController()
+        defer { first.recoveryTimer?.invalidate(); second.recoveryTimer?.invalidate() }
+        let preferences = PreferencesController(owner:first)
+        func findSlider(_ view: NSView) -> NSSlider? {
+            if let slider = view as? NSSlider { return slider }
+            return view.subviews.lazy.compactMap(findSlider).first
+        }
+        let slider = try XCTUnwrap(preferences.window?.contentView.flatMap(findSlider))
+        let action = try XCTUnwrap(slider.action)
+        slider.doubleValue = 40
+        XCTAssertTrue(slider.sendAction(action,to:slider.target))
+        XCTAssertEqual(first.workspaceBackdrop.alphaValue,0.5)
+        XCTAssertEqual(second.workspaceBackdrop.alphaValue,0.5)
+        XCTAssertEqual(first.titleBarBacking.layer?.backgroundColor?.alpha,1)
+
+        let reopened = PreferencesController(owner:first)
+        XCTAssertEqual(reopened.window?.contentView.flatMap(findSlider)?.integerValue,40)
+        XCTAssertEqual(defaults.integer(forKey:WorkspaceGlass.opacityKey),40)
+    }
+
     func testWorkspaceTitleBarRemainsOpaqueAcrossThemeChanges() throws {
         _ = NSApplication.shared
         let workspace = WorkspaceController()

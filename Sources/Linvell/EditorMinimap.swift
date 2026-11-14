@@ -3,16 +3,49 @@ import AppKit
 /// Draws only the lines that fit in the minimap, sampling long documents.
 final class EditorMinimap: NSView {
     weak var pane: EditorPane?
+    private var codeMap: NSImage?
+    private var codeMapScale: CGFloat = 0
     override var isFlipped: Bool { true }
 
+    func invalidateCodeMap() {
+        codeMap = nil
+        needsDisplay = true
+    }
+
     override func draw(_ dirtyRect: NSRect) {
-        guard let pane, bounds.height >= 4 else { return }
+        guard let pane, bounds.height >= 4, bounds.width > 0 else { return }
+        let scale = window?.backingScaleFactor ?? 1
+        if codeMap?.size != bounds.size || codeMapScale != scale {
+            codeMap = nil
+        }
+        if codeMap == nil {
+            let image = NSImage(size:bounds.size)
+            image.lockFocusFlipped(true)
+            drawCodeMap(for:pane)
+            image.unlockFocus()
+            codeMap = image
+            codeMapScale = scale
+        }
+        codeMap?.draw(in:bounds,from:.zero,operation:.sourceOver,fraction:1,respectFlipped:true,hints:nil)
+        let lineCount = pane.document.lines.starts.count
+        let mapHeight = CGFloat(min(lineCount,max(1,Int((bounds.height-2)/2))))*2
+        let top = pane.scrollAnchor.line-1
+        let bottom = CGFloat(pane.lastVisibleSourceLine+1)
+        let height = min(mapHeight,max(5,(bottom-top)*mapHeight/CGFloat(lineCount)))
+        let y = min(mapHeight-height,max(0,top*mapHeight/CGFloat(lineCount)))
+        let viewport = NSBezierPath(roundedRect:NSRect(x:2,y:y,width:bounds.width-4,height:height),xRadius:3,yRadius:3)
+        Theme.foreground.withAlphaComponent(0.13).setFill()
+        viewport.fill()
+        Theme.foreground.withAlphaComponent(0.27).setStroke()
+        viewport.stroke()
+    }
+
+    private func drawCodeMap(for pane: EditorPane) {
         let document = pane.document
         let starts = document.lines.starts
         let text = document.storage.string as NSString
         let slots = min(starts.count,max(1,Int((bounds.height-2)/2)))
         let rowHeight: CGFloat = 2
-        let mapHeight = CGFloat(slots)*rowHeight
         let tokens = document.syntax.version == document.buffer.revision ? document.syntax.analysis.tokens : []
         Theme.secondary.withAlphaComponent(0.13).setFill()
         NSRect(x:0,y:0,width:1,height:bounds.height).fill()
@@ -40,16 +73,6 @@ final class EditorMinimap: NSView {
                 NSRect(x:4+column,y:y,width:1,height:1).fill()
             }
         }
-        let top = pane.scrollAnchor.line-1
-        let last = CGFloat(starts.count)
-        let bottom = CGFloat(pane.lastVisibleSourceLine+1)
-        let height = min(mapHeight,max(5,(bottom-top)*mapHeight/last))
-        let y = min(mapHeight-height,max(0,top*mapHeight/last))
-        let viewport = NSBezierPath(roundedRect:NSRect(x:2,y:y,width:bounds.width-4,height:height),xRadius:3,yRadius:3)
-        Theme.foreground.withAlphaComponent(0.13).setFill()
-        viewport.fill()
-        Theme.foreground.withAlphaComponent(0.27).setStroke()
-        viewport.stroke()
     }
 
     override func mouseDown(with event: NSEvent) { navigate(event) }

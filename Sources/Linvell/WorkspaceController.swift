@@ -94,6 +94,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     let titleBarBacking = NSView()
     private let workspaceHeader = NSView()
     let workspaceBackdrop = NSVisualEffectView()
+    private let workspaceOpacityFill = NSView()
     let status = Theme.label("Ready",size:11,color:Theme.secondary)
     let languageStatus = Theme.label("",size:11,color:Theme.secondary)
     let modeLabel = Theme.label("TEXT",size:11,color:Theme.accent,weight:.semibold)
@@ -159,6 +160,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         }
         NotificationCenter.default.addObserver(self,selector:#selector(languageToolsChanged(_:)),name:LanguageTools.changed,object:nil)
         NSWorkspace.shared.notificationCenter.addObserver(self,selector:#selector(updateWorkspaceMaterial),name:NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,object:nil)
+        NotificationCenter.default.addObserver(self,selector:#selector(updateWorkspaceOpacity),name:WorkspaceGlass.opacityChanged,object:nil)
         recoveryTimer = Timer.scheduledTimer(withTimeInterval:2,repeats:true) { [weak self] _ in self?.persistRecovery() }
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -171,14 +173,14 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         let shell = NSStackView(); shell.orientation = .vertical; shell.spacing = 0; shell.alignment = .leading; shell.distribution = .fill
         let header = workspaceHeader
         shell.addArrangedSubview(header)
-        for view in [workspaceBackdrop,titleBarBacking,shell] {
+        for view in [workspaceBackdrop,workspaceOpacityFill,titleBarBacking,shell] {
             view.translatesAutoresizingMaskIntoConstraints = false
             rootView.addSubview(view)
         }
         titleBarBacking.wantsLayer = true
         header.wantsLayer = true
+        workspaceOpacityFill.wantsLayer = true
         workspaceBackdrop.material = .popover
-        workspaceBackdrop.alphaValue = 0.52
         workspaceBackdrop.blendingMode = .behindWindow
         workspaceBackdrop.state = .active
         NSLayoutConstraint.activate([
@@ -193,7 +195,11 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
             workspaceBackdrop.leadingAnchor.constraint(equalTo:rootView.leadingAnchor),
             workspaceBackdrop.trailingAnchor.constraint(equalTo:rootView.trailingAnchor),
             workspaceBackdrop.topAnchor.constraint(equalTo:header.bottomAnchor),
-            workspaceBackdrop.bottomAnchor.constraint(equalTo:rootView.bottomAnchor)
+            workspaceBackdrop.bottomAnchor.constraint(equalTo:rootView.bottomAnchor),
+            workspaceOpacityFill.leadingAnchor.constraint(equalTo:workspaceBackdrop.leadingAnchor),
+            workspaceOpacityFill.trailingAnchor.constraint(equalTo:workspaceBackdrop.trailingAnchor),
+            workspaceOpacityFill.topAnchor.constraint(equalTo:workspaceBackdrop.topAnchor),
+            workspaceOpacityFill.bottomAnchor.constraint(equalTo:workspaceBackdrop.bottomAnchor)
         ])
         updateWorkspaceMaterial()
         header.heightAnchor.constraint(equalToConstant:38).isActive = true
@@ -270,7 +276,8 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         outline.outlineTableColumn = column; outline.headerView = nil
         outline.indentationPerLevel = 15; outline.indentationMarkerFollowsCell = true; outline.autoresizesOutlineColumn = true
         outline.dataSource = self; outline.delegate = self; outline.rowHeight = 23
-        outline.backgroundColor = .clear; outline.style = .sourceList; outline.intercellSpacing = NSSize(width:0,height:2)
+        outline.style = .plain
+        outline.backgroundColor = .clear; outline.intercellSpacing = NSSize(width:0,height:2)
         outline.target = self; outline.action = #selector(fileClicked)
         outline.openSelected = { [weak self] in
             guard let self,let node = self.outline.item(atRow:self.outline.selectedRow) as? FileNode else { return false }
@@ -941,7 +948,18 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         titleBarBacking.layer?.backgroundColor = Theme.panel.cgColor
         workspaceHeader.layer?.backgroundColor = Theme.panel.cgColor
         workspaceBackdrop.isHidden = reduced
+        workspaceOpacityFill.isHidden = reduced
+        workspaceOpacityFill.layer?.backgroundColor = Theme.canvas.cgColor
+        updateWorkspaceOpacity()
         if let editorCard { WorkspaceGlass.tintEditor(editorCard,workspace:true) }
+    }
+
+    @objc private func updateWorkspaceOpacity() {
+        let opacity = CGFloat(WorkspaceGlass.opacity)
+        // Fade in the solid theme color once the system blur reaches full strength.
+        let fullBlur: CGFloat = 80
+        workspaceBackdrop.alphaValue = min(1,opacity / fullBlur)
+        workspaceOpacityFill.alphaValue = max(0,(opacity - fullBlur) / (100 - fullBlur))
     }
 
     func applyTheme() {

@@ -99,8 +99,13 @@ final class WindowFrameScheduler: NSObject {
     }
     private func frame(_ link: CADisplayLink) {
         guard let window,CACurrentMediaTime() <= until else { stop(); return }
-        onFrame?(link.timestamp); flush()
-        window.displayIfNeeded()
+        onFrame?(link.timestamp)
+        // AppKit presents native scrolling itself. Force a display only for
+        // queued work, such as a terminal update committed on this frame.
+        if !actions.isEmpty {
+            flush()
+            window.displayIfNeeded()
+        }
     }
     func stop() { link?.invalidate(); link = nil; screen = nil }
 }

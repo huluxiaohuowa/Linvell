@@ -459,6 +459,7 @@ final class EditorPane: NSView, NSTextViewDelegate {
     let minimap = EditorMinimap()
     private var highlighting = false
     private var highlightWork: DispatchWorkItem?
+    var paintedSyntaxRange: NSRange?
 
     init(document: OpenDocument, vim: Bool) {
         self.document = document
@@ -513,7 +514,7 @@ final class EditorPane: NSView, NSTextViewDelegate {
         let y = scroll.contentView.bounds.minY,origin = textView.textContainerOrigin
         let glyph = min(manager.numberOfGlyphs-1,manager.glyphIndex(for:NSPoint(x:0,y:max(0,y-origin.y)),in:container))
         let offset = manager.characterIndexForGlyph(at:glyph),row = document.lines.line(at:offset)
-        let start = document.lines.starts[row],end = row+1 < document.lines.starts.count ? document.lines.starts[row+1] : document.buffer.text.utf16.count
+        let start = document.lines.starts[row],end = row+1 < document.lines.starts.count ? document.lines.starts[row+1] : document.storage.length
         let rect = manager.boundingRect(forGlyphRange:manager.glyphRange(forCharacterRange:NSRange(location:start,length:end-start),actualCharacterRange:nil),in:container)
         let fraction = max(0,min(0.999,(y-origin.y-rect.minY)/max(1,rect.height)))
         let maximum = max(0,textView.frame.height-scroll.contentView.bounds.height)
@@ -557,7 +558,7 @@ final class EditorPane: NSView, NSTextViewDelegate {
         document.buffer.update(document.storage.string)
         document.syntax.request(document)
         onTextChanged?()
-        gutter.needsDisplay = true; minimap.needsDisplay = true; onChange?()
+        gutter.needsDisplay = true; minimap.invalidateCodeMap(); onChange?()
         highlightWork?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.highlight() }
         highlightWork = work; DispatchQueue.main.asyncAfter(deadline:.now()+0.15,execute:work)
@@ -595,9 +596,16 @@ final class EditorPane: NSView, NSTextViewDelegate {
     func updateTheme() {
         textView.textColor = Theme.foreground; textView.insertionPointColor = Theme.accent
         textView.selectedTextAttributes = [.backgroundColor:Theme.selection]
-        gutter.needsDisplay = true; minimap.needsDisplay = true; highlight()
+        gutter.needsDisplay = true; minimap.invalidateCodeMap(); highlight()
     }
-    func refreshCodePresentation() { gutter.updateWidth(); gutter.needsDisplay = true; highlight(); applyCodeDiagnostics(); onChange?() }
+    func refreshCodePresentation() {
+        gutter.updateWidth()
+        gutter.needsDisplay = true
+        minimap.invalidateCodeMap()
+        highlight()
+        applyCodeDiagnostics()
+        onChange?()
+    }
     func applyCodeDiagnostics() {
         let whole = NSRange(location:0,length:(document.storage.string as NSString).length)
         textView.layoutManager?.removeTemporaryAttribute(.underlineStyle,forCharacterRange:whole)
@@ -607,7 +615,7 @@ final class EditorPane: NSView, NSTextViewDelegate {
         }
     }
     private func highlight() {
-        document.syntax.request(document); paintSyntax(); highlightBrackets()
+        document.syntax.request(document); paintSyntax(reset:true); highlightBrackets()
     }
 
 }

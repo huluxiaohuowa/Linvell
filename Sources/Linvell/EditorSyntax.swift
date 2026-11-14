@@ -71,21 +71,60 @@ extension EditorPane {
     var folding: FoldingLayoutManager { textView.layoutManager as! FoldingLayoutManager }
     @objc func sourceAnalysisChanged(_ notification: Notification) {
         guard notification.object as? OpenDocument === document else { return }
-        paintSyntax(); highlightBrackets(); gutter.needsDisplay = true; minimap.needsDisplay = true
+        paintSyntax(reset:true); highlightBrackets(); gutter.needsDisplay = true; minimap.invalidateCodeMap()
     }
-    func paintSyntax() {
-        guard document.syntax.version == document.buffer.revision,!textView.hasMarkedText(),let container = textView.textContainer,let manager = textView.layoutManager else { return }
+    func paintSyntax(reset: Bool = false) {
+        guard !textView.hasMarkedText(),let container = textView.textContainer,let manager = textView.layoutManager else { return }
+        let whole = NSRange(location:0,length:document.storage.length)
+        if reset {
+            manager.removeTemporaryAttribute(.foregroundColor,forCharacterRange:whole)
+            paintedSyntaxRange = nil
+        }
+        guard document.syntax.version == document.buffer.revision else { return }
         let glyphs = manager.glyphRange(forBoundingRect:textView.visibleRect.offsetBy(dx:0,dy:-textView.textContainerOrigin.y),in:container)
         let visible = manager.characterRange(forGlyphRange:glyphs,actualGlyphRange:nil)
         guard visible.length > 0 else { return }
-        manager.removeTemporaryAttribute(.foregroundColor,forCharacterRange:NSRange(location:0,length:document.storage.length))
+        if let paintedSyntaxRange,NSIntersectionRange(paintedSyntaxRange,visible) == visible { return }
+        // Keep a margin around the viewport so small scroll steps reuse the existing colors.
+        let margin = min(visible.length,4096)
+        let start = max(0,visible.location-margin)
+        let end = min(whole.length,NSMaxRange(visible)+margin)
+        let paint = NSRange(location:start,length:end-start)
+        let previous = paintedSyntaxRange.map { NSIntersectionRange($0,whole) }
+        paintedSyntaxRange = paint
         let tokens = document.syntax.analysis.tokens
-        var low = 0,high = tokens.count
-        while low < high { let mid = (low+high)/2; if tokens[mid].range.location < visible.location { low = mid+1 } else { high = mid } }
-        var i = max(0,low-1)
-        while i < tokens.count,tokens[i].range.location < NSMaxRange(visible) {
-            let token = tokens[i],range = NSIntersectionRange(token.range,visible)
-            if range.length > 0 { manager.addTemporaryAttribute(.foregroundColor,value:Theme.syntaxColor(token.kind),forCharacterRange:range) }; i += 1
+
+        func outside(_ range: NSRange, _ retained: NSRange?) -> [NSRange] {
+            guard range.length > 0 else { return [] }
+            guard let retained else { return [range] }
+            let overlap = NSIntersectionRange(range,retained)
+            guard overlap.length > 0 else { return [range] }
+            return [
+                NSRange(location:range.location,length:overlap.location-range.location),
+                NSRange(location:NSMaxRange(overlap),length:NSMaxRange(range)-NSMaxRange(overlap))
+            ].filter { $0.length > 0 }
+        }
+        if let previous {
+            for range in outside(previous,paint) {
+                manager.removeTemporaryAttribute(.foregroundColor,forCharacterRange:range)
+            }
+        }
+        for added in outside(paint,previous) {
+            var low = 0, high = tokens.count
+            while low < high {
+                let mid = (low+high)/2
+                if NSMaxRange(tokens[mid].range) <= added.location { low = mid+1 }
+                else { high = mid }
+            }
+            var index = low
+            while index < tokens.count, tokens[index].range.location < NSMaxRange(added) {
+                let token = tokens[index]
+                let range = NSIntersectionRange(token.range,added)
+                if range.length > 0 {
+                    manager.addTemporaryAttribute(.foregroundColor,value:Theme.syntaxColor(token.kind),forCharacterRange:range)
+                }
+                index += 1
+            }
         }
     }
     func highlightBrackets() {
