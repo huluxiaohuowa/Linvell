@@ -177,7 +177,8 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         }
         titleBarBacking.wantsLayer = true
         header.wantsLayer = true
-        workspaceBackdrop.material = .menu
+        workspaceBackdrop.material = .popover
+        workspaceBackdrop.alphaValue = 0.52
         workspaceBackdrop.blendingMode = .behindWindow
         workspaceBackdrop.state = .active
         NSLayoutConstraint.activate([
