@@ -112,11 +112,12 @@ public struct SSHRemote {
     public func transportArguments(command: String) -> [String] {
         (configurationFile.map { ["-F",$0] } ?? [])+["-T","-o","BatchMode=yes","-o","ConnectTimeout=10","-o","ServerAliveInterval=10","-o","ServerAliveCountMax=2"]+Self.multiplexOptions+["--",host,command]
     }
-    public func request(_ operation: String,path: String,content: Data? = nil,digest: String? = nil,repositoryRoot: String? = nil) throws -> RemoteReply {
+    public func request(_ operation: String,path: String,content: Data? = nil,digest: String? = nil,repositoryRoot: String? = nil,showsHidden: Bool = true) throws -> RemoteReply {
         var request: [String:String] = ["operation":operation,"path":path]
         if let content { request["content"] = content.base64EncodedString() }
         if let digest { request["digest"] = digest }
         if let repositoryRoot { request["repositoryRoot"] = repositoryRoot }
+        if !showsHidden { request["showsHidden"] = "false" }
         let result = try ToolCommand.run(URL(fileURLWithPath:"/usr/bin/ssh"),arguments:transportArguments(command:"python3 -c "+Self.quote(Self.agent)),directory:nil,timeout:45,input:try JSONSerialization.data(withJSONObject:request),maximumOutputBytes:32*1024*1024)
         guard result.succeeded else { throw GitError.command(result.timedOut ? "SSH operation timed out." : result.output) }
         guard let line = result.output.components(separatedBy:.newlines).last(where:{ $0.hasPrefix("LINVELL_JSON:") }) else { throw GitError.command("The remote host needs Python 3 to browse and edit files. Open its SSH terminal to check authentication and Python availability.") }
@@ -405,10 +406,12 @@ try:
     elif op=='filter-files':
         query=base64.b64decode(req['content'],validate=True).decode('utf-8').casefold()
         entries=[]
+        shows_hidden=req.get('showsHidden')!='false'
         for base,dirs,names in os.walk(path,followlinks=False):
-            dirs[:]=[name for name in dirs if name!='.git']
+            if not shows_hidden:
+                dirs[:]=[name for name in dirs if not name.startswith('.')]
+                names=[name for name in names if not name.startswith('.')]
             for name in dirs+names:
-                if name=='.git': continue
                 full=os.path.join(base,name)
                 relative=os.path.relpath(full,path)
                 if query in relative.casefold():

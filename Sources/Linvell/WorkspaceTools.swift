@@ -2,13 +2,22 @@ import AppKit
 import LinvellCore
 
 enum ProjectFiles {
-    static func list(_ root: URL) -> [URL] {
+    static func list(_ root: URL, forExplorer: Bool = false,showsHidden: Bool = ExplorerVisibility.showsHidden) -> [URL] {
         let excluded: Set<String> = ["node_modules","dist","build","DerivedData","vendor","__pycache__"]
-        guard let iterator = FileManager.default.enumerator(at:root,includingPropertiesForKeys:[.isRegularFileKey,.isDirectoryKey,.isSymbolicLinkKey],options:[.skipsHiddenFiles]) else { return [] }
+        guard let iterator = FileManager.default.enumerator(at:root,includingPropertiesForKeys:[.isRegularFileKey,.isDirectoryKey,.isSymbolicLinkKey],options:forExplorer && showsHidden ? [] : [.skipsHiddenFiles]) else { return [] }
         var urls: [URL] = []
         for case let url as URL in iterator {
+            let info = try? url.resourceValues(forKeys:[.isRegularFileKey,.isDirectoryKey,.isSymbolicLinkKey])
+            if forExplorer {
+                let isDirectory = info?.isDirectory == true && FilePreview.kind(for:url) == nil
+                // The enumerator can spell the root differently (e.g. /private/var).
+                let relative = url.pathComponents.suffix(iterator.level).joined(separator:"/")
+                urls.append(root.appendingPathComponent(relative,isDirectory:isDirectory))
+                if (info?.isDirectory == true && !isDirectory) || info?.isSymbolicLink == true { iterator.skipDescendants() }
+                if urls.count >= 20_000 { break }
+                continue
+            }
             if excluded.contains(url.lastPathComponent) { iterator.skipDescendants(); continue }
-            let info = try? url.resourceValues(forKeys:[.isRegularFileKey,.isSymbolicLinkKey])
             if info?.isSymbolicLink == true { iterator.skipDescendants(); continue }
             if info?.isRegularFile == true { urls.append(url) }
             if urls.count >= 20_000 { break }

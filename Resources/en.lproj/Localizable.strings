@@ -1492,3 +1492,5 @@
 "Search files by name or file:line" = "Search files by name or file:line";
 "Match case" = "Match case";
 "%@ matches" = "%@ matches";
+
+"Show hidden files and folders" = "Show hidden files and folders";

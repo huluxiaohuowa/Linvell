@@ -4,6 +4,38 @@ import XCTest
 import LinvellCore
 
 final class SilicaWorkflowTests: XCTestCase {
+    func testExplorerListsAndFiltersHiddenItems() throws {
+        let defaults = UserDefaults.standard
+        let previous = defaults.object(forKey:ExplorerVisibility.key)
+        defaults.removeObject(forKey:ExplorerVisibility.key)
+        defer { defaults.set(previous,forKey:ExplorerVisibility.key) }
+        XCTAssertTrue(ExplorerVisibility.showsHidden)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString,isDirectory:true)
+        defer { try? FileManager.default.removeItem(at:root) }
+        let git = root.appendingPathComponent(".git",isDirectory:true)
+        let nested = root.appendingPathComponent(".linvell/.empty",isDirectory:true)
+        try FileManager.default.createDirectory(at:git,withIntermediateDirectories:true)
+        try FileManager.default.createDirectory(at:nested,withIntermediateDirectories:true)
+        try Data().write(to:git.appendingPathComponent("HEAD"))
+        try Data().write(to:root.appendingPathComponent(".example"))
+        XCTAssertEqual(Set(FileNode(root).children.map { $0.url.lastPathComponent }),[".git",".linvell",".example"])
+        let index = ProjectFiles.list(root,forExplorer:true)
+        let results = FileNode.filteredTree(index.filter { ProjectFiles.relative($0,root:root).contains(".empty") },under:root)
+        XCTAssertEqual(results.first?.children.first?.url.lastPathComponent,".empty")
+        XCTAssertEqual(results.first?.children.first?.isDirectory,true)
+        XCTAssertTrue(index.contains { $0.path == git.appendingPathComponent("HEAD").path })
+        XCTAssertTrue(ProjectFiles.list(root).isEmpty)
+        let workspace = WorkspaceController()
+        defer { workspace.recoveryTimer?.invalidate() }
+        workspace.root = FileNode(root)
+        XCTAssertEqual(workspace.outlineView(workspace.outline,numberOfChildrenOfItem:nil),3)
+        ExplorerVisibility.setShowsHidden(false)
+        XCTAssertEqual(workspace.outlineView(workspace.outline,numberOfChildrenOfItem:nil),0)
+        XCTAssertTrue(ProjectFiles.list(root,forExplorer:true).isEmpty)
+        ExplorerVisibility.setShowsHidden(true)
+        XCTAssertEqual(workspace.outlineView(workspace.outline,numberOfChildrenOfItem:nil),3)
+    }
+
     func testLocalFileCopySearchAndProjectRoutingWithoutOpeningWindows() throws {
         let app = NSApplication.shared
         XCTAssertNotEqual(app.activationPolicy(),.regular)

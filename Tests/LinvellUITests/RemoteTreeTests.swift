@@ -9,6 +9,35 @@ final class RemoteTreeTests: XCTestCase {
         while !condition(),Date() < deadline { RunLoop.current.run(until:Date().addingTimeInterval(0.05)) }
         return condition()
     }
+    func testHiddenItemsOverSSH() throws {
+        guard let file = ProcessInfo.processInfo.environment["LINVELL_SSH_HIDDEN_FIXTURE"] else { throw XCTSkip("A disposable SSH fixture was not selected.") }
+        _ = NSApplication.shared
+        let defaults = UserDefaults.standard
+        let previous = defaults.object(forKey:ExplorerVisibility.key)
+        defaults.removeObject(forKey:ExplorerVisibility.key)
+        defer { defaults.set(previous,forKey:ExplorerVisibility.key) }
+        let object = try JSONSerialization.jsonObject(with:Data(contentsOf:URL(fileURLWithPath:file))) as! [String:String]
+        let remote = try SSHRemote(host:try XCTUnwrap(object["host"])),root = try XCTUnwrap(object["root"])
+        let browser = RemoteExplorer(connection:remote,path:root)
+        XCTAssertTrue(waitUntil { browser.rootNode.children != nil })
+        let entries = try XCTUnwrap(browser.rootNode.children)
+        XCTAssertEqual(Set(entries.map(\.name)),[".git",".linvell",".example"])
+        for (name,child) in [(".git","HEAD"),(".linvell",".empty")] {
+            let folder = try XCTUnwrap(entries.first { $0.name == name })
+            browser.table.expandItem(folder)
+            XCTAssertTrue(waitUntil { folder.children?.contains { $0.name == child } == true })
+            let path = name+"/"+child
+            let matches = try remote.request("filter-files",path:root,content:Data(path.utf8))
+            XCTAssertTrue(matches.entries?.contains { $0.name == path } == true)
+        }
+        XCTAssertEqual(browser.outlineView(browser.table,numberOfChildrenOfItem:browser.rootNode),3)
+        ExplorerVisibility.setShowsHidden(false)
+        XCTAssertEqual(browser.outlineView(browser.table,numberOfChildrenOfItem:browser.rootNode),0)
+        let matches = try remote.request("filter-files",path:root,content:Data("HEAD".utf8),showsHidden:ExplorerVisibility.showsHidden)
+        XCTAssertEqual(matches.entries?.count,0)
+        ExplorerVisibility.setShowsHidden(true)
+        XCTAssertEqual(browser.outlineView(browser.table,numberOfChildrenOfItem:browser.rootNode),3)
+    }
     func testRemoteProjectExpandsNestedFoldersAndRestoresItsRoot() throws {
         guard let file = ProcessInfo.processInfo.environment["LINVELL_SSH_FIXTURE"] else { throw XCTSkip("A disposable SSH fixture was not selected.") }
         _ = NSApplication.shared
@@ -16,7 +45,6 @@ final class RemoteTreeTests: XCTestCase {
         let remote = try SSHRemote(host:try XCTUnwrap(object["host"])),root = try XCTUnwrap(object["root"])
         let browser = RemoteExplorer(connection:remote,path:root)
         XCTAssertTrue(waitUntil { browser.rootNode.children != nil })
-        XCTAssertFalse(browser.rootNode.children?.contains { $0.name == ".git" } == true)
         let nested = try XCTUnwrap(browser.rootNode.children?.first { $0.name == "nested" })
         browser.table.expandItem(nested)
         XCTAssertTrue(waitUntil { nested.children != nil })

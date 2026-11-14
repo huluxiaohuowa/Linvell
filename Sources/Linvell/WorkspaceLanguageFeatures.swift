@@ -19,7 +19,7 @@ extension WorkspaceController {
         let active = current.flatMap { codeSnapshot($0) },remote = remoteConnection ?? active?.remote
         guard let directory = remote != nil ? (remoteConnection != nil ? remoteDirectory : active?.root) : (root?.url.path ?? active?.root) else { status.stringValue = L.text("Open a project folder before configuring its language tools."); return }
         let panel = QuickPicker(title:L.text("Workspace Symbols"),options:[],owner:window); picker = panel
-        let services = languageServices,localPaths = fileIndex.map(\.path)
+        let services = languageServices
         let snapshots = documents.compactMap { codeSnapshot($0) }.filter { $0.root == directory && $0.remote?.host == remote?.host }
         let state = WorkspaceSymbolSearchState(directory:directory)
         panel.onQuery = { [weak self] query,deliver in
@@ -30,7 +30,7 @@ extension WorkspaceController {
                     if state.languages == nil {
                         if let remote,!state.directory.hasPrefix("/"),let path = try remote.listDirectory(state.directory).path { state.directory = path }
                         _ = try LanguageTools.load(CodeLanguage.supported[0],remote:remote,root:state.directory)
-                        let paths = try remote.map { try $0.request("files",path:state.directory).entries?.map(\.path) ?? [] } ?? (localPaths.isEmpty ? ProjectFiles.list(URL(fileURLWithPath:state.directory)).map(\.path) : localPaths)
+                        let paths = try remote.map { try $0.request("files",path:state.directory).entries?.map(\.path) ?? [] } ?? ProjectFiles.list(URL(fileURLWithPath:state.directory)).map(\.path)
                         var ids = Set(snapshots.map { $0.language.id })
                         for path in paths {
                             if ticket.cancelled { throw CancellationError() }

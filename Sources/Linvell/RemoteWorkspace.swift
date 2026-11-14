@@ -135,7 +135,10 @@ final class RemoteBrowser: NSView, NSTableViewDelegate, NSTableViewDataSource {
         }
     }
     private func apply(_ reply: RemoteReply,fallback: String) {
-        let updated = (reply.entries ?? []).filter { $0.name != ".git" && (!directoriesOnly || $0.directory) }
+        let showsHidden = ExplorerVisibility.showsHidden
+        let updated = (reply.entries ?? []).filter {
+            (!directoriesOnly || $0.directory) && (showsHidden || !$0.name.hasPrefix("."))
+        }
         let path = reply.path ?? fallback
         let changed = directory != path || entries != updated
         let selected = directory == path && entries.indices.contains(table.selectedRow) ? entries[table.selectedRow].path : nil

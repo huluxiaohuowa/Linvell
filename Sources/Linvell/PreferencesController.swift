@@ -80,6 +80,10 @@ final class PreferencesController: NSWindowController {
             rows.append(text("Restore the last local project or SSH folder. Files and folders opened from Finder always take priority."))
             rows.append(check("Restore project tabs",key:"restoreProjectTabs"))
             rows.append(check("Pin parent folders while scrolling",key:"pinExplorerFolders"))
+            let hidden = NSButton(checkboxWithTitle:L.text("Show hidden files and folders"),target:self,action:#selector(hiddenItemsChanged(_:)))
+            hidden.state = ExplorerVisibility.showsHidden ? .on : .off
+            hidden.font = .systemFont(ofSize:14)
+            rows.append(hidden)
             rows.append(section("INTERFACE LANGUAGE"))
             let language = Theme.choiceButton()
             language.addItems(withTitles:[L.text("Follow macOS"),"English","简体中文"])
@@ -195,6 +199,9 @@ final class PreferencesController: NSWindowController {
         guard opacity != WorkspaceGlass.opacity else { return }
         WorkspaceGlass.setOpacity(opacity)
         opacityValueLabel?.stringValue = "\(opacity)%"
+    }
+    @objc private func hiddenItemsChanged(_ sender: NSButton) {
+        ExplorerVisibility.setShowsHidden(sender.state == .on)
     }
     @objc private func popupChanged(_ sender: NSPopUpButton) {
         guard let key = sender.identifier?.rawValue,let title = sender.titleOfSelectedItem else { return }

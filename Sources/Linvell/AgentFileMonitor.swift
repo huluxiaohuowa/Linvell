@@ -77,8 +77,7 @@ final class AgentFileMonitor {
             }
             for node in directories {
                 let key = "directory:"+node.url.path,state = Self.signature(node.url.path)
-                guard self.states[key] != state,state != "missing",let urls = try? FileManager.default.contentsOfDirectory(at:node.url,includingPropertiesForKeys:[.isDirectoryKey],options:[.skipsHiddenFiles]) else { continue }
-                let children = urls.map(FileNode.init).sorted { a,b in a.isDirectory != b.isDirectory ? a.isDirectory : a.url.lastPathComponent.localizedStandardCompare(b.url.lastPathComponent) == .orderedAscending }
+                guard self.states[key] != state,state != "missing",let children = try? FileNode.readChildren(of:node.url) else { continue }
                 trees.append((node,children)); self.states[key] = state
             }
             if let remote {

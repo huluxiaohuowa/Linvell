@@ -3,14 +3,30 @@ import LinvellCore
 import LinvellPluginKit
 import SwiftTerm
 
+enum ExplorerVisibility {
+    static let key = "showHiddenExplorerItems"
+    static let changed = Notification.Name("Linvell.ExplorerVisibilityChanged")
+    static var showsHidden: Bool { UserDefaults.standard.object(forKey:key) as? Bool ?? true }
+
+    static func setShowsHidden(_ value: Bool) {
+        UserDefaults.standard.set(value,forKey:key)
+        NotificationCenter.default.post(name:changed,object:nil)
+    }
+}
+
 final class FileNode: NSObject {
     let url: URL
     let isDirectory: Bool
+    lazy var isHidden = url.lastPathComponent.hasPrefix(".")
+        || (try? url.resourceValues(forKeys:[.isHiddenKey]).isHidden) == true
     lazy var children: [FileNode] = {
         guard isDirectory else { return [] }
-        let urls = (try? FileManager.default.contentsOfDirectory(at:url,includingPropertiesForKeys:[.isDirectoryKey],options:[.skipsHiddenFiles])) ?? []
-        return urls.map(FileNode.init).sorted { a,b in a.isDirectory != b.isDirectory ? a.isDirectory : a.url.lastPathComponent.localizedStandardCompare(b.url.lastPathComponent) == .orderedAscending }
+        return (try? Self.readChildren(of:url)) ?? []
     }()
+    static func readChildren(of url: URL) throws -> [FileNode] {
+        let urls = try FileManager.default.contentsOfDirectory(at:url,includingPropertiesForKeys:[.isDirectoryKey])
+        return urls.map(FileNode.init).sorted { a,b in a.isDirectory != b.isDirectory ? a.isDirectory : a.url.lastPathComponent.localizedStandardCompare(b.url.lastPathComponent) == .orderedAscending }
+    }
     init(_ url: URL) {
         self.url = url
         isDirectory = (try? url.resourceValues(forKeys:[.isDirectoryKey]).isDirectory) == true && FilePreview.kind(for:url) == nil
@@ -30,7 +46,8 @@ final class FileNode: NSObject {
             return node
         }
         for url in urls where ExplorerActions.relative(url.path,under:root.path) != nil {
-            parent(at:url.deletingLastPathComponent()).children.append(FileNode(url,isDirectory:false))
+            if url.hasDirectoryPath { _ = parent(at:url) }
+            else { parent(at:url.deletingLastPathComponent()).children.append(FileNode(url,isDirectory:false)) }
         }
         for folder in folders.values {
             folder.children.sort {
@@ -161,6 +178,7 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         NotificationCenter.default.addObserver(self,selector:#selector(languageToolsChanged(_:)),name:LanguageTools.changed,object:nil)
         NSWorkspace.shared.notificationCenter.addObserver(self,selector:#selector(updateWorkspaceMaterial),name:NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,object:nil)
         NotificationCenter.default.addObserver(self,selector:#selector(updateWorkspaceOpacity),name:WorkspaceGlass.opacityChanged,object:nil)
+        NotificationCenter.default.addObserver(self,selector:#selector(explorerVisibilityChanged),name:ExplorerVisibility.changed,object:nil)
         recoveryTimer = Timer.scheduledTimer(withTimeInterval:2,repeats:true) { [weak self] _ in self?.persistRecovery() }
     }
     required init?(coder: NSCoder) { fatalError() }
@@ -1129,10 +1147,11 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
     @objc func showExplorer() { if sidebarKind != "files" || sidebar.isHidden { showSidebar("files") } }
 
     func indexProjectFiles(_ project: FileNode) {
+        let showsHidden = ExplorerVisibility.showsHidden
         DispatchQueue.global(qos:.utility).async { [weak self] in
-            let files = ProjectFiles.list(project.url),quick = ProjectFiles.searchable(project.url)
+            let files = ProjectFiles.list(project.url,forExplorer:true,showsHidden:showsHidden),quick = ProjectFiles.searchable(project.url)
             DispatchQueue.main.async {
-                guard let self,self.root === project else { return }
+                guard let self,self.root === project,showsHidden == ExplorerVisibility.showsHidden else { return }
                 self.fileIndex = files; self.quickFileIndex = quick
                 if self.isFilteringFiles { self.filterChanged() }
             }
@@ -1169,9 +1188,20 @@ final class WorkspaceController: NSWindowController, NSWindowDelegate, NSOutline
         if !query.isEmpty { outline.expandItem(nil,expandChildren:true) }
     }
     private var isFilteringFiles: Bool { !search.stringValue.trimmingCharacters(in:.whitespaces).isEmpty }
-    private var filtered: [FileNode] { isFilteringFiles ? fileMatches : (root?.children ?? []) }
-    func outlineView(_ outlineView: NSOutlineView,numberOfChildrenOfItem item: Any?) -> Int { (item as? FileNode)?.children.count ?? filtered.count }
-    func outlineView(_ outlineView: NSOutlineView,child index: Int,ofItem item: Any?) -> Any { (item as? FileNode)?.children[index] ?? filtered[index] }
+    @objc private func explorerVisibilityChanged() {
+        fileIndex = []
+        filterChanged()
+        if let root { indexProjectFiles(root) }
+    }
+    private func explorerChildren(of item: Any?) -> [FileNode] {
+        let children: [FileNode]
+        if let node = item as? FileNode { children = node.children }
+        else if isFilteringFiles { children = fileMatches }
+        else { children = root?.children ?? [] }
+        return ExplorerVisibility.showsHidden ? children : children.filter { !$0.isHidden }
+    }
+    func outlineView(_ outlineView: NSOutlineView,numberOfChildrenOfItem item: Any?) -> Int { explorerChildren(of:item).count }
+    func outlineView(_ outlineView: NSOutlineView,child index: Int,ofItem item: Any?) -> Any { explorerChildren(of:item)[index] }
     func outlineView(_ outlineView: NSOutlineView,isItemExpandable item: Any) -> Bool { (item as? FileNode)?.isDirectory == true }
     func outlineView(_ outlineView: NSOutlineView,viewFor tableColumn: NSTableColumn?,item: Any) -> NSView? {
         guard let node = item as? FileNode else { return nil }

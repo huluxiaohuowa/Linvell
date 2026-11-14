@@ -78,11 +78,17 @@ final class RemoteExplorer: NSView, NSOutlineViewDataSource, NSOutlineViewDelega
         scroll.canPin = { [weak self] in self?.filtered == nil }
         scroll.documentView = table; scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = false
         Theme.pin(Theme.stack([title,Theme.stack([open,create,shell,search,NSView(),refresh],spacing:4),filter,note,scroll],orientation:.vertical,spacing:6),in:self,inset:10)
+        NotificationCenter.default.addObserver(self,selector:#selector(visibilityChanged),name:ExplorerVisibility.changed,object:nil)
         rootNode.wantsExpanded = true; load(rootNode)
     }
     required init?(coder: NSCoder) { fatalError() }
-    func outlineView(_ outlineView: NSOutlineView,numberOfChildrenOfItem item: Any?) -> Int { item == nil ? (filtered?.count ?? 1) : (item as? RemoteTreeNode)?.children?.count ?? 0 }
-    func outlineView(_ outlineView: NSOutlineView,child index: Int,ofItem item: Any?) -> Any { item == nil ? (filtered?[index] ?? rootNode) : (item as! RemoteTreeNode).children![index] }
+    private func visibleChildren(of item: Any?) -> [RemoteTreeNode] {
+        guard let node = item as? RemoteTreeNode else { return filtered ?? [rootNode] }
+        let children = node.children ?? []
+        return ExplorerVisibility.showsHidden ? children : children.filter { !$0.name.hasPrefix(".") }
+    }
+    func outlineView(_ outlineView: NSOutlineView,numberOfChildrenOfItem item: Any?) -> Int { visibleChildren(of:item).count }
+    func outlineView(_ outlineView: NSOutlineView,child index: Int,ofItem item: Any?) -> Any { visibleChildren(of:item)[index] }
     func outlineView(_ outlineView: NSOutlineView,isItemExpandable item: Any) -> Bool { (item as? RemoteTreeNode)?.isDirectory == true }
     func outlineView(_ outlineView: NSOutlineView,shouldExpandItem item: Any) -> Bool {
         guard let node = item as? RemoteTreeNode else { return false }; node.wantsExpanded = true
@@ -153,6 +159,12 @@ final class RemoteExplorer: NSView, NSOutlineViewDataSource, NSOutlineViewDelega
         if !filter.stringValue.isEmpty { updateFilter() }
     }
     func controlTextDidChange(_ notification: Notification) { updateFilter() }
+    @objc private func visibilityChanged() {
+        filtered = nil
+        table.reloadData()
+        table.expandItem(rootNode)
+        updateFilter()
+    }
     func updateFilter() {
         filterWork?.cancel()
         let generation = UUID(); filterGeneration = generation
@@ -160,8 +172,9 @@ final class RemoteExplorer: NSView, NSOutlineViewDataSource, NSOutlineViewDelega
         guard !needle.isEmpty else {
             filtered = nil; table.reloadData(); table.expandItem(rootNode); return
         }
+        let showsHidden = ExplorerVisibility.showsHidden
         let work = DispatchWorkItem { [weak self] in
-            let result = Result { try remote.request("filter-files",path:root,content:Data(needle.utf8)) }
+            let result = Result { try remote.request("filter-files",path:root,content:Data(needle.utf8),showsHidden:showsHidden) }
             DispatchQueue.main.async {
                 guard let self,self.filterGeneration == generation else { return }
                 switch result {
@@ -187,7 +200,7 @@ final class RemoteExplorer: NSView, NSOutlineViewDataSource, NSOutlineViewDelega
     }
     private func apply(_ reply: RemoteReply,to node: RemoteTreeNode) {
         if node === rootNode,let path = reply.path { node.path = path; node.name = URL(fileURLWithPath:path).lastPathComponent }
-        let entries = (reply.entries ?? []).filter { $0.name != ".git" }
+        let entries = reply.entries ?? []
         let existing = node.children ?? []
         let unchanged = node.children != nil && existing.count == entries.count && zip(existing,entries).allSatisfy { $0.name == $1.name && $0.path == $1.path && $0.isDirectory == $1.directory && $0.isIgnored == $1.isIgnored }
         guard !unchanged else { return }
