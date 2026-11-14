@@ -23,9 +23,20 @@ final class RenderingTests: XCTestCase {
         _ = NSApplication.shared
         let view = DisplayPacedTerminalView(frame:NSRect(x:0,y:0,width:600,height:300))
         XCTAssertNotNil(view.displayUpdateScheduler)
-        RunLoop.current.run(until:Date().addingTimeInterval(0.05))
         var commits = 0
         view.displayUpdateScheduler = { work in commits += 1; work() }
+        // Initialization can leave a fallback draw queued. Wait until a feed
+        // actually reaches the host scheduler before measuring the two updates.
+        let deadline = ProcessInfo.processInfo.systemUptime + 2
+        repeat {
+            view.feed(text:"warm-up\r\n")
+            if commits == 0 { RunLoop.current.run(until:Date().addingTimeInterval(0.01)) }
+        } while commits == 0 && ProcessInfo.processInfo.systemUptime < deadline
+        guard commits > 0 else {
+            XCTFail("The terminal never reached the host display scheduler.")
+            return
+        }
+        commits = 0
         view.feed(text:"first\r\n"); view.feed(text:"second\r\n")
         XCTAssertEqual(commits,2,"Host scheduler controls the terminal/cursor update cadence.")
     }
